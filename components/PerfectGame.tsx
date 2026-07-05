@@ -41,6 +41,71 @@ const TH={padding:'8px 12px',color:'#7A8FA6',fontSize:11,fontWeight:700,letterSp
 const TD={padding:'8px 12px',borderBottom:'1px solid #243447',fontSize:12,verticalAlign:'middle' as const}
 
 // ── PROJECTS TAB ─────────────────────────────────────────────────────────
+function ViolationRow({v,project,fmt,d}:{v:any,project:any,fmt:any,d:any}) {
+  const [open,setOpen]=useState(false)
+  const [editStart,setEditStart]=useState(v.start_date||'')
+  const [editEnd,setEditEnd]=useState(v.end_date||'')
+  const [saving,setSaving]=useState(false)
+  const beforeStart=d(v.start_date)&&d(project.start_date)&&d(v.start_date)<d(project.start_date)
+  const afterEnd=d(v.end_date)&&d(project.end_date)&&d(v.end_date)>d(project.end_date)
+  const startOk=!d(editStart)||!d(project.start_date)||d(editStart)>=d(project.start_date)
+  const endOk=!d(editEnd)||!d(project.end_date)||d(editEnd)<=d(project.end_date)
+  async function saveItem(){
+    setSaving(true)
+    await supabase.from('items').update({start_date:editStart,end_date:editEnd}).eq('id',v.id)
+    setSaving(false);setOpen(false)
+  }
+  return(
+    <div style={{marginBottom:8,borderRadius:6,overflow:'hidden',border:'1px solid rgba(192,57,43,0.25)'}}>
+      <div onClick={()=>setOpen(o=>!o)}
+        style={{display:'flex',alignItems:'center',gap:8,padding:'8px 10px',cursor:'pointer',background:open?'rgba(192,57,43,0.12)':'transparent',fontSize:11,flexWrap:'wrap' as const}}
+        onMouseEnter={e=>(e.currentTarget.style.background='rgba(192,57,43,0.1)')}
+        onMouseLeave={e=>(e.currentTarget.style.background=open?'rgba(192,57,43,0.12)':'transparent')}>
+        <span style={{color:'#7A8FA6',fontFamily:'monospace',flexShrink:0}}>{v.item_id}</span>
+        <span style={{color:'#F4F6F8',fontWeight:600,flexShrink:0}}>{v.name}</span>
+        <span style={{color:'#E74C3C',flex:1}}>
+          {beforeStart&&`starts ${fmt(v.start_date)} — before project start`}
+          {beforeStart&&afterEnd&&' · '}
+          {afterEnd&&`ends ${fmt(v.end_date)} — after project end`}
+        </span>
+        <span style={{color:'#C8973A',fontSize:11,flexShrink:0,fontWeight:600}}>{open?'▲ Close':'✏️ Fix dates'}</span>
+      </div>
+      {open&&(
+        <div style={{padding:'12px 10px',background:'rgba(0,0,0,0.25)',borderTop:'1px solid rgba(192,57,43,0.2)'}}>
+          <div style={{fontSize:10,color:'#7A8FA6',marginBottom:10}}>
+            Project window: <span style={{color:'#C8973A',fontWeight:700}}>{fmt(project.start_date)} → {fmt(project.end_date)}</span>
+          </div>
+          <div style={{display:'flex',gap:10,alignItems:'flex-end',flexWrap:'wrap' as const}}>
+            <div>
+              <div style={{fontSize:10,color:'#7A8FA6',marginBottom:3}}>Start Date</div>
+              <input type="date" value={editStart} onChange={e=>setEditStart(e.target.value)}
+                style={{background:'#1E3048',color:startOk?'#F4F6F8':'#E74C3C',border:`1px solid ${startOk?'#243447':'#E74C3C'}`,borderRadius:6,padding:'5px 8px',fontSize:12}}/>
+            </div>
+            <div>
+              <div style={{fontSize:10,color:'#7A8FA6',marginBottom:3}}>End Date</div>
+              <input type="date" value={editEnd} onChange={e=>setEditEnd(e.target.value)}
+                style={{background:'#1E3048',color:endOk?'#F4F6F8':'#E74C3C',border:`1px solid ${endOk?'#243447':'#E74C3C'}`,borderRadius:6,padding:'5px 8px',fontSize:12}}/>
+            </div>
+            <button onClick={saveItem} disabled={saving}
+              style={{background:'#C8973A',color:'#0D1B2A',border:'none',borderRadius:6,padding:'6px 14px',fontWeight:700,cursor:'pointer',fontSize:12,opacity:saving?0.7:1}}>
+              {saving?'Saving...':'Save'}
+            </button>
+            <button onClick={()=>setOpen(false)}
+              style={{background:'#1E3048',color:'#F4F6F8',border:'1px solid #243447',borderRadius:6,padding:'6px 10px',fontSize:11,cursor:'pointer'}}>
+              Cancel
+            </button>
+          </div>
+          <div style={{marginTop:8,fontSize:10}}>
+            {!startOk&&<div style={{color:'#E74C3C'}}>⚠️ Start still before project start ({fmt(project.start_date)})</div>}
+            {!endOk&&<div style={{color:'#E74C3C'}}>⚠️ End still after project end ({fmt(project.end_date)})</div>}
+            {startOk&&endOk&&editStart&&editEnd&&<div style={{color:'#27AE60'}}>✓ Dates are within the project window</div>}
+          </div>
+        </div>
+      )}
+    </div>
+  )
+}
+
 function Projects({items,projects,setProjects}:{items:any[],projects:any[],setProjects:any}) {
   const [adding,setAdding]=useState(false)
   const [editing,setEditing]=useState(null)
@@ -57,14 +122,13 @@ function Projects({items,projects,setProjects}:{items:any[],projects:any[],setPr
     return true
   }).sort((a,b)=>(PRIORITY_ORDER[a.priority]??4)-(PRIORITY_ORDER[b.priority]??4))
 
-  // Check for timeline violations — child items outside project dates
+  function d(str){return str?new Date(str+'T12:00:00'):null}
+  function fmt(str){return d(str)?.toLocaleDateString('default',{month:'short',day:'numeric',year:'numeric'})||'—'}
+
   function getViolations(project) {
+    if(!project.start_date||!project.end_date) return []
     const children=items.filter(i=>i.parent_project===project.name&&i.start_date&&i.end_date)
-    return children.filter(i=>{
-      const ps=new Date(project.start_date),pe=new Date(project.end_date)
-      const is=new Date(i.start_date),ie=new Date(i.end_date)
-      return is<ps||ie>pe
-    })
+    return children.filter(i=>d(i.start_date)<d(project.start_date)||d(i.end_date)>d(project.end_date))
   }
 
   async function saveProject() {
@@ -104,6 +168,7 @@ function Projects({items,projects,setProjects}:{items:any[],projects:any[],setPr
 
   return(
     <div style={{display:'flex',flexDirection:'column',height:'100%'}}>
+
       {/* Controls */}
       <div style={{display:'flex',gap:8,padding:'10px 20px',borderBottom:'1px solid #243447',alignItems:'center',background:'#162436',flexWrap:'wrap'}}>
         <select value={filterTeam} onChange={e=>setFilterTeam(e.target.value)} style={sel}>
@@ -120,14 +185,24 @@ function Projects({items,projects,setProjects}:{items:any[],projects:any[],setPr
             ⚠️ {totalViolations} timeline violation{totalViolations!==1?'s':''} — child items outside project dates
           </div>
         )}
-        <div style={{marginLeft:'auto',display:'flex',gap:8}}>
-          <button onClick={()=>{setAdding(true);setEditing(null);setForm({...empty})}} style={{background:'#C8973A',color:'#0D1B2A',border:'none',borderRadius:6,padding:'5px 14px',fontSize:12,fontWeight:700,cursor:'pointer'}}>+ New Project</button>
+        <div style={{marginLeft:'auto'}}>
+          <button onClick={()=>{setAdding(true);setEditing(null);setForm({...empty})}}
+            style={{background:'#C8973A',color:'#0D1B2A',border:'none',borderRadius:6,padding:'5px 14px',fontSize:12,fontWeight:700,cursor:'pointer'}}>
+            + New Project
+          </button>
         </div>
       </div>
 
       {/* Summary stats */}
       <div style={{display:'flex',gap:12,padding:'12px 20px',borderBottom:'1px solid #243447',background:'#0D1B2A',flexWrap:'wrap'}}>
-        {[['Total',projects.length,'#7A8FA6'],['🟢 Green',projects.filter(p=>p.rag==='Green').length,'#27AE60'],['🟡 Amber',projects.filter(p=>p.rag==='Amber').length,'#D4820A'],['🔴 Red',projects.filter(p=>p.rag==='Red').length,'#C0392B'],['In Progress',projects.filter(p=>p.status==='In Progress').length,'#2E86AB'],['Planning',projects.filter(p=>p.status==='Planning').length,'#8E44AD']].map(([label,val,color])=>(
+        {[
+          ['Total',projects.length,'#7A8FA6'],
+          ['🟢 Green',projects.filter(p=>p.rag==='Green').length,'#27AE60'],
+          ['🟡 Amber',projects.filter(p=>p.rag==='Amber').length,'#D4820A'],
+          ['🔴 Red',projects.filter(p=>p.rag==='Red').length,'#C0392B'],
+          ['In Progress',projects.filter(p=>p.status==='In Progress').length,'#2E86AB'],
+          ['Planning',projects.filter(p=>p.status==='Planning').length,'#8E44AD'],
+        ].map(([label,val,color])=>(
           <div key={label} style={{background:'#162436',border:'1px solid #243447',borderRadius:8,padding:'10px 16px',display:'flex',gap:10,alignItems:'center'}}>
             <span style={{fontSize:20,fontWeight:700,color}}>{val}</span>
             <span style={{fontSize:11,color:'#7A8FA6'}}>{label}</span>
@@ -135,29 +210,26 @@ function Projects({items,projects,setProjects}:{items:any[],projects:any[],setPr
         ))}
       </div>
 
-      {/* Project cards */}
+      {/* Cards */}
       <div style={{flex:1,overflowY:'auto',padding:20,display:'flex',flexDirection:'column',gap:12}}>
         {filtered.map(project=>{
           const violations=getViolations(project)
           const children=items.filter(i=>i.parent_project===project.name)
           const ragColor=RAG_COLORS[project.rag]||'#27AE60'
           const pclr=pc(project.priority)
-          const daysTotal=project.start_date&&project.end_date?Math.round((new Date(project.end_date).getTime()-new Date(project.start_date).getTime())/(1000*60*60*24)):null
-          const daysLeft=project.end_date?Math.round((new Date(project.end_date).getTime()-new Date().getTime())/(1000*60*60*24)):null
-          const progress=project.start_date&&project.end_date?Math.max(0,Math.min(100,Math.round((new Date().getTime()-new Date(project.start_date).getTime())/(new Date(project.end_date).getTime()-new Date(project.start_date).getTime())*100))):0
+          const ps=d(project.start_date),pe=d(project.end_date)
+          const now=new Date()
+          const daysTotal=ps&&pe?Math.round((pe.getTime()-ps.getTime())/(1000*60*60*24)):null
+          const daysLeft=pe?Math.round((pe.getTime()-now.getTime())/(1000*60*60*24)):null
+          const progress=ps&&pe?Math.max(0,Math.min(100,Math.round((now.getTime()-ps.getTime())/(pe.getTime()-ps.getTime())*100))):0
 
           return(
-            <div key={project.id} style={{background:'#162436',border:`1px solid ${violations.length>0?'rgba(192,57,43,0.5)':'#243447'}`,borderLeft:`4px solid ${project.color||'#2E86AB'}`,borderRadius:10,padding:'16px 20px',position:'relative'}}>
-              {violations.length>0&&(
-                <div style={{position:'absolute',top:12,right:60,background:'rgba(192,57,43,0.15)',border:'1px solid rgba(192,57,43,0.4)',borderRadius:6,padding:'3px 10px',fontSize:11,color:'#E74C3C',display:'flex',alignItems:'center',gap:5}}>
-                  ⚠️ {violations.length} item{violations.length!==1?'s':''} outside timeline
-                </div>
-              )}
+            <div key={project.id} style={{background:'#162436',border:`1px solid ${violations.length>0?'rgba(192,57,43,0.5)':'#243447'}`,borderLeft:`4px solid ${project.color||'#2E86AB'}`,borderRadius:10,padding:'16px 20px'}}>
 
-              {/* Header row */}
+              {/* Header */}
               <div style={{display:'flex',alignItems:'flex-start',gap:12,marginBottom:12}}>
-                <div style={{flex:1}}>
-                  <div style={{display:'flex',alignItems:'center',gap:8,marginBottom:4,flexWrap:'wrap'}}>
+                <div style={{flex:1,minWidth:0}}>
+                  <div style={{display:'flex',alignItems:'center',gap:8,marginBottom:4,flexWrap:'wrap' as const}}>
                     <span style={{fontSize:16,fontWeight:700,color:'#F4F6F8'}}>{project.name}</span>
                     <span style={{background:pclr.bg,color:'#fff',padding:'2px 8px',borderRadius:4,fontSize:11,fontWeight:700}}>{project.priority}</span>
                     <span style={{background:ragColor+'22',color:ragColor,border:`1px solid ${ragColor}44`,padding:'2px 10px',borderRadius:12,fontSize:11,fontWeight:700}}>
@@ -165,6 +237,11 @@ function Projects({items,projects,setProjects}:{items:any[],projects:any[],setPr
                     </span>
                     <span style={{color:sc(project.status),fontSize:11,fontWeight:600}}>{project.status}</span>
                     <span style={{fontSize:11,color:'#7A8FA6'}}>{project.team==='Consumer Experience'?'CE':'OE'}</span>
+                    {violations.length>0&&(
+                      <span style={{background:'rgba(192,57,43,0.15)',border:'1px solid rgba(192,57,43,0.4)',borderRadius:6,padding:'2px 8px',fontSize:11,color:'#E74C3C'}}>
+                        ⚠️ {violations.length} item{violations.length!==1?'s':''} outside timeline
+                      </span>
+                    )}
                   </div>
                   {project.description&&<div style={{fontSize:12,color:'#7A8FA6',lineHeight:1.5}}>{project.description}</div>}
                 </div>
@@ -175,24 +252,24 @@ function Projects({items,projects,setProjects}:{items:any[],projects:any[],setPr
               </div>
 
               {/* Timeline bar */}
-              {project.start_date&&project.end_date&&(
+              {ps&&pe&&(
                 <div style={{marginBottom:12}}>
-                  <div style={{display:'flex',justifyContent:'space-between',fontSize:10,color:'#7A8FA6',marginBottom:4}}>
-                    <span>{new Date(project.start_date).toLocaleDateString('default',{month:'short',day:'numeric',year:'numeric'})}</span>
-                    <span style={{color:daysLeft!==null&&daysLeft<30?'#E74C3C':daysLeft!==null&&daysLeft<60?'#D4820A':'#7A8FA6'}}>
-                      {daysLeft!==null&&daysLeft>0?`${daysLeft} days remaining`:daysLeft!==null&&daysLeft<=0?'Overdue':'—'}
+                  <div style={{display:'flex',justifyContent:'space-between',fontSize:11,color:'#7A8FA6',marginBottom:6}}>
+                    <span>{fmt(project.start_date)}</span>
+                    <span style={{color:daysLeft!==null&&daysLeft<0?'#E74C3C':daysLeft!==null&&daysLeft<30?'#E74C3C':daysLeft!==null&&daysLeft<60?'#D4820A':'#7A8FA6',fontWeight:daysLeft!==null&&daysLeft<60?700:400}}>
+                      {daysLeft!==null&&daysLeft>0?`${daysLeft} days remaining`:daysLeft!==null&&daysLeft<=0?`${Math.abs(daysLeft)} days overdue`:'—'}
                     </span>
-                    <span>{new Date(project.end_date).toLocaleDateString('default',{month:'short',day:'numeric',year:'numeric'})}</span>
+                    <span>{fmt(project.end_date)}</span>
                   </div>
-                  <div style={{height:8,background:'#1E3048',borderRadius:4,overflow:'hidden'}}>
-                    <div style={{height:'100%',width:`${progress}%`,background:project.color||'#2E86AB',borderRadius:4,transition:'width 0.3s'}}/>
+                  <div style={{height:8,background:'#1E3048',borderRadius:4,overflow:'hidden',marginBottom:4}}>
+                    <div style={{height:'100%',width:`${progress}%`,background:project.color||'#2E86AB',borderRadius:4}}/>
                   </div>
-                  <div style={{fontSize:10,color:'#7A8FA6',marginTop:3}}>{progress}% through timeline · {daysTotal} days total</div>
+                  <div style={{fontSize:10,color:'#7A8FA6'}}>{progress}% through timeline · {daysTotal} days total</div>
                 </div>
               )}
 
-              {/* Inline field editors */}
-              <div style={{display:'flex',gap:8,flexWrap:'wrap',alignItems:'center',marginBottom:violations.length>0?12:0}}>
+              {/* Quick controls */}
+              <div style={{display:'flex',gap:8,flexWrap:'wrap' as const,alignItems:'center',marginBottom:violations.length>0?12:0}}>
                 <div style={{display:'flex',alignItems:'center',gap:4,fontSize:11}}>
                   <span style={{color:'#7A8FA6'}}>RAG:</span>
                   {['Green','Amber','Red'].map(r=>(
@@ -220,34 +297,26 @@ function Projects({items,projects,setProjects}:{items:any[],projects:any[],setPr
                 </div>
               </div>
 
-              {/* Violations list */}
+              {/* Violations */}
               {violations.length>0&&(
                 <div style={{background:'rgba(192,57,43,0.08)',border:'1px solid rgba(192,57,43,0.2)',borderRadius:6,padding:'10px 12px'}}>
-                  <div style={{fontSize:11,fontWeight:700,color:'#E74C3C',marginBottom:8}}>⚠️ Timeline Violations — these items fall outside the project window:</div>
-                  {violations.map(v=>{
-                    const beforeStart=new Date(v.start_date)<new Date(project.start_date)
-                    const afterEnd=new Date(v.end_date)>new Date(project.end_date)
-                    return(
-                      <div key={v.id} style={{display:'flex',alignItems:'center',gap:8,marginBottom:4,fontSize:11}}>
-                        <span style={{color:'#7A8FA6',fontFamily:'monospace'}}>{v.item_id}</span>
-                        <span style={{color:'#F4F6F8'}}>{v.name}</span>
-                        <span style={{color:'#E74C3C'}}>
-                          {beforeStart&&`starts ${v.start_date} (before project start ${project.start_date})`}
-                          {afterEnd&&`${beforeStart?' · ':''}ends ${v.end_date} (after project end ${project.end_date})`}
-                        </span>
-                      </div>
-                    )
-                  })}
+                  <div style={{fontSize:11,fontWeight:700,color:'#E74C3C',marginBottom:10}}>
+                    ⚠️ Timeline violations — project window: {fmt(project.start_date)} → {fmt(project.end_date)}
+                  </div>
+                  {violations.map(v=>(
+                    <ViolationRow key={v.id} v={v} project={project} fmt={fmt} d={d}/>
+                  ))}
                 </div>
               )}
             </div>
           )
         })}
+
         {filtered.length===0&&(
           <div style={{textAlign:'center',padding:60,color:'#7A8FA6'}}>
             <div style={{fontSize:32,marginBottom:12}}>📋</div>
             <div style={{fontSize:16,marginBottom:8}}>No projects yet</div>
-            <div style={{fontSize:13}}>Click "+ New Project" to create your first project</div>
+            <div style={{fontSize:13}}>Click "+ New Project" to get started</div>
           </div>
         )}
       </div>
@@ -260,60 +329,58 @@ function Projects({items,projects,setProjects}:{items:any[],projects:any[],setPr
             <div style={{display:'flex',flexDirection:'column',gap:14}}>
               <div>
                 <div style={{fontSize:11,color:'#7A8FA6',marginBottom:4}}>Project Name *</div>
-                <input value={form.name} onChange={e=>setForm(p=>({...p,name:e.target.value}))} placeholder="e.g. Peak Prep" style={{width:'100%',background:'#1E3048',color:'#F4F6F8',border:'1px solid #243447',borderRadius:6,padding:'8px 10px',fontSize:13,boxSizing:'border-box' as const}}/>
+                <input value={form.name} onChange={e=>setForm(p=>({...p,name:e.target.value}))} placeholder="e.g. Peak Prep"
+                  style={{width:'100%',background:'#1E3048',color:'#F4F6F8',border:'1px solid #243447',borderRadius:6,padding:'8px 10px',fontSize:13,boxSizing:'border-box' as const}}/>
               </div>
               <div>
                 <div style={{fontSize:11,color:'#7A8FA6',marginBottom:4}}>Description</div>
-                <textarea value={form.description} onChange={e=>setForm(p=>({...p,description:e.target.value}))} rows={2} style={{width:'100%',background:'#1E3048',color:'#F4F6F8',border:'1px solid #243447',borderRadius:6,padding:'8px 10px',fontSize:13,boxSizing:'border-box' as const,resize:'vertical' as const,fontFamily:'inherit'}}/>
+                <textarea value={form.description} onChange={e=>setForm(p=>({...p,description:e.target.value}))} rows={2}
+                  style={{width:'100%',background:'#1E3048',color:'#F4F6F8',border:'1px solid #243447',borderRadius:6,padding:'8px 10px',fontSize:13,boxSizing:'border-box' as const,resize:'vertical' as const,fontFamily:'inherit'}}/>
               </div>
               <div style={{display:'grid',gridTemplateColumns:'1fr 1fr',gap:12}}>
-                <div>
-                  <div style={{fontSize:11,color:'#7A8FA6',marginBottom:4}}>Priority</div>
-                  <select value={form.priority} onChange={e=>setForm(p=>({...p,priority:e.target.value}))} style={{width:'100%',background:'#1E3048',color:'#F4F6F8',border:'1px solid #243447',borderRadius:6,padding:'7px 8px',fontSize:12}}>
-                    {PRIORITIES.map(p=><option key={p}>{p}</option>)}
-                  </select>
-                </div>
-                <div>
-                  <div style={{fontSize:11,color:'#7A8FA6',marginBottom:4}}>Status</div>
-                  <select value={form.status} onChange={e=>setForm(p=>({...p,status:e.target.value}))} style={{width:'100%',background:'#1E3048',color:'#F4F6F8',border:'1px solid #243447',borderRadius:6,padding:'7px 8px',fontSize:12}}>
-                    {PROJECT_STATUSES.map(s=><option key={s}>{s}</option>)}
-                  </select>
-                </div>
+                {([['Priority','priority',PRIORITIES],['Status','status',PROJECT_STATUSES],['Team','team',TEAMS]] as [string,string,string[]][]).map(([label,field,opts])=>(
+                  <div key={field}>
+                    <div style={{fontSize:11,color:'#7A8FA6',marginBottom:4}}>{label}</div>
+                    <select value={form[field]} onChange={e=>setForm(p=>({...p,[field]:e.target.value}))}
+                      style={{width:'100%',background:'#1E3048',color:'#F4F6F8',border:'1px solid #243447',borderRadius:6,padding:'7px 8px',fontSize:12}}>
+                      {opts.map(o=><option key={o}>{o}</option>)}
+                    </select>
+                  </div>
+                ))}
                 <div>
                   <div style={{fontSize:11,color:'#7A8FA6',marginBottom:4}}>RAG Status</div>
-                  <select value={form.rag} onChange={e=>setForm(p=>({...p,rag:e.target.value}))} style={{width:'100%',background:'#1E3048',color:'#F4F6F8',border:'1px solid #243447',borderRadius:6,padding:'7px 8px',fontSize:12}}>
+                  <select value={form.rag} onChange={e=>setForm(p=>({...p,rag:e.target.value}))}
+                    style={{width:'100%',background:'#1E3048',color:'#F4F6F8',border:'1px solid #243447',borderRadius:6,padding:'7px 8px',fontSize:12}}>
                     <option value="Green">🟢 Green</option>
                     <option value="Amber">🟡 Amber</option>
                     <option value="Red">🔴 Red</option>
                   </select>
                 </div>
                 <div>
-                  <div style={{fontSize:11,color:'#7A8FA6',marginBottom:4}}>Team</div>
-                  <select value={form.team} onChange={e=>setForm(p=>({...p,team:e.target.value}))} style={{width:'100%',background:'#1E3048',color:'#F4F6F8',border:'1px solid #243447',borderRadius:6,padding:'7px 8px',fontSize:12}}>
-                    {TEAMS.map(t=><option key={t}>{t}</option>)}
-                  </select>
-                </div>
-                <div>
                   <div style={{fontSize:11,color:'#7A8FA6',marginBottom:4}}>Start Date</div>
-                  <input type="date" value={form.start_date} onChange={e=>setForm(p=>({...p,start_date:e.target.value}))} style={{width:'100%',background:'#1E3048',color:'#F4F6F8',border:'1px solid #243447',borderRadius:6,padding:'7px 10px',fontSize:12,boxSizing:'border-box' as const}}/>
+                  <input type="date" value={form.start_date} onChange={e=>setForm(p=>({...p,start_date:e.target.value}))}
+                    style={{width:'100%',background:'#1E3048',color:'#F4F6F8',border:'1px solid #243447',borderRadius:6,padding:'7px 10px',fontSize:12,boxSizing:'border-box' as const}}/>
                 </div>
                 <div>
                   <div style={{fontSize:11,color:'#7A8FA6',marginBottom:4}}>End Date</div>
-                  <input type="date" value={form.end_date} onChange={e=>setForm(p=>({...p,end_date:e.target.value}))} style={{width:'100%',background:'#1E3048',color:'#F4F6F8',border:'1px solid #243447',borderRadius:6,padding:'7px 10px',fontSize:12,boxSizing:'border-box' as const}}/>
+                  <input type="date" value={form.end_date} onChange={e=>setForm(p=>({...p,end_date:e.target.value}))}
+                    style={{width:'100%',background:'#1E3048',color:'#F4F6F8',border:'1px solid #243447',borderRadius:6,padding:'7px 10px',fontSize:12,boxSizing:'border-box' as const}}/>
                 </div>
               </div>
               <div>
                 <div style={{fontSize:11,color:'#7A8FA6',marginBottom:8}}>Project Color</div>
-                <div style={{display:'flex',gap:8,flexWrap:'wrap'}}>
+                <div style={{display:'flex',gap:8,flexWrap:'wrap' as const}}>
                   {COLORS.map(c=>(
-                    <div key={c} onClick={()=>setForm(p=>({...p,color:c}))} style={{width:28,height:28,borderRadius:6,background:c,cursor:'pointer',border:form.color===c?'3px solid #F4F6F8':'3px solid transparent'}}/>
+                    <div key={c} onClick={()=>setForm(p=>({...p,color:c}))}
+                      style={{width:28,height:28,borderRadius:6,background:c,cursor:'pointer',border:form.color===c?'3px solid #F4F6F8':'3px solid transparent'}}/>
                   ))}
                 </div>
               </div>
             </div>
             <div style={{display:'flex',gap:8,justifyContent:'flex-end',marginTop:20}}>
               <button onClick={()=>{setAdding(false);setEditing(null);setForm({...empty})}} style={sel}>Cancel</button>
-              <button onClick={saveProject} disabled={saving||!form.name.trim()} style={{background:'#C8973A',color:'#0D1B2A',border:'none',borderRadius:6,padding:'8px 20px',fontWeight:700,cursor:'pointer',fontSize:13,opacity:saving?0.7:1}}>
+              <button onClick={saveProject} disabled={saving||!form.name.trim()}
+                style={{background:'#C8973A',color:'#0D1B2A',border:'none',borderRadius:6,padding:'8px 20px',fontWeight:700,cursor:'pointer',fontSize:13,opacity:saving?0.7:1}}>
                 {saving?'Saving...':(editing?'Save Changes':'Create Project')}
               </button>
             </div>
@@ -718,7 +785,7 @@ function Backlog({items,setItems,projects}:{items:any[],setItems:any,projects:an
 }
 
 // ── ROADMAP ───────────────────────────────────────────────────────────────
-function Roadmap({items,projects}:{items:any[],projects:any[]}) {
+function Roadmap({items,setItems,projects}:{items:any[],projects:any[],setItems:any}) {
   const [view,setView]=useState('quarter')
   const [ft,setFt]=useState('All')
   const [zoom,setZoom]=useState(1)
@@ -731,53 +798,58 @@ function Roadmap({items,projects}:{items:any[],projects:any[]}) {
   const [showSettings,setShowSettings]=useState(false)
   const [codeFreezeStart,setCodeFreezeStart]=useState('2026-10-01')
   const [codeFreezeEnd,setCodeFreezeEnd]=useState('2026-12-31')
+  const [backlogOpen,setBacklogOpen]=useState(true)
+  const [discussionOpen,setDiscussionOpen]=useState(true)
+  const [dragOverProject,setDragOverProject]=useState(null)
+  const [dragOverCol,setDragOverCol]=useState(null)
+  const [draggingBar,setDraggingBar]=useState(null)
+  const [draggingEdge,setDraggingEdge]=useState(null)
+  const ganttRef=useRef(null)
   const today=new Date()
 
   const filteredItems=items.filter(i=>ft==='All'||i.team===ft)
   const withDates=filteredItems.filter(i=>i.start_date&&i.end_date)
   const noDates=filteredItems.filter(i=>!i.start_date||!i.end_date)
-
-  // Build groups from PROJECTS table — project drives the parent row
+  const uncommitted=noDates.sort((a,b)=>{
+    const pa=PRIORITY_ORDER[a.priority]??4,pb=PRIORITY_ORDER[b.priority]??4
+    if(pa!==pb) return pa-pb
+    if(a.wsjf&&b.wsjf) return parseFloat(b.wsjf)-parseFloat(a.wsjf)
+    return 0
+  })
   const filteredProjects=projects.filter(p=>ft==='All'||p.team===ft)
+  const flaggedItems=items.filter(i=>i.flagged)
+
+  function ragColor(rag){return rag==='Red'?'#C0392B':rag==='Amber'?'#D4820A':'#27AE60'}
+  function ragBg(rag){return rag==='Red'?'rgba(192,57,43,0.14)':rag==='Amber'?'rgba(212,130,10,0.14)':'rgba(39,174,96,0.08)'}
+  function ragBorder(rag){return rag==='Red'?'rgba(192,57,43,0.6)':rag==='Amber'?'rgba(212,130,10,0.6)':'rgba(39,174,96,0.4)'}
 
   const groups=filteredProjects.map(project=>{
     const children=withDates.filter(i=>i.parent_project===project.name)
-    // violations
     const violations=children.filter(i=>{
       if(!project.start_date||!project.end_date) return false
-      return new Date(i.start_date)<new Date(project.start_date)||new Date(i.end_date)>new Date(project.end_date)
+      return new Date(i.start_date+'T12:00:00')<new Date(project.start_date+'T12:00:00')||new Date(i.end_date+'T12:00:00')>new Date(project.end_date+'T12:00:00')
     })
-    return{
-      ...project,
-      items:children,
-      violations,
-      // use project dates as the master bar
-      bar_start:project.start_date,
-      bar_end:project.end_date,
-    }
-  }).filter(g=>g.items.length>0||(g.bar_start&&g.bar_end)).sort((a:any,b:any)=>{
+    return{...project,items:children,violations,bar_start:project.start_date,bar_end:project.end_date}
+  }).filter((g:any)=>g.items.length>0||(g.bar_start&&g.bar_end)).sort((a:any,b:any)=>{
     let av,bv
-    if(sortBy==='start_date'){av=new Date(a.bar_start||'9999');bv=new Date(b.bar_start||'9999')}
-    else if(sortBy==='end_date'){av=new Date(a.bar_end||'9999');bv=new Date(b.bar_end||'9999')}
+    if(sortBy==='start_date'){av=new Date((a.bar_start||'9999')+'T12:00:00');bv=new Date((b.bar_start||'9999')+'T12:00:00')}
+    else if(sortBy==='end_date'){av=new Date((a.bar_end||'9999')+'T12:00:00');bv=new Date((b.bar_end||'9999')+'T12:00:00')}
     else if(sortBy==='name'){av=a.name.toLowerCase();bv=b.name.toLowerCase()}
     else if(sortBy==='rag'){av=['Red','Amber','Green'].indexOf(a.rag);bv=['Red','Amber','Green'].indexOf(b.rag)}
-    else{av=new Date(a.bar_start||'9999');bv=new Date(b.bar_start||'9999')}
+    else{av=new Date((a.bar_start||'9999')+'T12:00:00');bv=new Date((b.bar_start||'9999')+'T12:00:00')}
     if(av<bv) return sortDir==='asc'?-1:1
     if(av>bv) return sortDir==='asc'?1:-1
     return 0
   })
 
-  // Items not linked to any project
   const orphans=withDates.filter(i=>!i.parent_project||!projects.find(p=>p.name===i.parent_project))
-  const flaggedItems=items.filter(i=>i.flagged)
-  const totalViolations=groups.reduce((acc,g)=>acc+g.violations.length,0)
+  const totalViolations=groups.reduce((acc,g:any)=>acc+g.violations.length,0)
 
   function getCollapsed(){
     if(collapsed===null){
       const all={}
       groups.forEach((g:any)=>all[g.id]=true)
-      all['__nodates']=true
-      all['__orphans']=true
+      all['__nodates']=true;all['__orphans']=true
       return all
     }
     return collapsed
@@ -787,7 +859,7 @@ function Roadmap({items,projects}:{items:any[],projects:any[]}) {
   function expandAll(){setCollapsed({})}
 
   function buildCols(){
-    const cfStart=new Date(codeFreezeStart),cfEnd=new Date(codeFreezeEnd)
+    const cfStart=new Date(codeFreezeStart+'T12:00:00'),cfEnd=new Date(codeFreezeEnd+'T12:00:00')
     function isCF(s,e){return s<=cfEnd&&e>=cfStart}
     const cols=[]
     const start=new Date('2026-04-01'),end=new Date('2028-04-01')
@@ -823,10 +895,108 @@ function Roadmap({items,projects}:{items:any[],projects:any[]}) {
   const totalEnd=cols[cols.length-1]?.end
   const totalMs=totalEnd.getTime()-totalStart.getTime()
   const COL_W=view==='week'?60*zoom:view==='month'?100*zoom:view==='quarter'?200*zoom:300*zoom
+  const GANTT_W=cols.length*COL_W
 
-  function pct(dateStr){return Math.max(0,(new Date(dateStr).getTime()-totalStart.getTime())/totalMs*100)}
-  function barW(s,e){return Math.max(0.5,Math.min(100,(new Date(e).getTime()-totalStart.getTime())/totalMs*100)-pct(s))}
+  function pct(dateStr){return Math.max(0,(new Date(dateStr+'T12:00:00').getTime()-totalStart.getTime())/totalMs*100)}
+  function barW(s,e){return Math.max(0.5,Math.min(100,(new Date(e+'T12:00:00').getTime()-totalStart.getTime())/totalMs*100)-pct(s))}
   function todayPos(){return`${Math.max(0,Math.min(100,(today.getTime()-totalStart.getTime())/totalMs*100))}%`}
+  function pxToDate(px,containerWidth){
+    const ratio=px/containerWidth
+    const ms=totalStart.getTime()+ratio*totalMs
+    return new Date(ms)
+  }
+  function dateToStr(d){return d.toISOString().split('T')[0]}
+
+  // ── Drop from backlog panel onto gantt ──────────────────────────────
+  function handleGanttDragOver(e,projectName,col){
+    e.preventDefault()
+    setDragOverProject(projectName)
+    setDragOverCol(col.key)
+  }
+  function handleGanttDragLeave(){setDragOverProject(null);setDragOverCol(null)}
+  async function handleGanttDrop(e,projectName,col){
+    e.preventDefault()
+    const itemId=e.dataTransfer.getData('itemId')
+    if(!itemId){setDragOverProject(null);setDragOverCol(null);return}
+    const item=items.find(i=>i.id===itemId)
+    if(!item){setDragOverProject(null);setDragOverCol(null);return}
+    const startStr=dateToStr(col.start)
+    const endStr=dateToStr(col.end)
+    const updates={start_date:startStr,end_date:endStr,parent_project:projectName}
+    setItems(items.map(i=>i.id===itemId?{...i,...updates}:i))
+    await supabase.from('items').update(updates).eq('id',itemId)
+    setDragOverProject(null);setDragOverCol(null)
+  }
+
+  // ── Bar drag to move ────────────────────────────────────────────────
+  const barDragState=useRef<any>(null)
+  function startBarDrag(e,item,type:'move'|'left'|'right'){
+    e.preventDefault()
+    e.stopPropagation()
+    const gantt=ganttRef.current as any
+    if(!gantt) return
+    const rect=gantt.getBoundingClientRect()
+    const scrollLeft=gantt.scrollLeft
+    barDragState.current={
+      item,type,
+      startX:e.clientX,
+      startScrollLeft:scrollLeft,
+      origStart:item.start_date,
+      origEnd:item.end_date,
+      containerWidth:gantt.scrollWidth-220,
+      containerLeft:rect.left+220-scrollLeft,
+    }
+    setDraggingBar(item.id)
+    if(type!=='move') setDraggingEdge(type)
+  }
+
+  useEffect(()=>{
+    function onMouseMove(e){
+      const state=barDragState.current
+      if(!state) return
+      const dx=e.clientX-state.startX
+      const daysTotal=totalMs/(1000*60*60*24)
+      const pxPerDay=state.containerWidth/daysTotal
+      const daysDelta=Math.round(dx/pxPerDay)
+      if(daysDelta===0) return
+      const origStartMs=new Date(state.origStart+'T12:00:00').getTime()
+      const origEndMs=new Date(state.origEnd+'T12:00:00').getTime()
+      const DAY=1000*60*60*24
+      let newStart=state.origStart,newEnd=state.origEnd
+      if(state.type==='move'){
+        newStart=dateToStr(new Date(origStartMs+daysDelta*DAY))
+        newEnd=dateToStr(new Date(origEndMs+daysDelta*DAY))
+      }else if(state.type==='left'){
+        const ns=new Date(origStartMs+daysDelta*DAY)
+        if(ns<new Date(state.origEnd+'T12:00:00')) newStart=dateToStr(ns)
+      }else if(state.type==='right'){
+        const ne=new Date(origEndMs+daysDelta*DAY)
+        if(ne>new Date(state.origStart+'T12:00:00')) newEnd=dateToStr(ne)
+      }
+      setItems((prev:any[])=>prev.map(i=>i.id===state.item.id?{...i,start_date:newStart,end_date:newEnd}:i))
+    }
+    async function onMouseUp(e){
+      const state=barDragState.current
+      if(!state) return
+      // Check if dropped on a different project row
+      const el=document.elementFromPoint(e.clientX,e.clientY)
+      const projectRow=el?.closest('[data-project-id]')
+      const newProjectId=projectRow?.getAttribute('data-project-id')
+      const newProjectName=projectRow?.getAttribute('data-project-name')
+      const item=items.find(i=>i.id===state.item.id)
+      if(!item){barDragState.current=null;setDraggingBar(null);setDraggingEdge(null);return}
+      const updates:any={start_date:item.start_date,end_date:item.end_date}
+      if(newProjectName&&newProjectName!==item.parent_project){
+        updates.parent_project=newProjectName
+        setItems((prev:any[])=>prev.map(i=>i.id===state.item.id?{...i,parent_project:newProjectName}:i))
+      }
+      await supabase.from('items').update(updates).eq('id',state.item.id)
+      barDragState.current=null;setDraggingBar(null);setDraggingEdge(null)
+    }
+    window.addEventListener('mousemove',onMouseMove)
+    window.addEventListener('mouseup',onMouseUp)
+    return()=>{window.removeEventListener('mousemove',onMouseMove);window.removeEventListener('mouseup',onMouseUp)}
+  },[items,totalMs])
 
   async function saveEdit(){
     if(!editing) return
@@ -848,6 +1018,8 @@ function Roadmap({items,projects}:{items:any[],projects:any[]}) {
 
   return(
     <div style={{display:'flex',flexDirection:'column',height:'100%'}}>
+
+      {/* Controls */}
       <div style={{display:'flex',gap:8,padding:'10px 20px',borderBottom:'1px solid #243447',alignItems:'center',background:'#162436',flexWrap:'wrap'}}>
         <select value={ft} onChange={e=>setFt(e.target.value)} style={sel}><option value="All">All Teams</option>{TEAMS.map(t=><option key={t}>{t}</option>)}</select>
         <div style={{display:'flex',gap:3}}>
@@ -861,7 +1033,7 @@ function Roadmap({items,projects}:{items:any[],projects:any[]}) {
             <option value="start_date">Start Date</option>
             <option value="end_date">End Date</option>
             <option value="name">Name</option>
-            <option value="rag">RAG</option>
+            <option value="rag">RAG Status</option>
           </select>
           <button onClick={()=>setSortDir(d=>d==='asc'?'desc':'asc')} style={{...sel,fontSize:13,padding:'3px 10px'}}>{sortDir==='asc'?'↑':'↓'}</button>
         </div>
@@ -880,29 +1052,40 @@ function Roadmap({items,projects}:{items:any[],projects:any[]}) {
             ⚠️ {totalViolations} violation{totalViolations!==1?'s':''}
           </div>
         )}
-        <div style={{display:'flex',gap:12,fontSize:11,marginLeft:'auto',color:'#7A8FA6'}}>
-          <span>{groups.length} projects · {withDates.length} items</span>
-          <span style={{display:'flex',alignItems:'center',gap:4}}><span style={{width:2,height:10,background:'#E74C3C',display:'inline-block'}}/> Today</span>
-          <span style={{display:'flex',alignItems:'center',gap:4}}><span style={{width:10,height:10,background:'rgba(192,57,43,0.2)',border:'1px dashed rgba(192,57,43,0.5)',display:'inline-block',borderRadius:2}}/> Code Freeze</span>
+        <div style={{display:'flex',gap:10,fontSize:11,marginLeft:'auto',color:'#7A8FA6',alignItems:'center'}}>
+          <span>{groups.length} projects · {withDates.length} committed · {uncommitted.length} backlog</span>
+          <span style={{display:'flex',alignItems:'center',gap:3}}><span style={{width:2,height:10,background:'#E74C3C',display:'inline-block'}}/> Today</span>
         </div>
       </div>
 
       <div style={{display:'flex',flex:1,overflow:'hidden'}}>
-        {flaggedItems.length>0&&(
-          <div style={{width:196,borderRight:'1px solid #243447',padding:12,background:'#162436',overflowY:'auto',flexShrink:0}}>
-            <div style={{fontSize:11,fontWeight:700,color:'#C8973A',letterSpacing:1,marginBottom:10}}>🚩 DISCUSSION</div>
-            {flaggedItems.map(item=>(
-              <div key={item.id} style={{background:'#1E3048',border:'1px solid rgba(200,151,58,0.3)',borderRadius:6,padding:'6px 8px',marginBottom:6}}>
-                <div style={{fontSize:10,color:'#7A8FA6',fontFamily:'monospace'}}>{item.item_id}</div>
-                <div style={{fontSize:11,color:'#F4F6F8',marginTop:2,lineHeight:1.3}}>{item.name}</div>
-                <div style={{marginTop:4}}><span style={{background:pc(item.priority).bg,color:'#fff',padding:'1px 6px',borderRadius:3,fontSize:9,fontWeight:700}}>{item.priority}</span></div>
-              </div>
-            ))}
-          </div>
-        )}
 
-        <div style={{flex:1,overflowX:'auto',overflowY:'auto'}}>
+        {/* Discussion panel — left, collapsible */}
+        <div style={{borderRight:'1px solid #243447',background:'#162436',flexShrink:0,display:'flex',flexDirection:'column',transition:'width 0.2s',width:discussionOpen?196:32,overflow:'hidden'}}>
+          <button onClick={()=>setDiscussionOpen(o=>!o)}
+            style={{background:'none',border:'none',borderBottom:'1px solid #243447',cursor:'pointer',padding:'10px 8px',display:'flex',alignItems:'center',gap:6,color:'#C8973A',fontSize:11,fontWeight:700,letterSpacing:1,whiteSpace:'nowrap' as const,width:'100%'}}>
+            <span style={{transform:discussionOpen?'none':'rotate(-90deg)',transition:'transform 0.2s',display:'inline-block'}}>▼</span>
+            {discussionOpen&&'🚩 DISCUSSION'}
+            {!discussionOpen&&<span style={{transform:'rotate(90deg)',display:'inline-block',fontSize:10}}>🚩</span>}
+          </button>
+          {discussionOpen&&(
+            <div style={{overflowY:'auto',flex:1,padding:12}}>
+              {flaggedItems.length===0&&<div style={{fontSize:11,color:'#7A8FA6',fontStyle:'italic'}}>No flagged items</div>}
+              {flaggedItems.map(item=>(
+                <div key={item.id} style={{background:'#1E3048',border:'1px solid rgba(200,151,58,0.3)',borderRadius:6,padding:'6px 8px',marginBottom:6}}>
+                  <div style={{fontSize:10,color:'#7A8FA6',fontFamily:'monospace'}}>{item.item_id}</div>
+                  <div style={{fontSize:11,color:'#F4F6F8',marginTop:2,lineHeight:1.3}}>{item.name}</div>
+                  <div style={{marginTop:4}}><span style={{background:pc(item.priority).bg,color:'#fff',padding:'1px 6px',borderRadius:3,fontSize:9,fontWeight:700}}>{item.priority}</span></div>
+                </div>
+              ))}
+            </div>
+          )}
+        </div>
+
+        {/* Gantt */}
+        <div ref={ganttRef} style={{flex:1,overflowX:'auto',overflowY:'auto',position:'relative',userSelect:draggingBar?'none':'auto'}}>
           <div style={{minWidth:cols.length*COL_W+220}}>
+
             {/* Header */}
             <div style={{display:'flex',position:'sticky',top:0,zIndex:10,background:'#162436',borderBottom:'1px solid #243447'}}>
               <div style={{width:220,flexShrink:0,borderRight:'1px solid #243447',padding:'8px 12px',fontSize:11,fontWeight:700,color:'#7A8FA6',letterSpacing:1}}>PROJECT / ITEM</div>
@@ -919,14 +1102,15 @@ function Roadmap({items,projects}:{items:any[],projects:any[]}) {
             {/* Project groups */}
             {groups.map((group:any)=>{
               const isCollapsed=getCollapsed()[group.id]
-              const childItems=[...group.items].sort((a,b)=>(!a.start_date?1:!b.start_date?-1:new Date(a.start_date).getTime()-new Date(b.start_date).getTime()))
-              const groupColor=group.color||'#2E86AB'
-              const ragColor=RAG_COLORS[group.rag]||'#27AE60'
+              const childItems=[...group.items].sort((a,b)=>(!a.start_date?1:!b.start_date?-1:new Date(a.start_date+'T12:00:00').getTime()-new Date(b.start_date+'T12:00:00').getTime()))
+              const rc=ragColor(group.rag)
+              const rb=ragBg(group.rag)
+              const rbd=ragBorder(group.rag)
 
               return(
-                <div key={group.id}>
-                  {/* Project header row */}
-                  <div style={{display:'flex',height:PARENT_H,background:`${groupColor}18`,borderBottom:'1px solid #243447',borderTop:`2px solid ${groupColor}44`,position:'sticky',top:36,zIndex:5}}>
+                <div key={group.id} data-project-id={group.id} data-project-name={group.name}>
+                  {/* Parent row */}
+                  <div style={{display:'flex',height:PARENT_H,background:rb,borderBottom:'1px solid #243447',borderTop:`2px solid ${rbd}`,position:'sticky',top:36,zIndex:5}}>
                     <div style={{width:220,flexShrink:0,borderRight:'1px solid #243447',display:'flex',alignItems:'center',padding:'0 8px',gap:6}}>
                       <button onClick={()=>toggleCollapse(group.id)} style={{background:'none',border:'none',cursor:'pointer',color:'#C8973A',fontSize:14,padding:'2px 4px',lineHeight:1,flexShrink:0}}>
                         {isCollapsed?'▶':'▼'}
@@ -934,50 +1118,79 @@ function Roadmap({items,projects}:{items:any[],projects:any[]}) {
                       <div style={{overflow:'hidden',flex:1}}>
                         <div style={{display:'flex',alignItems:'center',gap:5,marginBottom:2}}>
                           <span style={{fontSize:12,fontWeight:700,color:'#F4F6F8',overflow:'hidden',whiteSpace:'nowrap' as const,textOverflow:'ellipsis',maxWidth:120}}>{group.name}</span>
-                          <span style={{fontSize:9,color:ragColor,fontWeight:700,flexShrink:0}}>{group.rag==='Green'?'🟢':group.rag==='Amber'?'🟡':'🔴'}</span>
+                          <span style={{fontSize:10,color:rc,fontWeight:700,flexShrink:0}}>{group.rag==='Green'?'🟢':group.rag==='Amber'?'🟡':'🔴'}</span>
                           {group.violations.length>0&&<span style={{fontSize:9,color:'#E74C3C',flexShrink:0}}>⚠️</span>}
                         </div>
-                        <div style={{fontSize:9,color:'#7A8FA6'}}>{childItems.length} items · {group.status}</div>
+                        <div style={{fontSize:9,color:'#7A8FA6'}}>{childItems.length} committed · {group.status}</div>
                       </div>
                     </div>
-                    <div style={{flex:1,position:'relative',overflow:'hidden'}}>
+                    {/* Parent bar drop zone */}
+                    <div style={{flex:1,position:'relative',overflow:'hidden',display:'flex'}}>
                       <div style={{position:'absolute',top:0,bottom:0,left:todayPos(),width:2,background:'#E74C3C',opacity:0.5,zIndex:4}}/>
                       <CfShading/>
+                      {cols.map(col=>(
+                        <div key={col.key}
+                          style={{width:COL_W,flexShrink:0,height:'100%',position:'relative',zIndex:1,background:dragOverProject===group.name&&dragOverCol===col.key?'rgba(200,151,58,0.15)':'transparent',borderRight:'1px solid transparent'}}
+                          onDragOver={e=>handleGanttDragOver(e,group.name,col)}
+                          onDragLeave={handleGanttDragLeave}
+                          onDrop={e=>handleGanttDrop(e,group.name,col)}/>
+                      ))}
                       {group.bar_start&&group.bar_end&&(
-                        <div style={{position:'absolute',top:10,height:32,left:`${pct(group.bar_start)}%`,width:`${barW(group.bar_start,group.bar_end)}%`,background:groupColor,borderRadius:6,display:'flex',alignItems:'center',padding:'0 10px',fontSize:11,fontWeight:700,color:'#fff',overflow:'hidden',whiteSpace:'nowrap' as const,opacity:0.9,zIndex:2,minWidth:8,border:group.violations.length>0?'2px solid #E74C3C':'none'}}>
-                          {group.name}
+                        <div style={{position:'absolute',top:10,height:32,left:`${pct(group.bar_start)}%`,width:`${barW(group.bar_start,group.bar_end)}%`,background:rc,borderRadius:6,display:'flex',alignItems:'center',padding:'0 10px',fontSize:11,fontWeight:700,color:'#fff',overflow:'hidden',whiteSpace:'nowrap' as const,opacity:0.9,zIndex:2,minWidth:8,border:group.violations.length>0?'2px dashed rgba(255,255,255,0.5)':'none',boxShadow:`0 2px 8px ${rc}55`,pointerEvents:'none'}}>
+                          {group.rag==='Red'?'🔴':group.rag==='Amber'?'🟡':'🟢'} {group.name}
                           {group.violations.length>0&&<span style={{marginLeft:6,fontSize:10}}>⚠️</span>}
                         </div>
                       )}
                     </div>
                   </div>
 
-                  {/* Child item rows */}
+                  {/* Child rows */}
                   {!isCollapsed&&childItems.map((item,idx)=>{
                     const pclr=pc(item.priority)
-                    const itemColor=item.roadmap_color||groupColor
-                    const isViolation=group.violations.find(v=>v.id===item.id)
+                    const itemColor=item.roadmap_color||rc
+                    const isViolation=group.violations.find((v:any)=>v.id===item.id)
+                    const isDragging=draggingBar===item.id
                     return(
                       <div key={item.id} style={{display:'flex',height:ROW_H,borderBottom:'1px solid #243447',background:isViolation?'rgba(192,57,43,0.05)':idx%2===0?'#0D1B2A':'#111D2C'}}>
                         <div style={{width:220,flexShrink:0,borderRight:`1px solid ${isViolation?'rgba(192,57,43,0.3)':'#243447'}`,display:'flex',alignItems:'center',padding:'0 8px 0 28px',gap:6}}>
                           <div style={{width:1,height:20,background:'#243447',flexShrink:0}}/>
                           <span style={{background:pclr.bg,color:'#fff',padding:'1px 5px',borderRadius:3,fontSize:9,fontWeight:700,flexShrink:0}}>{item.priority}</span>
                           <div style={{overflow:'hidden'}}>
-                            <div style={{fontSize:11,color:isViolation?'#E74C3C':'#C8C8D4',overflow:'hidden',whiteSpace:'nowrap' as const,textOverflow:'ellipsis',maxWidth:130}}>{item.name} {isViolation&&'⚠️'}</div>
+                            <div style={{fontSize:11,color:isViolation?'#E74C3C':'#C8C8D4',overflow:'hidden',whiteSpace:'nowrap' as const,textOverflow:'ellipsis',maxWidth:130}}>{item.name}{isViolation?' ⚠️':''}</div>
                             <div style={{fontSize:9,color:'#7A8FA6',fontFamily:'monospace'}}>{item.item_id}</div>
                           </div>
                         </div>
-                        <div style={{flex:1,position:'relative',overflow:'hidden'}}>
+                        {/* Bar area with drop zones per column */}
+                        <div style={{flex:1,position:'relative',overflow:'hidden',display:'flex'}}>
                           <div style={{position:'absolute',top:0,bottom:0,left:todayPos(),width:2,background:'#E74C3C',opacity:0.3,zIndex:4}}/>
                           <CfShading/>
-                          {cols.map((col,ci)=><div key={col.key} style={{position:'absolute',top:0,bottom:0,left:`${ci/cols.length*100}%`,width:1,background:'#243447',opacity:0.3,zIndex:1}}/>)}
+                          {cols.map((col,ci)=>(
+                            <div key={col.key}
+                              style={{width:COL_W,flexShrink:0,height:'100%',borderRight:'1px solid rgba(36,52,71,0.4)',position:'relative',zIndex:1,background:dragOverProject===group.name&&dragOverCol===col.key?'rgba(200,151,58,0.1)':'transparent'}}
+                              onDragOver={e=>handleGanttDragOver(e,group.name,col)}
+                              onDragLeave={handleGanttDragLeave}
+                              onDrop={e=>handleGanttDrop(e,group.name,col)}/>
+                          ))}
+                          {/* The draggable bar */}
                           <div
-                            onClick={()=>{setEditing(item);setEditForm({name:item.name,start_date:item.start_date,end_date:item.end_date,roadmap_color:item.roadmap_color||groupColor})}}
-                            title={`${item.name}\n${item.start_date} → ${item.end_date}${isViolation?'\n⚠️ Outside project window!':''}`}
-                            style={{position:'absolute',top:6,height:28,left:`${pct(item.start_date)}%`,width:`${barW(item.start_date,item.end_date)}%`,background:isViolation?'#C0392B':itemColor,borderRadius:5,display:'flex',alignItems:'center',padding:'0 8px',fontSize:10,fontWeight:600,color:'#fff',overflow:'hidden',whiteSpace:'nowrap' as const,cursor:'pointer',zIndex:3,minWidth:4,opacity:0.85,border:isViolation?'1px dashed #ff6b6b':'none'}}
-                            onMouseEnter={e=>(e.currentTarget.style.opacity='1')}
-                            onMouseLeave={e=>(e.currentTarget.style.opacity='0.85')}>
-                            {item.name}
+                            style={{position:'absolute',top:6,height:28,left:`${pct(item.start_date)}%`,width:`${barW(item.start_date,item.end_date)}%`,zIndex:3,minWidth:8,opacity:isDragging?0.7:1}}
+                          >
+                            {/* Left resize handle */}
+                            <div
+                              onMouseDown={e=>startBarDrag(e,item,'left')}
+                              style={{position:'absolute',left:0,top:0,bottom:0,width:8,cursor:'ew-resize',zIndex:5,background:'rgba(255,255,255,0.15)',borderRadius:'4px 0 0 4px'}}/>
+                            {/* Main bar — drag to move */}
+                            <div
+                              onMouseDown={e=>startBarDrag(e,item,'move')}
+                              onClick={()=>{if(!draggingBar){setEditing(item);setEditForm({name:item.name,start_date:item.start_date,end_date:item.end_date,roadmap_color:item.roadmap_color||rc})}}}
+                              title={`${item.name}\n${item.start_date} → ${item.end_date}\nDrag to move · Drag edges to resize · Drag to new row to reassign`}
+                              style={{position:'absolute',left:0,right:0,top:0,bottom:0,background:isViolation?'#C0392B':itemColor,borderRadius:5,display:'flex',alignItems:'center',padding:'0 12px',fontSize:10,fontWeight:600,color:'#fff',overflow:'hidden',whiteSpace:'nowrap' as const,cursor:draggingBar===item.id?'grabbing':'grab',border:isViolation?'1px dashed #ff6b6b':'none',boxShadow:isDragging?'0 4px 12px rgba(0,0,0,0.4)':'none'}}>
+                              {item.name}
+                            </div>
+                            {/* Right resize handle */}
+                            <div
+                              onMouseDown={e=>startBarDrag(e,item,'right')}
+                              style={{position:'absolute',right:0,top:0,bottom:0,width:8,cursor:'ew-resize',zIndex:5,background:'rgba(255,255,255,0.15)',borderRadius:'0 4px 4px 0'}}/>
                           </div>
                         </div>
                       </div>
@@ -987,7 +1200,7 @@ function Roadmap({items,projects}:{items:any[],projects:any[]}) {
               )
             })}
 
-            {/* Orphaned items — no project assigned */}
+            {/* Orphaned items */}
             {orphans.length>0&&(
               <div>
                 <div style={{display:'flex',height:PARENT_H,background:'rgba(122,143,166,0.08)',borderBottom:'1px solid #243447',borderTop:'2px solid #243447',position:'sticky',top:36,zIndex:5}}>
@@ -1000,12 +1213,19 @@ function Roadmap({items,projects}:{items:any[],projects:any[]}) {
                       <div style={{fontSize:10,color:'#7A8FA6'}}>{orphans.length} items</div>
                     </div>
                   </div>
-                  <div style={{flex:1,position:'relative',overflow:'hidden'}}>
+                  <div style={{flex:1,position:'relative',overflow:'hidden',display:'flex'}}>
                     <div style={{position:'absolute',top:0,bottom:0,left:todayPos(),width:2,background:'#E74C3C',opacity:0.3,zIndex:4}}/>
+                    {cols.map(col=>(
+                      <div key={col.key} style={{width:COL_W,flexShrink:0,height:'100%'}}
+                        onDragOver={e=>handleGanttDragOver(e,'',col)}
+                        onDragLeave={handleGanttDragLeave}
+                        onDrop={e=>handleGanttDrop(e,'',col)}/>
+                    ))}
                   </div>
                 </div>
                 {!getCollapsed()['__orphans']&&orphans.map((item,idx)=>{
                   const pclr=pc(item.priority)
+                  const isDragging=draggingBar===item.id
                   return(
                     <div key={item.id} style={{display:'flex',height:ROW_H,borderBottom:'1px solid #243447',background:idx%2===0?'#0D1B2A':'#111D2C'}}>
                       <div style={{width:220,flexShrink:0,borderRight:'1px solid #243447',display:'flex',alignItems:'center',padding:'0 8px 0 28px',gap:6}}>
@@ -1015,49 +1235,22 @@ function Roadmap({items,projects}:{items:any[],projects:any[]}) {
                           <div style={{fontSize:9,color:'#7A8FA6',fontFamily:'monospace'}}>{item.item_id}</div>
                         </div>
                       </div>
-                      <div style={{flex:1,position:'relative',overflow:'hidden'}}>
+                      <div style={{flex:1,position:'relative',overflow:'hidden',display:'flex'}}>
                         <div style={{position:'absolute',top:0,bottom:0,left:todayPos(),width:2,background:'#E74C3C',opacity:0.3,zIndex:4}}/>
                         <CfShading/>
-                        {cols.map((col,ci)=><div key={col.key} style={{position:'absolute',top:0,bottom:0,left:`${ci/cols.length*100}%`,width:1,background:'#243447',opacity:0.3,zIndex:1}}/>)}
-                        <div
-                          onClick={()=>{setEditing(item);setEditForm({name:item.name,start_date:item.start_date,end_date:item.end_date,roadmap_color:item.roadmap_color||'#7A8FA6'})}}
-                          style={{position:'absolute',top:6,height:28,left:`${pct(item.start_date)}%`,width:`${barW(item.start_date,item.end_date)}%`,background:'#7A8FA6',borderRadius:5,display:'flex',alignItems:'center',padding:'0 8px',fontSize:10,fontWeight:600,color:'#fff',overflow:'hidden',whiteSpace:'nowrap' as const,cursor:'pointer',zIndex:3,minWidth:4,opacity:0.7}}>
-                          {item.name}
+                        {cols.map((col,ci)=>(
+                          <div key={col.key} style={{width:COL_W,flexShrink:0,height:'100%',borderRight:'1px solid rgba(36,52,71,0.4)'}}
+                            onDragOver={e=>handleGanttDragOver(e,'',col)}
+                            onDragLeave={handleGanttDragLeave}
+                            onDrop={e=>handleGanttDrop(e,'',col)}/>
+                        ))}
+                        <div style={{position:'absolute',top:6,height:28,left:`${pct(item.start_date)}%`,width:`${barW(item.start_date,item.end_date)}%`,zIndex:3,minWidth:8,opacity:isDragging?0.7:1}}>
+                          <div onMouseDown={e=>startBarDrag(e,item,'left')} style={{position:'absolute',left:0,top:0,bottom:0,width:8,cursor:'ew-resize',zIndex:5,background:'rgba(255,255,255,0.15)',borderRadius:'4px 0 0 4px'}}/>
+                          <div onMouseDown={e=>startBarDrag(e,item,'move')} style={{position:'absolute',left:0,right:0,top:0,bottom:0,background:'#7A8FA6',borderRadius:5,display:'flex',alignItems:'center',padding:'0 12px',fontSize:10,fontWeight:600,color:'#fff',overflow:'hidden',whiteSpace:'nowrap' as const,cursor:'grab'}}>
+                            {item.name}
+                          </div>
+                          <div onMouseDown={e=>startBarDrag(e,item,'right')} style={{position:'absolute',right:0,top:0,bottom:0,width:8,cursor:'ew-resize',zIndex:5,background:'rgba(255,255,255,0.15)',borderRadius:'0 4px 4px 0'}}/>
                         </div>
-                      </div>
-                    </div>
-                  )
-                })}
-              </div>
-            )}
-
-            {/* No dates */}
-            {noDates.length>0&&(
-              <div>
-                <div style={{display:'flex',height:40,background:'rgba(122,143,166,0.05)',borderBottom:'1px solid #243447',borderTop:'1px solid #243447'}}>
-                  <div style={{width:220,flexShrink:0,borderRight:'1px solid #243447',display:'flex',alignItems:'center',padding:'0 8px',gap:8}}>
-                    <button onClick={()=>toggleCollapse('__nodates')} style={{background:'none',border:'none',cursor:'pointer',color:'#7A8FA6',fontSize:12,padding:'2px 4px',lineHeight:1,flexShrink:0}}>
-                      {getCollapsed()['__nodates']?'▶':'▼'}
-                    </button>
-                    <div style={{fontSize:11,fontWeight:700,color:'#7A8FA6'}}>No Dates ({noDates.length})</div>
-                  </div>
-                  <div style={{flex:1,display:'flex',alignItems:'center',padding:'0 16px'}}>
-                    <span style={{fontSize:11,color:'#7A8FA6',fontStyle:'italic'}}>Set start/end dates in backlog to place on roadmap</span>
-                  </div>
-                </div>
-                {!getCollapsed()['__nodates']&&noDates.map((item,idx)=>{
-                  const pclr=pc(item.priority)
-                  return(
-                    <div key={item.id} style={{display:'flex',height:ROW_H,borderBottom:'1px solid #243447',background:idx%2===0?'#0D1B2A':'#111D2C'}}>
-                      <div style={{width:220,flexShrink:0,borderRight:'1px solid #243447',display:'flex',alignItems:'center',padding:'0 8px 0 28px',gap:6}}>
-                        <span style={{background:pclr.bg,color:'#fff',padding:'1px 5px',borderRadius:3,fontSize:9,fontWeight:700}}>{item.priority}</span>
-                        <div style={{overflow:'hidden'}}>
-                          <div style={{fontSize:11,color:'#7A8FA6',overflow:'hidden',whiteSpace:'nowrap' as const,textOverflow:'ellipsis',maxWidth:150}}>{item.name}</div>
-                          <div style={{fontSize:9,color:'#7A8FA6',fontFamily:'monospace'}}>{item.item_id}</div>
-                        </div>
-                      </div>
-                      <div style={{flex:1,display:'flex',alignItems:'center',padding:'0 16px'}}>
-                        <span style={{fontSize:10,color:'#7A8FA6',fontStyle:'italic'}}>— no dates set</span>
                       </div>
                     </div>
                   )
@@ -1075,13 +1268,60 @@ function Roadmap({items,projects}:{items:any[],projects:any[]}) {
             </div>
           </div>
         </div>
+
+        {/* Backlog panel — right, collapsible */}
+        <div style={{borderLeft:'1px solid #243447',background:'#162436',flexShrink:0,display:'flex',flexDirection:'column',transition:'width 0.2s',width:backlogOpen?260:32,overflow:'hidden'}}>
+          <button onClick={()=>setBacklogOpen(o=>!o)}
+            style={{background:'none',border:'none',borderBottom:'1px solid #243447',cursor:'pointer',padding:'10px 8px',display:'flex',alignItems:'center',gap:6,color:'#C8973A',fontSize:11,fontWeight:700,letterSpacing:1,whiteSpace:'nowrap' as const,width:'100%'}}>
+            <span style={{transform:backlogOpen?'rotate(-90deg)':'rotate(90deg)',transition:'transform 0.2s',display:'inline-block'}}>◀</span>
+            {backlogOpen&&`📋 BACKLOG (${uncommitted.length})`}
+          </button>
+          {backlogOpen&&(
+            <div style={{flex:1,overflowY:'auto',padding:10}}>
+              <div style={{fontSize:10,color:'#7A8FA6',marginBottom:8,lineHeight:1.5}}>
+                Drag items onto a project row to commit them to the roadmap
+              </div>
+              {uncommitted.length===0&&(
+                <div style={{textAlign:'center',padding:20,color:'#7A8FA6',fontSize:11}}>
+                  <div style={{fontSize:20,marginBottom:8}}>🎯</div>
+                  All items committed!
+                </div>
+              )}
+              {uncommitted.map(item=>{
+                const pclr=pc(item.priority)
+                const r=rice(item)
+                return(
+                  <div
+                    key={item.id}
+                    draggable
+                    onDragStart={e=>{e.dataTransfer.setData('itemId',item.id);e.dataTransfer.effectAllowed='copy'}}
+                    style={{background:'#1E3048',border:'1px solid #243447',borderLeft:`3px solid ${pclr.bg}`,borderRadius:6,padding:'8px 10px',marginBottom:6,cursor:'grab',userSelect:'none'}}
+                    onMouseEnter={e=>(e.currentTarget.style.borderColor='#C8973A')}
+                    onMouseLeave={e=>(e.currentTarget.style.borderColor='#243447')}>
+                    <div style={{display:'flex',alignItems:'center',gap:5,marginBottom:3}}>
+                      <span style={{background:pclr.bg,color:'#fff',padding:'1px 5px',borderRadius:3,fontSize:9,fontWeight:700}}>{item.priority}</span>
+                      <span style={{fontSize:9,color:'#7A8FA6',fontFamily:'monospace'}}>{item.item_id}</span>
+                      {item.effort&&<span style={{fontSize:9,color:'#7A8FA6',marginLeft:'auto'}}>{item.effort}</span>}
+                    </div>
+                    <div style={{fontSize:11,color:'#F4F6F8',lineHeight:1.3,marginBottom:3}}>{item.name}</div>
+                    <div style={{display:'flex',gap:8,fontSize:9,color:'#7A8FA6'}}>
+                      {item.wsjf&&<span>WSJF: <span style={{color:'#E8B95A',fontWeight:700}}>{parseFloat(item.wsjf).toFixed(1)}</span></span>}
+                      {r&&<span>RICE: <span style={{color:'#27AE60',fontWeight:700}}>{r}</span></span>}
+                      {item.swimlane&&<span style={{marginLeft:'auto'}}>{item.swimlane}</span>}
+                    </div>
+                  </div>
+                )
+              })}
+            </div>
+          )}
+        </div>
       </div>
 
-      {/* Edit item modal */}
+      {/* Edit modal */}
       {editing&&(
         <div style={{position:'fixed',inset:0,background:'rgba(0,0,0,0.7)',zIndex:200,display:'flex',alignItems:'center',justifyContent:'center'}}>
           <div style={{background:'#162436',border:'1px solid #243447',borderRadius:12,padding:28,width:440}}>
-            <div style={{fontSize:16,fontWeight:700,color:'#F4F6F8',marginBottom:4}}>Edit Item Dates</div>
+            <div style={{fontSize:16,fontWeight:700,color:'#F4F6F8',marginBottom:4}}>Edit Item</div>
             <div style={{fontSize:10,color:'#7A8FA6',fontFamily:'monospace',marginBottom:20}}>{editing.item_id} · {editing.parent_project||'No project'}</div>
             <div style={{marginBottom:12}}>
               <div style={{fontSize:11,color:'#7A8FA6',marginBottom:4}}>Name</div>
@@ -1097,13 +1337,33 @@ function Roadmap({items,projects}:{items:any[],projects:any[]}) {
                 <input type="date" value={editForm.end_date} onChange={e=>setEditForm(p=>({...p,end_date:e.target.value}))} style={{width:'100%',background:'#1E3048',color:'#F4F6F8',border:'1px solid #243447',borderRadius:6,padding:'7px 10px',fontSize:12,boxSizing:'border-box' as const}}/>
               </div>
             </div>
+            <div style={{marginBottom:12}}>
+              <div style={{fontSize:11,color:'#7A8FA6',marginBottom:4}}>Assign to Project</div>
+              <select value={editing.parent_project||''} onChange={async e=>{
+                const v=e.target.value
+                setEditing({...editing,parent_project:v})
+                setItems(items.map(i=>i.id===editing.id?{...i,parent_project:v}:i))
+                await supabase.from('items').update({parent_project:v}).eq('id',editing.id)
+              }} style={{width:'100%',background:'#1E3048',color:'#F4F6F8',border:'1px solid #243447',borderRadius:6,padding:'7px 8px',fontSize:12}}>
+                <option value="">— No project —</option>
+                {projects.map(p=><option key={p.id} value={p.name}>{p.name}</option>)}
+              </select>
+            </div>
             <div style={{marginBottom:20}}>
               <div style={{fontSize:11,color:'#7A8FA6',marginBottom:8}}>Bar Color</div>
-              <div style={{display:'flex',gap:8,flexWrap:'wrap'}}>
+              <div style={{display:'flex',gap:8,flexWrap:'wrap' as const}}>
                 {COLORS.map(c=><div key={c} onClick={()=>setEditForm(p=>({...p,roadmap_color:c}))} style={{width:28,height:28,borderRadius:6,background:c,cursor:'pointer',border:editForm.roadmap_color===c?'3px solid #F4F6F8':'3px solid transparent'}}/>)}
               </div>
             </div>
             <div style={{display:'flex',gap:8,justifyContent:'flex-end'}}>
+              <button onClick={()=>{
+                // Remove from roadmap
+                if(confirm('Remove from roadmap? This will clear start/end dates.')) {
+                  supabase.from('items').update({start_date:null,end_date:null}).eq('id',editing.id)
+                  setItems(items.map(i=>i.id===editing.id?{...i,start_date:null,end_date:null}:i))
+                  setEditing(null)
+                }
+              }} style={{...sel,color:'#E74C3C',border:'1px solid #E74C3C',fontSize:11}}>Remove from Roadmap</button>
               <button onClick={()=>setEditing(null)} style={sel}>Cancel</button>
               <button onClick={saveEdit} disabled={saving} style={{background:'#C8973A',color:'#0D1B2A',border:'none',borderRadius:6,padding:'8px 20px',fontWeight:700,cursor:'pointer',fontSize:13,opacity:saving?0.7:1}}>{saving?'Saving...':'Save'}</button>
             </div>
@@ -1130,11 +1390,11 @@ function Roadmap({items,projects}:{items:any[],projects:any[]}) {
             <div style={{background:'#1E3048',borderRadius:8,padding:12,marginBottom:16,fontSize:12,color:'#7A8FA6'}}>
               <div style={{display:'flex',justifyContent:'space-between',marginBottom:4}}>
                 <span>Current window</span>
-                <span style={{color:'#E74C3C',fontWeight:700}}>{new Date(codeFreezeStart).toLocaleDateString('default',{month:'short',day:'numeric',year:'numeric'})} → {new Date(codeFreezeEnd).toLocaleDateString('default',{month:'short',day:'numeric',year:'numeric'})}</span>
+                <span style={{color:'#E74C3C',fontWeight:700}}>{new Date(codeFreezeStart+'T12:00:00').toLocaleDateString('default',{month:'short',day:'numeric',year:'numeric'})} → {new Date(codeFreezeEnd+'T12:00:00').toLocaleDateString('default',{month:'short',day:'numeric',year:'numeric'})}</span>
               </div>
               <div style={{display:'flex',justifyContent:'space-between'}}>
                 <span>Duration</span>
-                <span style={{color:'#F4F6F8',fontWeight:700}}>{Math.round((new Date(codeFreezeEnd).getTime()-new Date(codeFreezeStart).getTime())/(1000*60*60*24))} days</span>
+                <span style={{color:'#F4F6F8',fontWeight:700}}>{Math.round((new Date(codeFreezeEnd+'T12:00:00').getTime()-new Date(codeFreezeStart+'T12:00:00').getTime())/(1000*60*60*24))} days</span>
               </div>
             </div>
             <div style={{fontSize:11,color:'#7A8FA6',marginBottom:8}}>Quick set</div>
@@ -1153,95 +1413,6 @@ function Roadmap({items,projects}:{items:any[],projects:any[]}) {
     </div>
   )
 }
-
-// ── SCORING ───────────────────────────────────────────────────────────────
-function Scoring({items}:{items:any[]}) {
-  const [session,setSession]=useState(null)
-  const [scores,setScores]=useState({})
-  const [method,setMethod]=useState('wsjf')
-  const [ft,setFt]=useState('All')
-  const [cp,setCp]=useState(false)
-  const scorers=['Jos Nazareth','Kurt Lipson','Shaina Groves','Cara Trevino','Nick Mancini','Kirty Ginman']
-  const sc2=items.filter(i=>i.priority!=='P1'&&i.priority!=='P2'&&(ft==='All'||i.team===ft))
-  function avg(id,field){
-    const s=scores[id];if(!s) return null
-    const v=Object.values(s).map((x:any)=>parseFloat(x[field])).filter(x=>!isNaN(x))
-    if(!v.length) return null
-    return(v.reduce((a,b)=>a+b,0)/v.length).toFixed(1)
-  }
-  if(!session) return(
-    <div style={{display:'flex',alignItems:'center',justifyContent:'center',height:'100%',flexDirection:'column',gap:24}}>
-      <div style={{fontSize:24,fontWeight:700,color:'#F4F6F8'}}>Start a Scoring Session</div>
-      <div style={{color:'#7A8FA6',maxWidth:440,textAlign:'center' as const,lineHeight:1.6}}>Configure your session then share the link with stakeholders.</div>
-      <div style={{background:'#162436',border:'1px solid #243447',borderRadius:12,padding:28,width:400,display:'flex',flexDirection:'column',gap:16}}>
-        <div>
-          <div style={{fontSize:11,color:'#7A8FA6',marginBottom:6,letterSpacing:1}}>SCORING METHOD</div>
-          <div style={{display:'flex',gap:8,flexWrap:'wrap'}}>
-            {[['wsjf','WSJF'],['rice','RICE'],['vote','Simple Vote'],['combo','WSJF + RICE']].map(([k,label])=>(
-              <button key={k} onClick={()=>setMethod(k)} style={{background:method===k?'#C8973A':'#1E3048',color:method===k?'#0D1B2A':'#7A8FA6',border:`1px solid ${method===k?'#C8973A':'#243447'}`,borderRadius:6,padding:'6px 12px',fontSize:12,cursor:'pointer',fontWeight:method===k?700:400}}>{label}</button>
-            ))}
-          </div>
-        </div>
-        <select value={ft} onChange={e=>setFt(e.target.value)} style={{...sel,width:'100%'}}><option value="All">All Teams</option>{TEAMS.map(t=><option key={t}>{t}</option>)}</select>
-        <div style={{background:'#1E3048',borderRadius:8,padding:12,fontSize:12,color:'#7A8FA6'}}>{sc2.length} items · P1/P2 excluded</div>
-        <button onClick={()=>setSession({method,startedAt:new Date().toLocaleString()})} style={{background:'#C8973A',color:'#0D1B2A',border:'none',borderRadius:8,padding:12,fontSize:14,fontWeight:700,cursor:'pointer'}}>Start Session →</button>
-      </div>
-    </div>
-  )
-  return(
-    <div style={{display:'flex',flexDirection:'column',height:'100%'}}>
-      <div style={{display:'flex',alignItems:'center',gap:16,padding:'12px 20px',borderBottom:'1px solid #243447',background:'#162436'}}>
-        <span style={{fontSize:11,color:'#C8973A',fontWeight:700,letterSpacing:1}}>ACTIVE SESSION</span>
-        <span style={{fontSize:12,color:'#7A8FA6'}}>{session.method.toUpperCase()} · {session.startedAt}</span>
-        <div style={{marginLeft:'auto',display:'flex',gap:8}}>
-          <button onClick={()=>{setCp(true);setTimeout(()=>setCp(false),2000)}} style={{...sel,background:cp?'#27AE60':'#1E3048',color:cp?'#fff':'#7A8FA6'}}>{cp?'✓ Copied!':'📋 Copy Link'}</button>
-          <button onClick={()=>setSession(null)} style={{...sel,color:'#E74C3C',border:'1px solid #E74C3C'}}>End</button>
-        </div>
-      </div>
-      <div style={{overflowX:'auto',overflowY:'auto',flex:1}}>
-        <table style={{width:'100%',borderCollapse:'collapse',minWidth:800}}>
-          <thead style={{position:'sticky',top:0,zIndex:5,background:'#162436'}}>
-            <tr>
-              <th style={{...TH,minWidth:200}}>Item</th>
-              <th style={{...TH,width:70}}>Pri</th>
-              {scorers.map(s=><th key={s} style={{...TH,minWidth:80,textAlign:'center' as const,color:'#C8973A'}}>{s.split(' ')[0]}</th>)}
-              <th style={{...TH,width:60,textAlign:'center' as const}}>Avg BV</th>
-              <th style={{...TH,width:60,textAlign:'center' as const}}>Avg Urg</th>
-              <th style={{...TH,width:60,textAlign:'center' as const,color:'#27AE60'}}>WSJF</th>
-            </tr>
-          </thead>
-          <tbody>
-            {sc2.map((item,idx)=>{
-              const ab=avg(item.id,'bv'),au=avg(item.id,'urg')
-              const ew=item.effort==='S'?1:item.effort==='M'?2:item.effort==='L'?3:5
-              const wsjf=ab&&au?((parseFloat(ab)+parseFloat(au))/ew).toFixed(2):null
-              const pclr=pc(item.priority)
-              return(
-                <tr key={item.id} style={{background:idx%2===0?'#0D1B2A':'#162436'}}>
-                  <td style={{padding:'8px 12px',borderBottom:'1px solid #243447'}}><div style={{fontSize:11,color:'#7A8FA6',fontFamily:'monospace'}}>{item.item_id}</div><div style={{fontSize:12,color:'#F4F6F8',marginTop:2}}>{item.name}</div></td>
-                  <td style={{padding:'8px 12px',borderBottom:'1px solid #243447'}}><span style={{background:pclr.bg,color:'#fff',padding:'2px 8px',borderRadius:4,fontSize:11,fontWeight:700}}>{item.priority}</span></td>
-                  {scorers.map(scorer=>(
-                    <td key={scorer} style={{padding:'4px 6px',borderBottom:'1px solid #243447',textAlign:'center' as const}}>
-                      <div style={{display:'flex',gap:3,justifyContent:'center'}}>
-                        {['bv','urg'].map(field=>(
-                          <input key={field} type="number" min={1} max={5} value={scores[item.id]?.[scorer]?.[field]||''} onChange={e=>setScores(prev=>({...prev,[item.id]:{...(prev[item.id]||{}),[scorer]:{...(prev[item.id]?.[scorer]||{}),[field]:e.target.value}}}))} style={{width:30,background:'#1E3048',color:'#F4F6F8',border:'1px solid #243447',borderRadius:4,padding:3,textAlign:'center' as const,fontSize:12}} placeholder="—"/>
-                        ))}
-                      </div>
-                    </td>
-                  ))}
-                  <td style={{padding:'8px 6px',borderBottom:'1px solid #243447',textAlign:'center' as const,color:'#E8B95A',fontWeight:700}}>{ab||'—'}</td>
-                  <td style={{padding:'8px 6px',borderBottom:'1px solid #243447',textAlign:'center' as const,color:'#E8B95A',fontWeight:700}}>{au||'—'}</td>
-                  <td style={{padding:'8px 6px',borderBottom:'1px solid #243447',textAlign:'center' as const,color:wsjf?'#27AE60':'#7A8FA6',fontWeight:700,fontSize:13}}>{wsjf||'—'}</td>
-                </tr>
-              )
-            })}
-          </tbody>
-        </table>
-      </div>
-    </div>
-  )
-}
-
 // ── STAKEHOLDER ───────────────────────────────────────────────────────────
 function Stakeholder({items,projects}:{items:any[],projects:any[]}) {
   const [fl,setFl]=useState({})
@@ -1400,7 +1571,7 @@ export default function PerfectGame() {
       <div style={{flex:1,overflow:'hidden'}}>
         {activeTab==='backlog'&&<Backlog items={items} setItems={setItems} projects={projects}/>}
         {activeTab==='projects'&&<Projects items={items} projects={projects} setProjects={setProjects}/>}
-        {activeTab==='roadmap'&&<Roadmap items={items} projects={projects}/>}
+        {activeTab==='roadmap'&&<Roadmap items={items} setItems={setItems} projects={projects}/>}
         {activeTab==='scoring'&&<Scoring items={items}/>}
         {activeTab==='stakeholder'&&<Stakeholder items={items} projects={projects}/>}
       </div>
