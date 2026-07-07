@@ -13,7 +13,7 @@ const T = {
 
 const PRIORITIES=['P1','P2','P3','P4','Backlog']
 const STATUSES=['Accepted','Testing','Awaiting Vendor Deliverable','Need Requirements','Under Review','In Progress','Will Not Implement','Ready to Score','Triage']
-const PROJECT_STATUSES=['Planning','In Progress','Testing','On Hold','Complete','Cancelled']
+const PROJECT_STATUSES=['Queued','Planning','In Progress','Testing','On Hold','Complete','Cancelled']
 const TEAMS=['Consumer Experience','Operational Efficiency']
 const EFFORTS=['S','M','L','XL']
 const REQUEST_TYPES=['Bug','Tech Debt','Enhancement','Strategic Initiative','Business Request']
@@ -579,6 +579,7 @@ function Projects({items,setItems,projects,setProjects,milestones,setMilestones}
             ['🔴 Red',projects.filter(p=>p.rag==='Red').length,'#C0392B'],
             ['In Progress',projects.filter(p=>p.status==='In Progress').length,'#2E86AB'],
             ['Planning',projects.filter(p=>p.status==='Planning').length,'#8E44AD'],
+            ['Queued',projects.filter(p=>p.status==='Queued').length,'#7A8FA6'],
           ].map(([label,val,color])=>(
             <div key={label} style={{background:'#162436',border:'1px solid #243447',borderRadius:8,padding:'8px 14px',display:'flex',gap:8,alignItems:'center'}}>
               <span style={{fontSize:18,fontWeight:700,color}}>{val}</span>
