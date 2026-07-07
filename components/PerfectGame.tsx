@@ -31,6 +31,14 @@ function sc(s) {
   const m={'In Progress':'#27AE60','Testing':'#C8973A','Need Requirements':'#E74C3C','Under Review':'#E8B95A','Will Not Implement':'#7A8FA6','Ready to Score':'#8E44AD','Accepted':'#2E86AB'}
   return m[s]||'#7A8FA6'
 }
+// Sequential item IDs — max existing RTL number + 1. Random IDs collided with real data.
+function nextItemId(items){
+  const max=items.reduce((m,i)=>{
+    const match=/^RTL-(\d+)$/.exec(i.item_id||'')
+    return match?Math.max(m,parseInt(match[1],10)):m
+  },0)
+  return `RTL-${String(max+1).padStart(3,'0')}`
+}
 function rice(item) {
   if(!item.reach||!item.impact||!item.confidence) return null
   const ew=item.effort==='S'?1:item.effort==='M'?2:item.effort==='L'?3:5
@@ -133,7 +141,7 @@ function ProjectDetail({project,items,setItems,projects,milestones,setMilestones
   async function saveNewItem(){
     if(!newItem.name.trim()) return
     setSavingItem(true)
-    const iid=`RTL-${String(Math.floor(Math.random()*900)+100)}`
+    const iid=nextItemId(items)
     const{data,error}=await supabase.from('items').insert({
       item_id:iid,name:newItem.name,description:newItem.description,
       priority:newItem.priority,swimlane:newItem.swimlane,team:project.team,
@@ -248,7 +256,7 @@ function ProjectDetail({project,items,setItems,projects,milestones,setMilestones
             const isPast=d(m.date)&&d(m.date)<new Date()
             const daysAway=d(m.date)?Math.round((d(m.date).getTime()-new Date().getTime())/(1000*60*60*24)):null
             return(
-              <div key={m.id} style={{display:'flex',alignItems:'flex-start',gap:8,padding:'8px 10px',background:m.completed?'rgba(39,174,96,0.05)':'#162436',borderRadius:6,marginBottom:5,border:`1px solid ${m.completed?'rgba(39,174,96,0.2)':'#243447'}`,borderLeft:`3px solid ${m.color||'#C8973A'}`}}>
+              <div key={m.id} style={{display:'flex',alignItems:'flex-start',gap:8,padding:'8px 10px',background:m.completed?'rgba(39,174,96,0.05)':'#162436',borderRadius:6,marginBottom:5,borderTop:`1px solid ${m.completed?'rgba(39,174,96,0.2)':'#243447'}`,borderRight:`1px solid ${m.completed?'rgba(39,174,96,0.2)':'#243447'}`,borderBottom:`1px solid ${m.completed?'rgba(39,174,96,0.2)':'#243447'}`,borderLeft:`3px solid ${m.color||'#C8973A'}`}}>
                 <button onClick={()=>toggleMilestone(m)}
                   style={{width:16,height:16,borderRadius:3,border:`2px solid ${m.color||'#C8973A'}`,background:m.completed?m.color||'#C8973A':'transparent',cursor:'pointer',flexShrink:0,marginTop:2,display:'flex',alignItems:'center',justifyContent:'center',fontSize:10,color:'#fff'}}>
                   {m.completed&&'✓'}
@@ -285,7 +293,7 @@ function ProjectDetail({project,items,setItems,projects,milestones,setMilestones
             const pclr=pc(item.priority)
             const daysLeft=item.end_date?Math.round((new Date(item.end_date+'T12:00:00').getTime()-new Date().getTime())/(1000*60*60*24)):null
             return(
-              <div key={item.id} style={{background:'#162436',border:'1px solid #243447',borderLeft:`3px solid ${pclr.bg}`,borderRadius:6,padding:'8px 10px',marginBottom:6}}>
+              <div key={item.id} style={{background:'#162436',borderTop:'1px solid #243447',borderRight:'1px solid #243447',borderBottom:'1px solid #243447',borderLeft:`3px solid ${pclr.bg}`,borderRadius:6,padding:'8px 10px',marginBottom:6}}>
                 <div style={{display:'flex',alignItems:'center',gap:6,marginBottom:3,flexWrap:'wrap' as const}}>
                   <span style={{background:pclr.bg,color:'#fff',padding:'1px 5px',borderRadius:3,fontSize:9,fontWeight:700}}>{item.priority}</span>
                   <span style={{fontSize:10,color:'#7A8FA6',fontFamily:'monospace'}}>{item.item_id}</span>
@@ -375,7 +383,7 @@ function ProjectDetail({project,items,setItems,projects,milestones,setMilestones
           {noDates.map(item=>{
             const pclr=pc(item.priority)
             return(
-              <div key={item.id} style={{background:'#162436',border:'1px solid #243447',borderLeft:`3px solid ${pclr.bg}`,borderRadius:6,padding:'8px 10px',marginBottom:5}}>
+              <div key={item.id} style={{background:'#162436',borderTop:'1px solid #243447',borderRight:'1px solid #243447',borderBottom:'1px solid #243447',borderLeft:`3px solid ${pclr.bg}`,borderRadius:6,padding:'8px 10px',marginBottom:5}}>
                 <div style={{display:'flex',alignItems:'center',gap:6,flexWrap:'wrap' as const}}>
                   <span style={{background:pclr.bg,color:'#fff',padding:'1px 5px',borderRadius:3,fontSize:9,fontWeight:700}}>{item.priority}</span>
                   <span style={{fontSize:10,color:'#7A8FA6',fontFamily:'monospace'}}>{item.item_id}</span>
@@ -425,7 +433,7 @@ function Projects({items,setItems,projects,setProjects,milestones,setMilestones}
     if(filterTeam!=='All'&&p.team!==filterTeam) return false
     if(filterRAG!=='All'&&p.rag!==filterRAG) return false
     return true
-  }).sort((a,b)=>(PRIORITY_ORDER[a.priority]??4)-(PRIORITY_ORDER[b.priority]??4))
+  }).sort((a,b)=>(a.sort_order??999)-(b.sort_order??999)) // pure manual order — drag has full control; priority is a badge/filter, not a pin
 
   function d(str){return str?new Date(str+'T12:00:00'):null}
   function fmt(str){return d(str)?.toLocaleDateString('default',{month:'short',day:'numeric',year:'numeric'})||'—'}
@@ -441,15 +449,23 @@ function Projects({items,setItems,projects,setProjects,milestones,setMilestones}
   }
   async function dropProject(targetId){
     if(!dragId||dragId===targetId) return
-    const arr=[...filtered]
-    const fi=arr.findIndex(p=>p.id===dragId)
-    const ti=arr.findIndex(p=>p.id===targetId)
-    const [moved]=arr.splice(fi,1)
-    arr.splice(ti,0,moved)
-    const updated=arr.map((p,idx)=>({...p,sort_order:idx}))
-    setProjects(projects.map(p=>{const u=updated.find(u=>u.id===p.id);return u||p}))
+    const dragged=projects.find(p=>p.id===dragId)
+    if(!dragged){setDragId(null);setDragOverId(null);return}
+    const visible=filtered.map(p=>p.id)
+    const fi=visible.indexOf(dragId),ti=visible.indexOf(targetId)
+    if(fi===-1||ti===-1){setDragId(null);setDragOverId(null);return}
+    const down=fi<ti
+    // Splice into the GLOBAL project order; write only rows whose sort_order changed, in parallel
+    const all=[...projects].sort((a,b)=>(a.sort_order??999)-(b.sort_order??999))
+    const without=all.filter(p=>p.id!==dragId)
+    const gIdx=without.findIndex(p=>p.id===targetId)
+    const pos=gIdx===-1?without.length:(down?gIdx+1:gIdx)
+    const reordered=[...without.slice(0,pos),dragged,...without.slice(pos)]
+    const updated=reordered.map((p,idx)=>({...p,sort_order:idx}))
+    const changed=updated.filter(u=>{const o=projects.find(p=>p.id===u.id);return o&&o.sort_order!==u.sort_order})
+    setProjects(projects.map(p=>{const u=changed.find(u=>u.id===p.id);return u?{...p,sort_order:u.sort_order}:p}))
     setDragId(null);setDragOverId(null)
-    for(const p of updated) await supabase.from('projects').update({sort_order:p.sort_order}).eq('id',p.id)
+    Promise.all(changed.map(u=>supabase.from('projects').update({sort_order:u.sort_order}).eq('id',u.id))).then()
   }
 
   function getProjectItems(project){
@@ -586,6 +602,7 @@ function Projects({items,setItems,projects,setProjects,milestones,setMilestones}
             const progress=ps&&pe?Math.max(0,Math.min(100,Math.round((now.getTime()-ps.getTime())/(pe.getTime()-ps.getTime())*100))):0
             const isSelected=selectedProject?.id===project.id
 
+            const edgeClr=dragOverId===project.id?'#C8973A':isSelected?'#C8973A':violations.length>0?'rgba(192,57,43,0.5)':'#243447'
             return(
               <div key={project.id}
               draggable
@@ -594,9 +611,9 @@ function Projects({items,setItems,projects,setProjects,milestones,setMilestones}
               onDrop={()=>dropProject(project.id)}
               onDragEnd={()=>{setDragId(null);setDragOverId(null)}}
               onClick={()=>setSelectedProject(isSelected?null:project)}
-              style={{background:'#162436',border:`1px solid ${dragOverId===project.id?'#C8973A':isSelected?'#C8973A':violations.length>0?'rgba(192,57,43,0.5)':'#243447'}`,borderLeft:`4px solid ${project.color||'#2E86AB'}`,borderRadius:10,padding:'14px 18px',cursor:'grab',transition:'border-color 0.15s',opacity:dragId===project.id?0.5:1}}
-              onMouseEnter={e=>{if(!isSelected)e.currentTarget.style.borderColor='rgba(200,151,58,0.4)'}}
-              onMouseLeave={e=>{if(!isSelected)e.currentTarget.style.borderColor=dragOverId===project.id?'#C8973A':violations.length>0?'rgba(192,57,43,0.5)':'#243447'}}>
+              style={{background:'#162436',borderTop:`1px solid ${edgeClr}`,borderRight:`1px solid ${edgeClr}`,borderBottom:`1px solid ${edgeClr}`,borderLeft:`4px solid ${project.color||'#2E86AB'}`,borderRadius:10,padding:'14px 18px',cursor:'grab',transition:'border-color 0.15s',opacity:dragId===project.id?0.5:1}}
+              onMouseEnter={e=>{if(!isSelected){const c='rgba(200,151,58,0.4)';e.currentTarget.style.borderTopColor=c;e.currentTarget.style.borderRightColor=c;e.currentTarget.style.borderBottomColor=c}}}
+              onMouseLeave={e=>{if(!isSelected){const c=dragOverId===project.id?'#C8973A':violations.length>0?'rgba(192,57,43,0.5)':'#243447';e.currentTarget.style.borderTopColor=c;e.currentTarget.style.borderRightColor=c;e.currentTarget.style.borderBottomColor=c}}}>
                 {/* Header */}
                 <div style={{display:'flex',alignItems:'flex-start',gap:10,marginBottom:10}}>
                   <div style={{flex:1,minWidth:0}}>
@@ -986,7 +1003,7 @@ const sorted=[...items].sort((a,b)=>{
   async function addIt() {
     if(!ni.name.trim()) return
     setSav(true)
-    const iid=`RTL-${String(Math.floor(Math.random()*900)+100)}`
+    const iid=nextItemId(items)
     const{data,error}=await supabase.from('items').insert({item_id:iid,name:ni.name,description:ni.description,priority:ni.priority,swimlane:ni.swimlane,team:ni.team,effort:ni.effort,status:ni.status,request_type:ni.request_type,region:ni.region,vendor:ni.vendor,flagged:false,sort_order:items.length}).select().single()
     if(error){alert('Failed to add item: '+error.message);setSav(false);return}
     if(data) setItems([...items,data])
@@ -1337,6 +1354,13 @@ function Roadmap({items,setItems,projects,setProjects,milestones}:{items:any[],p
   const [discussionOpen,setDiscussionOpen]=useState(true)
   const [discussNoteId,setDiscussNoteId]=useState(null)
   const [discussNoteDraft,setDiscussNoteDraft]=useState('')
+  const [detailItem,setDetailItem]=useState(null)
+
+  async function updItem(id,field,val){
+    setItems((prev:any[])=>prev.map(i=>i.id===id?{...i,[field]:val}:i))
+    setDetailItem((d:any)=>d&&d.id===id?{...d,[field]:val}:d)
+    await supabase.from('items').update({[field]:val}).eq('id',id)
+  }
   const [projectsPanelOpen,setProjectsPanelOpen]=useState(true)
   const [backlogSectionOpen,setBacklogSectionOpen]=useState(true)
   const [dragOverProject,setDragOverProject]=useState(null)
@@ -1927,9 +1951,9 @@ function Roadmap({items,setItems,projects,setProjects,milestones}:{items:any[],p
                       return(
                         <div key={project.id} draggable
                           onDragStart={e=>{e.dataTransfer.setData('projectId',project.id);e.dataTransfer.setData('projectName',project.name);e.dataTransfer.effectAllowed='copy'}}
-                          style={{background:'#1E3048',border:'1px solid #243447',borderLeft:`3px solid ${rc}`,borderRadius:6,padding:'8px 10px',marginBottom:6,cursor:'grab',userSelect:'none' as const,transition:'border-color 0.15s'}}
+                          style={{background:'#1E3048',borderTop:'1px solid #243447',borderRight:'1px solid #243447',borderBottom:'1px solid #243447',borderLeft:`3px solid ${rc}`,borderRadius:6,padding:'8px 10px',marginBottom:6,cursor:'grab',userSelect:'none' as const,transition:'border-color 0.15s'}}
                           onMouseEnter={e=>(e.currentTarget.style.borderColor='#2E86AB')}
-                          onMouseLeave={e=>(e.currentTarget.style.borderColor='#243447')}>
+                          onMouseLeave={e=>{e.currentTarget.style.borderTopColor='#243447';e.currentTarget.style.borderRightColor='#243447';e.currentTarget.style.borderBottomColor='#243447'}}>
                           <div style={{display:'flex',alignItems:'center',gap:5,marginBottom:3}}>
                             <span style={{background:pclr.bg,color:'#fff',padding:'1px 5px',borderRadius:3,fontSize:9,fontWeight:700}}>{project.priority}</span>
                             <span style={{fontSize:10,color:rc,fontWeight:700}}>{project.rag==='Green'?'🟢':project.rag==='Amber'?'🟡':'🔴'}</span>
@@ -1964,15 +1988,20 @@ function Roadmap({items,setItems,projects,setProjects,milestones}:{items:any[],p
                       return(
                         <div key={item.id} draggable
                           onDragStart={e=>{e.dataTransfer.setData('itemId',item.id);e.dataTransfer.effectAllowed='copy'}}
-                          style={{background:'#1E3048',border:'1px solid #243447',borderLeft:`3px solid ${pclr.bg}`,borderRadius:6,padding:'8px 10px',marginBottom:6,cursor:'grab',userSelect:'none' as const,transition:'border-color 0.15s'}}
-                          onMouseEnter={e=>(e.currentTarget.style.borderColor='#C8973A')}
-                          onMouseLeave={e=>(e.currentTarget.style.borderColor='#243447')}>
+                          onClick={()=>setDetailItem(item)}
+                          style={{background:'#1E3048',borderTop:'1px solid #243447',borderRight:'1px solid #243447',borderBottom:'1px solid #243447',borderLeft:`3px solid ${pclr.bg}`,borderRadius:6,padding:'8px 10px',marginBottom:6,cursor:'grab',userSelect:'none' as const,transition:'border-color 0.15s'}}
+                          onMouseEnter={e=>{e.currentTarget.style.borderTopColor='#C8973A';e.currentTarget.style.borderRightColor='#C8973A';e.currentTarget.style.borderBottomColor='#C8973A'}}
+                          onMouseLeave={e=>{e.currentTarget.style.borderTopColor='#243447';e.currentTarget.style.borderRightColor='#243447';e.currentTarget.style.borderBottomColor='#243447'}}>
                           <div style={{display:'flex',alignItems:'center',gap:5,marginBottom:3}}>
                             <span style={{background:pclr.bg,color:'#fff',padding:'1px 5px',borderRadius:3,fontSize:9,fontWeight:700}}>{item.priority}</span>
                             <span style={{fontSize:9,color:'#7A8FA6',fontFamily:'monospace'}}>{item.item_id}</span>
                             {item.effort&&<span style={{fontSize:9,color:'#7A8FA6',marginLeft:'auto'}}>{item.effort}</span>}
                           </div>
                           <div style={{fontSize:11,color:'#F4F6F8',lineHeight:1.3,marginBottom:3}}>{item.name}</div>
+                          <div style={{display:'flex',alignItems:'center',gap:6,marginBottom:3,flexWrap:'wrap' as const}}>
+                            {item.status&&<span style={{fontSize:9,fontWeight:700,color:sc(item.status)}}>{item.status}</span>}
+                            {item.vendor_delivery_date&&<span style={{fontSize:9,color:'#7A8FA6'}}>🚚 {item.vendor_delivery_date}</span>}
+                          </div>
                           <div style={{display:'flex',gap:8,fontSize:9,color:'#7A8FA6'}}>
                             {item.wsjf&&<span>WSJF: <span style={{color:'#E8B95A',fontWeight:700}}>{parseFloat(item.wsjf).toFixed(1)}</span></span>}
                             {r&&<span>RICE: <span style={{color:'#27AE60',fontWeight:700}}>{r}</span></span>}
@@ -2095,6 +2124,37 @@ function Roadmap({items,setItems,projects,setProjects,milestones}:{items:any[],p
           </div>
         </div>
       )}
+      {/* Backlog item detail modal */}
+      {detailItem&&(
+        <div onClick={()=>setDetailItem(null)} style={{position:'fixed',inset:0,background:'rgba(0,0,0,0.6)',zIndex:200,display:'flex',alignItems:'center',justifyContent:'center'}}>
+          <div onClick={e=>e.stopPropagation()} style={{background:'#162436',border:'1px solid #243447',borderRadius:12,width:520,maxWidth:'92vw',maxHeight:'85vh',overflowY:'auto',padding:20}}>
+            <div style={{display:'flex',alignItems:'center',gap:8,marginBottom:4}}>
+              <span style={{background:pc(detailItem.priority).bg,color:'#fff',padding:'2px 8px',borderRadius:4,fontSize:11,fontWeight:700}}>{detailItem.priority}</span>
+              <span style={{fontSize:12,color:'#7A8FA6',fontFamily:'monospace'}}>{detailItem.item_id}</span>
+              {detailItem.status&&<span style={{fontSize:11,fontWeight:700,color:sc(detailItem.status)}}>{detailItem.status}</span>}
+              {detailItem.committed_priority!=null&&<span style={{fontSize:11,color:'#C8973A',fontWeight:700}}>Rank {detailItem.committed_priority}</span>}
+              <button onClick={()=>setDetailItem(null)} style={{marginLeft:'auto',background:'none',border:'none',color:'#7A8FA6',fontSize:18,cursor:'pointer',lineHeight:1}}>✕</button>
+            </div>
+            <div style={{display:'flex',flexWrap:'wrap' as const,gap:6,margin:'8px 0 14px'}}>
+              {[['Swimlane',detailItem.swimlane],['Team',detailItem.team],['Effort',detailItem.effort],['Type',detailItem.request_type],['Region',detailItem.region],['Vendor',detailItem.vendor],['Project',detailItem.parent_project],['WSJF',detailItem.wsjf?parseFloat(detailItem.wsjf).toFixed(1):null],['RICE',rice(detailItem)]].filter(([,v])=>v).map(([k,v])=>(
+                <span key={k as string} style={{background:'#1E3048',border:'1px solid #243447',borderRadius:4,padding:'3px 8px',fontSize:10,color:'#7A8FA6'}}>{k}: <span style={{color:'#F4F6F8',fontWeight:600}}>{v}</span></span>
+              ))}
+            </div>
+            <div style={{display:'flex',flexDirection:'column' as const,gap:12}}>
+              <PanelField selected={detailItem} upd={updItem} label="Item Name" field="name"/>
+              <PanelField selected={detailItem} upd={updItem} label="Description" field="description" type="textarea"/>
+              <div style={{display:'grid',gridTemplateColumns:'1fr 1fr',gap:12}}>
+                <PanelField selected={detailItem} upd={updItem} label="Owner" field="owner"/>
+                <PanelField selected={detailItem} upd={updItem} label="Vendor Delivery Date" field="vendor_delivery_date" type="date"/>
+                <PanelField selected={detailItem} upd={updItem} label="Start Date" field="start_date" type="date"/>
+                <PanelField selected={detailItem} upd={updItem} label="End Date" field="end_date" type="date"/>
+              </div>
+              <PanelField selected={detailItem} upd={updItem} label="Dependency" field="dependency"/>
+              <PanelField selected={detailItem} upd={updItem} label="Notes" field="notes" type="textarea"/>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   )
 }
@@ -2185,6 +2245,115 @@ function Scoring({items}:{items:any[]}) {
   )
 }
 // ── STAKEHOLDER ───────────────────────────────────────────────────────────
+// ── TEAMS ─────────────────────────────────────────────────────────────────
+// Read-only per-team work queue. All editing happens in Backlog/Projects/Roadmap.
+function Teams({items,projects}:{items:any[],projects:any[]}) {
+  const teams=[...new Set(items.map(i=>i.team).filter(Boolean))].sort() as string[]
+  const [team,setTeam]=useState(teams[0]||'')
+  const [showDone,setShowDone]=useState(false)
+  const [expandedId,setExpandedId]=useState(null)
+  const RAG={Green:'#27AE60',Amber:'#E8B95A',Red:'#E74C3C'}
+
+  const isDone=(s:string)=>/done|complete|closed|deployed|cancel/i.test(s||'')
+  const teamItems=items.filter(i=>i.team===team&&(showDone||!isDone(i.status)))
+
+  // Ranked order — P1/P2 pinned, then committed rank (same rule as everywhere)
+  const ranked=[...teamItems].sort((a,b)=>{
+    const pa=PRIORITY_ORDER[a.priority]??4,pb=PRIORITY_ORDER[b.priority]??4
+    if(pa<=1&&pb>1) return -1
+    if(pa>1&&pb<=1) return 1
+    if(pa<=1&&pb<=1) return pa-pb
+    const am=a.committed_priority??a.sort_order??999,bm=b.committed_priority??b.sort_order??999
+    return am-bm
+  })
+  // Team-relative queue numbers (1 = this team's next most important item)
+  const queueNo=new Map(ranked.map((i,idx)=>[i.id,idx+1]))
+
+  // Group by parent project, ordered like the Projects tab; unassigned last
+  const projOrder=new Map(projects.map((p,idx)=>[p.name,p.sort_order??idx]))
+  const groupsMap=new Map()
+  ranked.forEach(i=>{
+    const k=i.parent_project||'__none__'
+    if(!groupsMap.has(k)) groupsMap.set(k,[])
+    groupsMap.get(k).push(i)
+  })
+  const groups=[...groupsMap.entries()].sort((a:any,b:any)=>{
+    if(a[0]==='__none__') return 1
+    if(b[0]==='__none__') return -1
+    return (projOrder.get(a[0])??999)-(projOrder.get(b[0])??999)
+  })
+
+  return(
+    <div style={{height:'100%',overflowY:'auto',padding:'20px 28px'}}>
+      <div style={{display:'flex',alignItems:'center',gap:10,marginBottom:6,flexWrap:'wrap' as const}}>
+        {teams.map(t=>(
+          <button key={t} onClick={()=>setTeam(t)} style={{background:team===t?'#C8973A':'#1E3048',color:team===t?'#0D1B2A':'#7A8FA6',border:`1px solid ${team===t?'#C8973A':'#243447'}`,borderRadius:20,padding:'6px 16px',fontSize:13,fontWeight:700,cursor:'pointer'}}>{t}</button>
+        ))}
+        <label style={{marginLeft:'auto',display:'flex',alignItems:'center',gap:6,fontSize:12,color:'#7A8FA6',cursor:'pointer'}}>
+          <input type="checkbox" checked={showDone} onChange={e=>setShowDone(e.target.checked)}/> Show completed
+        </label>
+      </div>
+      <div style={{fontSize:12,color:'#7A8FA6',marginBottom:18}}>{ranked.length} items · read-only view · numbers show this team's queue order</div>
+
+      {groups.map(([pname,gItems]:any)=>{
+        const project=pname==='__none__'?null:projects.find(p=>p.name===pname)
+        return(
+          <div key={pname} style={{marginBottom:22}}>
+            <div style={{display:'flex',alignItems:'center',gap:10,background:'#162436',borderTop:'1px solid #243447',borderRight:'1px solid #243447',borderBottom:'1px solid #243447',borderLeft:`4px solid ${project?.color||'#3A4A5E'}`,borderRadius:'8px 8px 0 0',padding:'10px 14px'}}>
+              {project?.rag&&<span title={project.rag} style={{width:10,height:10,borderRadius:'50%',background:RAG[project.rag]||'#7A8FA6',flexShrink:0}}/>}
+              <span style={{fontSize:14,fontWeight:800,letterSpacing:0.3}}>{pname==='__none__'?'No Project Assigned':pname}</span>
+              {project?.status&&<span style={{fontSize:11,color:'#7A8FA6'}}>{project.status}</span>}
+              {project?.start_date&&project?.end_date&&<span style={{fontSize:11,color:'#7A8FA6'}}>{project.start_date} → {project.end_date}</span>}
+              <span style={{marginLeft:'auto',fontSize:11,color:'#7A8FA6'}}>{gItems.length} item{gItems.length!==1?'s':''}</span>
+            </div>
+            <div style={{border:'1px solid #243447',borderTop:'none',borderRadius:'0 0 8px 8px',overflow:'hidden'}}>
+              {gItems.map((item:any,idx:number)=>{
+                const pclr=pc(item.priority)
+                const committed=item.start_date&&item.end_date
+                const open=expandedId===item.id
+                return(
+                  <div key={item.id} onClick={()=>setExpandedId(open?null:item.id)}
+                    style={{display:'flex',alignItems:'flex-start',gap:12,padding:'10px 14px',background:idx%2?'#12202F':'#0F1C2B',borderTop:idx?'1px solid #1A2838':'none',cursor:'pointer'}}>
+                    <span style={{fontSize:16,fontWeight:800,color:'#C8973A',minWidth:30,textAlign:'right' as const,lineHeight:1.3}}>{queueNo.get(item.id)}</span>
+                    <span style={{background:pclr.bg,color:'#fff',padding:'2px 7px',borderRadius:4,fontSize:10,fontWeight:700,marginTop:1}}>{item.priority}</span>
+                    <div style={{flex:1,minWidth:0}}>
+                      <div style={{display:'flex',alignItems:'center',gap:8,flexWrap:'wrap' as const}}>
+                        <span style={{fontSize:10,color:'#7A8FA6',fontFamily:'monospace'}}>{item.item_id}</span>
+                        <span style={{fontSize:13,color:'#F4F6F8',fontWeight:600}}>{item.name}</span>
+                        {committed&&<span style={{fontSize:9,color:'#27AE60',border:'1px solid rgba(39,174,96,0.4)',borderRadius:3,padding:'1px 5px'}}>✓ committed</span>}
+                        {item.flagged&&<span style={{fontSize:11}}>🚩</span>}
+                      </div>
+                      {item.description&&!open&&<div style={{fontSize:11,color:'#7A8FA6',marginTop:2,overflow:'hidden',whiteSpace:'nowrap' as const,textOverflow:'ellipsis'}}>{item.description}</div>}
+                      {open&&(
+                        <div style={{marginTop:6}}>
+                          {item.description&&<div style={{fontSize:12,color:'#B8C4D0',lineHeight:1.5,marginBottom:6}}>{item.description}</div>}
+                          {item.notes&&<div style={{fontSize:11,color:'#E8B95A',background:'rgba(200,151,58,0.08)',border:'1px solid rgba(200,151,58,0.25)',borderRadius:6,padding:'6px 10px',lineHeight:1.5}}>📝 {item.notes}</div>}
+                          {item.dependency&&<div style={{fontSize:11,color:'#7A8FA6',marginTop:6}}>Depends on: <span style={{color:'#F4F6F8'}}>{item.dependency}</span></div>}
+                          {item.owner&&<div style={{fontSize:11,color:'#7A8FA6',marginTop:2}}>Owner: <span style={{color:'#F4F6F8'}}>{item.owner}</span></div>}
+                        </div>
+                      )}
+                    </div>
+                    <div style={{display:'flex',flexDirection:'column' as const,alignItems:'flex-end',gap:3,flexShrink:0}}>
+                      <span style={{fontSize:11,fontWeight:700,color:sc(item.status)}}>{item.status}</span>
+                      <div style={{display:'flex',gap:8,fontSize:10,color:'#7A8FA6'}}>
+                        {item.effort&&<span>{item.effort}</span>}
+                        {item.swimlane&&<span>{item.swimlane}</span>}
+                        {item.vendor_delivery_date&&<span>🚚 {item.vendor_delivery_date}</span>}
+                      </div>
+                      {committed&&<span style={{fontSize:10,color:'#7A8FA6'}}>{item.start_date} → {item.end_date}</span>}
+                    </div>
+                  </div>
+                )
+              })}
+            </div>
+          </div>
+        )
+      })}
+      {groups.length===0&&<div style={{textAlign:'center' as const,color:'#7A8FA6',padding:60,fontSize:13}}>No items for this team</div>}
+    </div>
+  )
+}
+
 function Stakeholder({items,projects}:{items:any[],projects:any[]}) {
   const [fl,setFl]=useState({})
   const p1=items.filter(i=>i.priority==='P1')
@@ -2218,7 +2387,7 @@ function Stakeholder({items,projects}:{items:any[],projects:any[]}) {
             const ragColor=RAG_COLORS[project.rag]
             const pclr=pc(project.priority)
             return(
-              <div key={project.id} style={{background:`${ragColor}11`,border:`1px solid ${ragColor}33`,borderLeft:`4px solid ${ragColor}`,borderRadius:8,padding:'12px 16px',marginBottom:8,display:'flex',alignItems:'center',gap:12}}>
+              <div key={project.id} style={{background:`${ragColor}11`,borderTop:`1px solid ${ragColor}33`,borderRight:`1px solid ${ragColor}33`,borderBottom:`1px solid ${ragColor}33`,borderLeft:`4px solid ${ragColor}`,borderRadius:8,padding:'12px 16px',marginBottom:8,display:'flex',alignItems:'center',gap:12}}>
                 <span style={{fontSize:16}}>{project.rag==='Red'?'🔴':'🟡'}</span>
                 <span style={{background:pclr.bg,color:'#fff',padding:'2px 8px',borderRadius:4,fontSize:11,fontWeight:700}}>{project.priority}</span>
                 <div style={{flex:1}}>
@@ -2268,7 +2437,7 @@ function Stakeholder({items,projects}:{items:any[],projects:any[]}) {
 }
 
 // ── MAIN APP ──────────────────────────────────────────────────────────────
-export default function PerfectGame() {
+export default function DeckTech() {
   const [items,setItems]=useState([])
   const [projects,setProjects]=useState([])
   const [milestones,setMilestones]=useState([])
@@ -2311,8 +2480,9 @@ useEffect(()=>{
   }
   load()
   const ch1=supabase.channel('items').on('postgres_changes',{event:'INSERT',schema:'public',table:'items'},()=>load()).subscribe()
-  const ch2=supabase.channel('projects').on('postgres_changes',{event:'*',schema:'public',table:'projects'},()=>load()).subscribe()
-  const ch3=supabase.channel('milestones').on('postgres_changes',{event:'*',schema:'public',table:'milestones'},()=>load()).subscribe()
+  // UPDATE events excluded — our own bulk writes (reorders) were triggering a full reload per row
+  const ch2=supabase.channel('projects').on('postgres_changes',{event:'INSERT',schema:'public',table:'projects'},()=>load()).on('postgres_changes',{event:'DELETE',schema:'public',table:'projects'},()=>load()).subscribe()
+  const ch3=supabase.channel('milestones').on('postgres_changes',{event:'INSERT',schema:'public',table:'milestones'},()=>load()).on('postgres_changes',{event:'DELETE',schema:'public',table:'milestones'},()=>load()).subscribe()
  return()=>{supabase.removeChannel(ch1);supabase.removeChannel(ch2);supabase.removeChannel(ch3)}
   },[])
   const totalViolations=projects.reduce((acc,p)=>{
@@ -2326,13 +2496,14 @@ useEffect(()=>{
   {key:'backlog',label:'Backlog',icon:'≡'},
   {key:'roadmap',label:'Roadmap',icon:'◫'},
   {key:'scoring',label:'Scoring',icon:'◎'},
+  {key:'teams',label:'Teams',icon:'⬡'},
   {key:'stakeholder',label:'Stakeholder View',icon:'◉'},
 ]
 
   if(loading) return(
     <div style={{height:'100vh',background:'#0D1B2A',display:'flex',alignItems:'center',justifyContent:'center',flexDirection:'column',gap:16}}>
       <div style={{width:40,height:40,borderRadius:'50%',border:'3px solid #243447',borderTopColor:'#C8973A',animation:'spin 0.8s linear infinite'}}/>
-      <div style={{color:'#7A8FA6',fontSize:13}}>Loading Perfect Game...</div>
+      <div style={{color:'#7A8FA6',fontSize:13}}>Loading DeckTech...</div>
       <style>{`@keyframes spin{to{transform:rotate(360deg)}}`}</style>
     </div>
   )
@@ -2345,7 +2516,7 @@ useEffect(()=>{
             <div style={{width:16,height:16,borderRadius:'50%',border:'1.5px solid #C8973A',borderTopColor:'transparent',transform:'rotate(45deg)'}}/>
           </div>
           <div>
-            <div style={{fontSize:13,fontWeight:800,letterSpacing:2,color:'#F4F6F8',lineHeight:1}}>PERFECT GAME</div>
+            <div style={{fontSize:13,fontWeight:800,letterSpacing:2,color:'#F4F6F8',lineHeight:1}}>DECKTECH</div>
             <div style={{fontSize:9,color:'#C8973A',letterSpacing:3,lineHeight:1.4}}>TRUST THE PROCESS</div>
           </div>
         </div>
@@ -2369,6 +2540,7 @@ useEffect(()=>{
         {activeTab==='projects'&&<Projects items={items} setItems={setItems} projects={projects} setProjects={setProjects} milestones={milestones} setMilestones={setMilestones}/>}
 {activeTab==='roadmap'&&<Roadmap items={items} setItems={setItems} projects={projects} setProjects={setProjects} milestones={milestones}/>}
         {activeTab==='scoring'&&<Scoring items={items}/>}
+        {activeTab==='teams'&&<Teams items={items} projects={projects}/>}
         {activeTab==='stakeholder'&&<Stakeholder items={items} projects={projects}/>}
       </div>
     </div>
