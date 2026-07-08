@@ -2248,7 +2248,7 @@ function Scoring({items}:{items:any[]}) {
 // ── STAKEHOLDER ───────────────────────────────────────────────────────────
 // ── TEAMS ─────────────────────────────────────────────────────────────────
 // Read-only per-team work queue. All editing happens in Backlog/Projects/Roadmap.
-function Teams({items,projects}:{items:any[],projects:any[]}) {
+function Teams({items,projects,milestones}:{items:any[],projects:any[],milestones:any[]}) {
   const teams=[...new Set(items.map(i=>i.team).filter(Boolean))].sort() as string[]
   const [team,setTeam]=useState(teams[0]||'')
   const [showDone,setShowDone]=useState(false)
@@ -2284,6 +2284,20 @@ function Teams({items,projects}:{items:any[],projects:any[]}) {
     return (projOrder.get(a[0])??999)-(projOrder.get(b[0])??999)
   })
 
+  // ── Milestone timeline (driven by this team's projects) ──
+  const teamProjNames=groups.map(([n]:any)=>n).filter((n:string)=>n!=='__none__')
+  const teamProjects=teamProjNames.map(n=>projects.find(p=>p.name===n)).filter(Boolean)
+  const tlRows=teamProjects.map((p:any)=>({project:p,ms:milestones.filter(m=>m.project_id===p.id).sort((a,b)=>a.date<b.date?-1:1)})).filter(r=>r.ms.length>0)
+  const now=new Date();now.setHours(12,0,0,0)
+  const allDates=tlRows.flatMap(r=>r.ms.map((m:any)=>+new Date(m.date+'T12:00:00'))).concat(+now)
+  const tlMin=Math.min(...allDates)-14*86400000
+  const tlMax=Math.max(...allDates)+14*86400000
+  const tlPct=(t:number)=>((t-tlMin)/(tlMax-tlMin))*100
+  const monthTicks:{pct:number,label:string}[]=[]
+  {const d=new Date(tlMin);d.setDate(1);d.setMonth(d.getMonth()+1)
+   while(+d<tlMax){monthTicks.push({pct:tlPct(+d),label:d.toLocaleDateString('default',{month:'short'})});d.setMonth(d.getMonth()+1)}}
+  const msClr=(m:any)=>m.completed?'#27AE60':(+new Date(m.date+'T12:00:00')<+now?'#E74C3C':'#C8973A')
+
   return(
     <div style={{height:'100%',overflowY:'auto',padding:'20px 28px'}}>
       <div style={{display:'flex',alignItems:'center',gap:10,marginBottom:6,flexWrap:'wrap' as const}}>
@@ -2295,6 +2309,43 @@ function Teams({items,projects}:{items:any[],projects:any[]}) {
         </label>
       </div>
       <div style={{fontSize:12,color:'#7A8FA6',marginBottom:18}}>{ranked.length} items · read-only view · numbers show this team's queue order</div>
+
+      {tlRows.length>0&&(
+        <div style={{background:'#162436',border:'1px solid #243447',borderRadius:8,padding:'12px 14px 6px',marginBottom:22}}>
+          <div style={{fontSize:11,fontWeight:700,letterSpacing:1,color:'#C8973A',marginBottom:8}}>◆ MILESTONES</div>
+          <div style={{position:'relative'}}>
+            {/* month ticks */}
+            <div style={{position:'relative',height:16,marginLeft:150}}>
+              {monthTicks.map((t,i)=>(
+                <span key={i} style={{position:'absolute',left:`${t.pct}%`,fontSize:9,color:'#7A8FA6',transform:'translateX(-50%)'}}>{t.label}</span>
+              ))}
+            </div>
+            <div style={{position:'relative'}}>
+              {tlRows.map(({project,ms}:any)=>(
+                <div key={project.id} style={{display:'flex',alignItems:'center',height:38}}>
+                  <div style={{width:150,flexShrink:0,fontSize:11,fontWeight:600,color:'#F4F6F8',overflow:'hidden',whiteSpace:'nowrap' as const,textOverflow:'ellipsis',paddingRight:10,borderRight:`3px solid ${project.color||'#3A4A5E'}`}}>{project.name}</div>
+                  <div style={{position:'relative',flex:1,height:'100%',marginLeft:10}}>
+                    <div style={{position:'absolute',left:0,right:0,top:'50%',height:1,background:'#243447'}}/>
+                    <div title="Today" style={{position:'absolute',left:`${tlPct(+now)}%`,top:2,bottom:2,width:1,background:'rgba(231,76,60,0.5)'}}/>
+                    {ms.map((m:any)=>(
+                      <div key={m.id} title={`${m.name} · ${m.date}${m.completed?' · completed':''}`}
+                        style={{position:'absolute',left:`${tlPct(+new Date(m.date+'T12:00:00'))}%`,top:'50%',transform:'translate(-50%,-50%)'}}>
+                        <div style={{width:9,height:9,background:msClr(m),transform:'rotate(45deg)',border:'1px solid rgba(0,0,0,0.3)'}}/>
+                        <div style={{position:'absolute',top:11,left:'50%',transform:'translateX(-50%)',fontSize:8,color:'#7A8FA6',whiteSpace:'nowrap' as const,maxWidth:90,overflow:'hidden',textOverflow:'ellipsis'}}>{m.name}</div>
+                      </div>
+                    ))}
+                  </div>
+                </div>
+              ))}
+            </div>
+            <div style={{display:'flex',gap:14,fontSize:9,color:'#7A8FA6',marginTop:6,marginLeft:150}}>
+              <span><span style={{display:'inline-block',width:7,height:7,background:'#27AE60',transform:'rotate(45deg)',marginRight:4}}/>Completed</span>
+              <span><span style={{display:'inline-block',width:7,height:7,background:'#C8973A',transform:'rotate(45deg)',marginRight:4}}/>Upcoming</span>
+              <span><span style={{display:'inline-block',width:7,height:7,background:'#E74C3C',transform:'rotate(45deg)',marginRight:4}}/>Overdue</span>
+            </div>
+          </div>
+        </div>
+      )}
 
       {groups.map(([pname,gItems]:any)=>{
         const project=pname==='__none__'?null:projects.find(p=>p.name===pname)
@@ -2355,7 +2406,224 @@ function Teams({items,projects}:{items:any[],projects:any[]}) {
   )
 }
 
-function Stakeholder({items,projects}:{items:any[],projects:any[]}) {
+// ── STAKEHOLDER UPDATE COMPOSER ───────────────────────────────────────────
+function ComposeUpdate({projects,milestones,items,onClose}:{projects:any[],milestones:any[],items:any[],onClose:any}) {
+  const active=projects.filter(p=>p.status!=='Complete'&&p.status!=='Cancelled')
+  const [sel,setSel]=useState(()=>new Set(active.map(p=>p.id)))
+  const [drafts,setDrafts]=useState<any>({})
+  const [last,setLast]=useState<any>({})
+  const [saving,setSaving]=useState(false)
+  const [previewHtml,setPreviewHtml]=useState<string|null>(null)
+  const [copied,setCopied]=useState(false)
+
+  useEffect(()=>{(async()=>{
+    const{data}=await supabase.from('project_updates').select('*').order('created_at',{ascending:false})
+    if(data){const m:any={};data.forEach((u:any)=>{if(!m[u.project_id])m[u.project_id]=u});setLast(m)}
+  })()},[])
+
+  const toggle=(id:any)=>setSel(prev=>{const n=new Set(prev);n.has(id)?n.delete(id):n.add(id);return n})
+  const setDraft=(id:any,field:string,val:string)=>setDrafts((d:any)=>({...d,[id]:{...d[id],[field]:val}}))
+  const RAGC:any={Green:'#27AE60',Amber:'#B8860B',Red:'#C0392B'}
+  const fmtD=(str:string)=>str?new Date(str+'T12:00:00').toLocaleDateString('default',{month:'short',day:'numeric'}):''
+
+  async function generate(){
+    setSaving(true)
+    const hs=(t:string)=>(t||'').replace(/ /g,'&nbsp;')
+    const selected=active.filter(p=>sel.has(p.id))
+    // Save new updates for history
+    const inserts=selected.filter(p=>(drafts[p.id]?.update||'').trim()||(drafts[p.id]?.blockers||'').trim())
+      .map(p=>({project_id:p.id,update_text:(drafts[p.id]?.update||'').trim()||null,blockers:(drafts[p.id]?.blockers||'').trim()||null}))
+    if(inserts.length){const{error}=await supabase.from('project_updates').insert(inserts);if(error)alert('Failed to save updates: '+error.message)}
+    // Build email HTML — deliberately plain "typed in Outlook + pasted Excel tables" styling
+    const today=new Date().toLocaleDateString('default',{month:'long',day:'numeric',year:'numeric'})
+    const g=selected.filter(p=>p.rag==='Green').length,a=selected.filter(p=>p.rag==='Amber').length,r=selected.filter(p=>p.rag==='Red').length
+    const in4w=+new Date()+28*86400000
+    const upcoming=milestones
+      .filter(m=>!m.completed&&selected.some(p=>p.id===m.project_id)&&+new Date(m.date+'T12:00:00')>=+new Date()&&+new Date(m.date+'T12:00:00')<=in4w)
+      .sort((x,y)=>x.date<y.date?-1:1)
+    const RAGT:any={Green:'#217346',Amber:'#B8860B',Red:'#C0392B'}
+    const PCLRT:any={P1:'#C0392B',P2:'#C55A11',P3:'#2E5E8C',P4:'#595959'}
+    const ragTxt=(rg:string)=>`<span style="color:${RAGT[rg]||'#595959'};font-weight:bold;">${rg||''}</span>`
+    const priTxt=(pr:string)=>`<span style="color:${PCLRT[pr]||'#595959'};font-weight:bold;">${pr||''}</span>`
+    // Excel-paste table styling
+    const TD_='padding:3px 7px;border:1px solid #D9D9D9;font-size:13px;color:#222222;vertical-align:top;'
+    const TH_='padding:3px 7px;border:1px solid #D9D9D9;font-size:13px;color:#222222;background:#F2F2F2;font-weight:bold;text-align:left;'
+    const H2='font-size:14px;font-weight:bold;color:#1F1F1F;margin:20px 0 6px;'
+
+    // Roadmap grid (Excel-style)
+    const dated=selected.filter(p=>p.start_date&&p.end_date)
+    let roadmapHtml=''
+    if(dated.length){
+      const m0=(dstr:string)=>{const x=new Date(dstr+'T12:00:00');return new Date(x.getFullYear(),x.getMonth(),1)}
+      const curM=new Date(new Date().getFullYear(),new Date().getMonth(),1)
+      const floor=new Date(curM.getFullYear(),curM.getMonth()-1,1)
+      let minM=Math.max(Math.min(...dated.map(p=>+m0(p.start_date)),+curM),+floor)
+      const maxTarget=Math.max(...dated.map(p=>+m0(p.end_date)),+curM)
+      const months:Date[]=[]
+      {const d=new Date(minM);let n=0;while(+d<=maxTarget&&n<12){months.push(new Date(d));d.setMonth(d.getMonth()+1);n++}}
+      const idxOf=(dstr:string)=>{const t=+m0(dstr);let i=-1;months.forEach((m,j)=>{if(+m===t)i=j});return i}
+      const rows=dated.map(p=>{
+        const si=+m0(p.start_date),ei=+m0(p.end_date)
+        const msMonths=new Set(milestones.filter(m=>m.project_id===p.id&&!m.completed).map(m=>idxOf(m.date)).filter(i=>i>=0))
+        const startsBefore=si<+months[0]
+        const endsAfter=ei>+months[months.length-1]
+        const cells=months.map((m,ci)=>{
+          const active=(+m>=si&&+m<=ei)||(startsBefore&&+m<=ei)
+          const freeze=m.getMonth()>=9
+          const bg=active?(p.color||'#2E5E8C'):(freeze?'#FBEAEA':'#FFFFFF')
+          const mark=msMonths.has(ci)?'◆':(endsAfter&&ci===months.length-1&&active?'→':'')
+          return `<td style="padding:0;height:18px;background:${bg};border:1px solid #D9D9D9;text-align:center;font-size:10px;color:#FFFFFF;font-weight:bold;">${mark}</td>`
+        }).join('')
+        return `<tr><td style="${TD_}white-space:nowrap;font-weight:bold;">${hs(p.name.length>28?p.name.slice(0,27)+'…':p.name)}</td>${cells}</tr>`
+      }).join('')
+      const header=`<tr><td style="${TH_}"></td>${months.map(m=>{
+        const isCur=+m===+curM
+        const freeze=m.getMonth()>=9
+        return `<td style="${TH_}text-align:center;color:${freeze?'#C0392B':'#222222'};${isCur?'background:#DDEBF7;':''}">${m.toLocaleDateString('default',{month:'short'})}${m.getMonth()===0||+m===+months[0]?`&nbsp;${String(m.getFullYear()).slice(2)}`:''}</td>`
+      }).join('')}</tr>`
+      roadmapHtml=`<div style="${H2}">Roadmap</div>
+      <table cellspacing="0" style="border-collapse:collapse;width:100%;table-layout:fixed;"><colgroup><col style="width:200px;"/>${months.map(()=>'<col/>').join('')}</colgroup>${header}${rows}</table>
+      <div style="font-size:11px;color:#595959;margin:4px 0 0;">◆ upcoming milestone&nbsp;&nbsp;→ continues beyond window&nbsp;&nbsp;<span style="color:#C0392B;">Oct–Dec: code freeze</span>&nbsp;&nbsp;(committed projects only)</div>`
+    }
+
+    // Item sections
+    const p12=items.filter((i:any)=>i.priority==='P1'||i.priority==='P2')
+      .sort((a:any,b:any)=>(PRIORITY_ORDER[a.priority]??4)-(PRIORITY_ORDER[b.priority]??4)||((a.committed_priority??999)-(b.committed_priority??999)))
+    const top10=items.filter((i:any)=>i.priority!=='P1'&&i.priority!=='P2'&&!(i.start_date&&i.end_date))
+      .sort((a:any,b:any)=>(a.committed_priority??a.sort_order??999)-(b.committed_priority??b.sort_order??999)).slice(0,10)
+    const flagged=items.filter((i:any)=>i.flagged)
+    const itemRow=(i:any,n?:number)=>`<tr>
+      ${n!=null?`<td style="${TD_}text-align:center;font-weight:bold;">${n}</td>`:''}
+      <td style="${TD_}white-space:nowrap;">${hs(i.item_id)}</td>
+      <td style="${TD_}">${i.name}</td>
+      <td style="${TD_}white-space:nowrap;">${priTxt(i.priority)}</td>
+      <td style="${TD_}white-space:nowrap;">${hs(i.status)}</td>
+      <td style="${TD_}white-space:nowrap;">${hs(i.team)}</td>
+    </tr>`
+    const itemHead=(n?:boolean)=>`<tr>${n?`<th style="${TH_}width:26px;">#</th>`:''}<th style="${TH_}width:64px;">ID</th><th style="${TH_}">Item</th><th style="${TH_}width:38px;">Pri</th><th style="${TH_}width:170px;">Status</th><th style="${TH_}width:160px;">Team</th></tr>`
+    const p12Html=p12.length?`<div style="${H2}">Critical Items (P1 / P2)</div>
+      <table cellspacing="0" style="border-collapse:collapse;width:100%;">${itemHead()}${p12.map((i:any)=>itemRow(i)).join('')}</table>`:''
+    const top10Html=top10.length?`<div style="${H2}">Top 10 Backlog — Not Yet Committed</div>
+      <table cellspacing="0" style="border-collapse:collapse;width:100%;">${itemHead(true)}${top10.map((i:any,n:number)=>itemRow(i,n+1)).join('')}</table>`:''
+    const flaggedHtml=flagged.length?`<div style="${H2}">Flagged for Discussion</div>
+      <table cellspacing="0" style="border-collapse:collapse;width:100%;">
+      <tr><th style="${TH_}width:64px;">ID</th><th style="${TH_}width:260px;">Item</th><th style="${TH_}width:38px;">Pri</th><th style="${TH_}">Discussion Notes</th></tr>
+      ${flagged.map((i:any)=>`<tr>
+        <td style="${TD_}white-space:nowrap;">${hs(i.item_id)}</td>
+        <td style="${TD_}font-weight:bold;">${i.name}</td>
+        <td style="${TD_}white-space:nowrap;">${priTxt(i.priority)}</td>
+        <td style="${TD_}line-height:1.5;">${i.notes||'<span style="color:#7F7F7F;font-style:italic;">No discussion notes yet.</span>'}</td>
+      </tr>`).join('')}</table>`:''
+
+    const projBlock=(p:any)=>{
+      const d=drafts[p.id]||{}
+      const upd=(d.update||'').trim()||(last[p.id]?.update_text||'')
+      const blk=(d.blockers||'').trim()
+      const pItems=items.filter((i:any)=>i.parent_project===p.name&&i.start_date&&i.end_date)
+        .sort((a:any,b:any)=>(a.end_date<b.end_date?-1:a.end_date>b.end_date?1:0))
+      return `<div style="margin:0 0 16px;">
+        <div style="font-size:13px;margin-bottom:3px;"><b>${p.name}</b> — ${ragTxt(p.rag)}${p.status?` | ${p.status}`:''}${p.start_date&&p.end_date?` | ${hs(fmtD(p.start_date))} – ${hs(fmtD(p.end_date))}`:''}</div>
+        ${upd?`<div style="font-size:13px;color:#222222;line-height:1.55;">${upd}</div>`:`<div style="font-size:13px;color:#7F7F7F;font-style:italic;">No update provided this period.</div>`}
+        ${blk?`<div style="font-size:13px;color:#222222;line-height:1.5;margin-top:4px;"><b style="color:#C0392B;">Risks / Blockers:</b> ${blk}</div>`:''}
+        ${pItems.length?`<table cellspacing="0" style="border-collapse:collapse;width:100%;margin-top:6px;">
+          <tr><th style="${TH_}width:64px;">ID</th><th style="${TH_}">Item</th><th style="${TH_}width:170px;">Status</th><th style="${TH_}width:80px;">Target</th></tr>
+          ${pItems.map((i:any)=>`<tr>
+            <td style="${TD_}white-space:nowrap;">${hs(i.item_id)}</td>
+            <td style="${TD_}">${i.name}${i.vendor_delivery_date?`<div style="font-size:11px;color:#8A6D1F;">Vendor deliverable: ${hs(fmtD(i.vendor_delivery_date))}</div>`:''}</td>
+            <td style="${TD_}white-space:nowrap;">${hs(i.status)}</td>
+            <td style="${TD_}white-space:nowrap;font-weight:bold;">${hs(fmtD(i.end_date))}</td>
+          </tr>`).join('')}</table>`:''}
+      </div>`
+    }
+    const html=`<div style="font-family:Calibri,'Segoe UI',Arial,sans-serif;max-width:900px;color:#222222;">
+      <div style="font-size:17px;font-weight:bold;color:#1F1F1F;">Retail Technology — Program Update</div>
+      <div style="font-size:13px;color:#595959;margin-bottom:12px;">${today}</div>
+      <div style="font-size:13px;color:#222222;margin-bottom:4px;"><b>${selected.length} active project${selected.length!==1?'s':''}:</b> <span style="color:#217346;font-weight:bold;">${g} Green</span>, <span style="color:#B8860B;font-weight:bold;">${a} Amber</span>, <span style="color:#C0392B;font-weight:bold;">${r} Red</span></div>
+      ${p12Html}
+      ${roadmapHtml}
+      <div style="${H2}">Project Updates</div>
+      ${selected.map(projBlock).join('')}
+      ${upcoming.length?`<div style="${H2}">Upcoming Milestones — Next 4 Weeks</div>
+      <table cellspacing="0" style="border-collapse:collapse;width:100%;">
+      <tr><th style="${TH_}width:70px;">Date</th><th style="${TH_}width:220px;">Project</th><th style="${TH_}">Milestone</th></tr>
+      ${upcoming.map(m=>{
+        const pr=projects.find(p=>p.id===m.project_id)
+        return `<tr><td style="${TD_}white-space:nowrap;">${hs(fmtD(m.date))}</td><td style="${TD_}">${pr?.name||''}</td><td style="${TD_}">${m.name}</td></tr>`
+      }).join('')}</table>`:''}
+      ${flaggedHtml}
+      ${top10Html}
+    </div>`
+    setPreviewHtml(html)
+    setSaving(false)
+  }
+
+  async function copyRich(){
+    try{
+      const blob=new Blob([previewHtml||''],{type:'text/html'})
+      const txt=new Blob([(previewHtml||'').replace(/<[^>]+>/g,' ')],{type:'text/plain'})
+      await (navigator.clipboard as any).write([new (window as any).ClipboardItem({'text/html':blob,'text/plain':txt})])
+      setCopied(true);setTimeout(()=>setCopied(false),2000)
+    }catch{alert('Copy failed — use Download instead')}
+  }
+  function download(){
+    const a=document.createElement('a')
+    a.href=URL.createObjectURL(new Blob([previewHtml||''],{type:'text/html'}))
+    a.download=`program-update-${new Date().toISOString().slice(0,10)}.html`
+    a.click()
+  }
+
+  return(
+    <div style={{position:'fixed',inset:0,background:'rgba(0,0,0,0.65)',zIndex:300,display:'flex',alignItems:'center',justifyContent:'center'}}>
+      <div style={{background:'#162436',border:'1px solid #243447',borderRadius:12,width:920,maxWidth:'96vw',maxHeight:'88vh',display:'flex',flexDirection:'column' as const}}>
+        <div style={{display:'flex',alignItems:'center',padding:'14px 20px',borderBottom:'1px solid #243447'}}>
+          <span style={{fontSize:15,fontWeight:800}}>{previewHtml?'Update Preview':'Compose Stakeholder Update'}</span>
+          <button onClick={onClose} style={{marginLeft:'auto',background:'none',border:'none',color:'#7A8FA6',fontSize:18,cursor:'pointer'}}>✕</button>
+        </div>
+        {!previewHtml?(
+          <>
+          <div style={{overflowY:'auto',padding:'14px 20px',flex:1}}>
+            {active.map(p=>(
+              <div key={p.id} style={{borderTop:'1px solid #243447',borderRight:'1px solid #243447',borderBottom:'1px solid #243447',borderLeft:`4px solid ${p.color||'#3A4A5E'}`,borderRadius:8,padding:'10px 14px',marginBottom:10,opacity:sel.has(p.id)?1:0.45}}>
+                <label style={{display:'flex',alignItems:'center',gap:10,cursor:'pointer'}}>
+                  <input type="checkbox" checked={sel.has(p.id)} onChange={()=>toggle(p.id)}/>
+                  <span style={{fontSize:13,fontWeight:700}}>{p.name}</span>
+                  <span style={{fontSize:11,color:p.rag==='Green'?'#27AE60':p.rag==='Amber'?'#E8B95A':'#E74C3C',fontWeight:700}}>{p.rag}</span>
+                  <span style={{fontSize:11,color:'#7A8FA6'}}>{p.status}</span>
+                </label>
+                {sel.has(p.id)&&(
+                  <div style={{marginTop:8}}>
+                    {last[p.id]&&<div style={{fontSize:11,color:'#7A8FA6',fontStyle:'italic',marginBottom:6}}>Last update ({new Date(last[p.id].created_at).toLocaleDateString()}): {last[p.id].update_text}</div>}
+                    <textarea placeholder="This period's update..." value={drafts[p.id]?.update||''} onChange={e=>setDraft(p.id,'update',e.target.value)} rows={2}
+                      style={{width:'100%',boxSizing:'border-box' as const,background:'#0D1B2A',border:'1px solid #243447',borderRadius:6,color:'#F4F6F8',fontSize:12,padding:8,resize:'vertical' as const,fontFamily:'inherit',marginBottom:6}}/>
+                    <textarea placeholder="Risks / Blockers (optional)..." value={drafts[p.id]?.blockers||''} onChange={e=>setDraft(p.id,'blockers',e.target.value)} rows={1}
+                      style={{width:'100%',boxSizing:'border-box' as const,background:'#0D1B2A',border:'1px solid rgba(231,76,60,0.35)',borderRadius:6,color:'#F4F6F8',fontSize:12,padding:8,resize:'vertical' as const,fontFamily:'inherit'}}/>
+                  </div>
+                )}
+              </div>
+            ))}
+          </div>
+          <div style={{padding:'12px 20px',borderTop:'1px solid #243447',display:'flex',justifyContent:'flex-end',gap:10}}>
+            <button onClick={onClose} style={{background:'none',border:'1px solid #243447',borderRadius:6,color:'#7A8FA6',fontSize:12,padding:'8px 16px',cursor:'pointer'}}>Cancel</button>
+            <button onClick={generate} disabled={saving||sel.size===0} style={{background:'#C8973A',border:'none',borderRadius:6,color:'#0D1B2A',fontSize:12,fontWeight:700,padding:'8px 18px',cursor:'pointer',opacity:saving||sel.size===0?0.6:1}}>{saving?'Generating...':`Generate (${sel.size})`}</button>
+          </div>
+          </>
+        ):(
+          <>
+          <div style={{overflowY:'auto',flex:1,background:'#ffffff',margin:'14px 20px',borderRadius:8,padding:20}} dangerouslySetInnerHTML={{__html:previewHtml}}/>
+          <div style={{padding:'12px 20px',borderTop:'1px solid #243447',display:'flex',justifyContent:'flex-end',gap:10}}>
+            <button onClick={()=>setPreviewHtml(null)} style={{background:'none',border:'1px solid #243447',borderRadius:6,color:'#7A8FA6',fontSize:12,padding:'8px 16px',cursor:'pointer'}}>← Back</button>
+            <button onClick={download} style={{background:'none',border:'1px solid #243447',borderRadius:6,color:'#7A8FA6',fontSize:12,padding:'8px 16px',cursor:'pointer'}}>Download .html</button>
+            <button onClick={copyRich} style={{background:'#27AE60',border:'none',borderRadius:6,color:'#fff',fontSize:12,fontWeight:700,padding:'8px 18px',cursor:'pointer'}}>{copied?'✓ Copied!':'Copy for Outlook'}</button>
+          </div>
+          </>
+        )}
+      </div>
+    </div>
+  )
+}
+
+function Stakeholder({items,projects,milestones}:{items:any[],projects:any[],milestones:any[]}) {
+  const [composing,setComposing]=useState(false)
   const [fl,setFl]=useState({})
   const p1=items.filter(i=>i.priority==='P1')
   const p2=items.filter(i=>i.priority==='P2')
@@ -2366,8 +2634,12 @@ function Stakeholder({items,projects}:{items:any[],projects:any[]}) {
   return(
     <div style={{maxWidth:960,margin:'0 auto',padding:'24px 20px',overflowY:'auto',height:'100%',boxSizing:'border-box' as const}}>
       <div style={{marginBottom:24}}>
-        <div style={{fontSize:22,fontWeight:700,color:'#F4F6F8',marginBottom:4}}>Retail Technology — Program Status</div>
+        <div style={{display:'flex',alignItems:'center'}}>
+          <div style={{fontSize:22,fontWeight:700,color:'#F4F6F8',marginBottom:4}}>Retail Technology — Program Status</div>
+          <button onClick={()=>setComposing(true)} style={{marginLeft:'auto',background:'#C8973A',border:'none',borderRadius:6,color:'#0D1B2A',fontSize:12,fontWeight:700,padding:'8px 16px',cursor:'pointer'}}>✉ Compose Update</button>
+        </div>
         <div style={{fontSize:13,color:'#7A8FA6'}}>Read-only · Flag items for discussion</div>
+        {composing&&<ComposeUpdate projects={projects} milestones={milestones} items={items} onClose={()=>setComposing(false)}/>}
       </div>
 
       {/* Stats */}
@@ -2541,8 +2813,8 @@ useEffect(()=>{
         {activeTab==='projects'&&<Projects items={items} setItems={setItems} projects={projects} setProjects={setProjects} milestones={milestones} setMilestones={setMilestones}/>}
 {activeTab==='roadmap'&&<Roadmap items={items} setItems={setItems} projects={projects} setProjects={setProjects} milestones={milestones}/>}
         {activeTab==='scoring'&&<Scoring items={items}/>}
-        {activeTab==='teams'&&<Teams items={items} projects={projects}/>}
-        {activeTab==='stakeholder'&&<Stakeholder items={items} projects={projects}/>}
+        {activeTab==='teams'&&<Teams items={items} projects={projects} milestones={milestones}/>}
+        {activeTab==='stakeholder'&&<Stakeholder items={items} projects={projects} milestones={milestones}/>}
       </div>
     </div>
   )
