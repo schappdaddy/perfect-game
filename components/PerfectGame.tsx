@@ -2918,6 +2918,20 @@ function Desk({items,setItems,projects,milestones,setMilestones,tasks,setTasks}:
   const [ntDate,setNtDate]=useState('')
   const [mvTitle,setMvTitle]=useState('')
   const [mvDate,setMvDate]=useState('')
+  const [qiName,setQiName]=useState('')
+  const [qiPri,setQiPri]=useState('P3')
+  const [qiType,setQiType]=useState('Bug')
+  async function submitQuickItem(){
+    if(!qiName.trim()||!projView)return
+    const iid=nextItemId(items)
+    const{data,error}=await supabase.from('items').insert({
+      item_id:iid,name:qiName.trim(),description:'',priority:qiPri,request_type:qiType,
+      swimlane:'POS',team:projView.team||'Consumer Experience',effort:'M',status:'Ready to Score',
+      region:'',vendor:'Deckers',parent_project:projView.name,flagged:false,sort_order:items.length,
+    }).select().single()
+    if(error){alert('Failed to add item: '+error.message);return}
+    if(data){setItems((prev:any[])=>[...prev,data]);setQiName('');setQiPri('P3');setQiType('Bug')}
+  }
   async function submitModalTask(){
     if(!mvTitle.trim()||!projView)return
     const ok=await addProjectTask(setTasks,projView.id,mvTitle,mvDate||null)
@@ -3400,6 +3414,21 @@ function Desk({items,setItems,projects,milestones,setMilestones,tasks,setTasks}:
                 )}
               </>)
             })()}
+            <div style={{borderTop:'1px solid #243447',marginTop:14,paddingTop:10}}>
+              <div style={{fontSize:10,fontWeight:700,letterSpacing:1,color:'#7A8FA6',marginBottom:6}}>+ ADD ITEM TO THIS PROJECT</div>
+              <div style={{display:'flex',gap:6}}>
+                <input placeholder="New item name..." value={qiName} onChange={e=>setQiName(e.target.value)} onKeyDown={e=>{if(e.key==='Enter')submitQuickItem()}}
+                  style={{flex:1,background:'#0D1B2A',border:'1px solid #243447',borderRadius:6,color:'#F4F6F8',fontSize:11,padding:'5px 8px'}}/>
+                <select value={qiPri} onChange={e=>setQiPri(e.target.value)} style={{background:'#0D1B2A',border:'1px solid #243447',borderRadius:6,color:'#F4F6F8',fontSize:11,padding:'5px 6px'}}>
+                  {PRIORITIES.map(p=><option key={p} value={p}>{p}</option>)}
+                </select>
+                <select value={qiType} onChange={e=>setQiType(e.target.value)} style={{background:'#0D1B2A',border:'1px solid #243447',borderRadius:6,color:'#F4F6F8',fontSize:11,padding:'5px 6px'}}>
+                  {REQUEST_TYPES.map(t=><option key={t} value={t}>{rt(t)} {t}</option>)}
+                </select>
+                <button onClick={submitQuickItem} disabled={!qiName.trim()} style={{background:'#C8973A',border:'none',borderRadius:6,color:'#0D1B2A',fontSize:11,fontWeight:700,padding:'5px 12px',cursor:'pointer',opacity:!qiName.trim()?0.5:1}}>+ Add</button>
+              </div>
+              <div style={{fontSize:9,color:'#5C6E80',marginTop:4}}>Lands uncommitted with defaults (Ready to Score · M · {'{'}team from project{'}'}) — refine in the Backlog anytime</div>
+            </div>
           </div>
         </div>
         )
