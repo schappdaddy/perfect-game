@@ -1741,15 +1741,15 @@ function Roadmap({items,setItems,projects,setProjects,milestones}:{items:any[],p
           ))}
         </div>
         <div style={{display:'flex',alignItems:'center',gap:6}}>
-          <span style={{fontSize:12,color:'#7A8FA6'}}>Color</span>
+          <span style={{fontSize:11,color:'#7A8FA6'}}>Color</span>
           <div style={{display:'flex',gap:3}}>
             {[['project','Project'],['status','Status']].map(([k,label])=>(
-              <button key={k} onClick={()=>setColorBy(k)} style={{background:colorBy===k?'#C8973A':'#1E3048',color:colorBy===k?'#0D1B2A':'#7A8FA6',border:`1px solid ${colorBy===k?'#C8973A':'#243447'}`,borderRadius:6,padding:'4px 10px',fontSize:11,cursor:'pointer',fontWeight:colorBy===k?700:400}}>{label}</button>
+              <button key={k} onClick={()=>setColorBy(k)} style={{background:colorBy===k?'#C8973A':'#1E3048',color:colorBy===k?'#0D1B2A':'#7A8FA6',border:`1px solid ${colorBy===k?'#C8973A':'#243447'}`,borderRadius:6,padding:'3px 8px',fontSize:11,cursor:'pointer',fontWeight:colorBy===k?700:400}}>{label}</button>
             ))}
           </div>
         </div>
         <div style={{display:'flex',alignItems:'center',gap:6}}>
-          <span style={{fontSize:12,color:'#7A8FA6'}}>Sort</span>
+          <span style={{fontSize:11,color:'#7A8FA6'}}>Sort</span>
           <select value={sortBy} onChange={e=>setSortBy(e.target.value)} style={{...sel,fontSize:11,padding:'4px 8px'}}>
             <option value="start_date">Start Date</option>
             <option value="end_date">End Date</option>
@@ -1770,8 +1770,8 @@ function Roadmap({items,setItems,projects,setProjects,milestones}:{items:any[],p
         <button onClick={()=>setShowSettings(true)} style={{...sel,fontSize:11,padding:'4px 10px',color:'#E74C3C',border:'1px solid #E74C3C'}}>🔒 Code Freeze</button>
         {totalViolations>0&&<div style={{background:'rgba(192,57,43,0.15)',border:'1px solid rgba(192,57,43,0.4)',borderRadius:6,padding:'4px 10px',fontSize:11,color:'#E74C3C'}}>⚠️ {totalViolations} violation{totalViolations!==1?'s':''}</div>}
         <div style={{display:'flex',gap:10,fontSize:11,marginLeft:'auto',color:'#7A8FA6',alignItems:'center'}}>
-          <span>{groups.length} projects · {withDates.length} committed · {uncommitted.length} backlog</span>
-          <span style={{display:'flex',gap:10,flexWrap:'wrap' as const,alignItems:'center'}}>
+          <span style={{whiteSpace:'nowrap' as const}}>{groups.length} projects · {withDates.length} committed · {uncommitted.length} backlog</span>
+          <span style={{display:'flex',gap:8,flexWrap:'wrap' as const,alignItems:'center',justifyContent:'flex-end',opacity:0.85}}>
             {[...new Set(withDates.map(i=>i.status).filter(Boolean))].map((st:any)=>(
               <span key={st} style={{fontSize:9,color:sc(st),fontWeight:700,whiteSpace:'nowrap' as const}}>● {st}</span>
             ))}
@@ -2280,92 +2280,6 @@ function Roadmap({items,setItems,projects,setProjects,milestones}:{items:any[],p
           </div>
         </div>
       )}
-    </div>
-  )
-}
-function Scoring({items}:{items:any[]}) {
-  const [session,setSession]=useState(null)
-  const [scores,setScores]=useState({})
-  const [method,setMethod]=useState('wsjf')
-  const [ft,setFt]=useState('All')
-  const [cp,setCp]=useState(false)
-  const scorers=['Jos Nazareth','Kurt Lipson','Shaina Groves','Cara Trevino','Nick Mancini','Kirty Ginman']
-  const sc2=items.filter(i=>i.priority!=='P1'&&i.priority!=='P2'&&(ft==='All'||i.team===ft))
-  function avg(id,field){
-    const s=scores[id];if(!s) return null
-    const v=Object.values(s).map((x:any)=>parseFloat(x[field])).filter(x=>!isNaN(x))
-    if(!v.length) return null
-    return(v.reduce((a,b)=>a+b,0)/v.length).toFixed(1)
-  }
-  if(!session) return(
-    <div style={{display:'flex',alignItems:'center',justifyContent:'center',height:'100%',flexDirection:'column',gap:24}}>
-      <div style={{fontSize:24,fontWeight:700,color:'#F4F6F8'}}>Start a Scoring Session</div>
-      <div style={{color:'#7A8FA6',maxWidth:440,textAlign:'center' as const,lineHeight:1.6}}>Configure your session then share the link with stakeholders.</div>
-      <div style={{background:'#162436',border:'1px solid #243447',borderRadius:12,padding:28,width:400,display:'flex',flexDirection:'column',gap:16}}>
-        <div>
-          <div style={{fontSize:11,color:'#7A8FA6',marginBottom:6,letterSpacing:1}}>SCORING METHOD</div>
-          <div style={{display:'flex',gap:8,flexWrap:'wrap' as const}}>
-            {[['wsjf','WSJF'],['rice','RICE'],['vote','Simple Vote'],['combo','WSJF + RICE']].map(([k,label])=>(
-              <button key={k} onClick={()=>setMethod(k)} style={{background:method===k?'#C8973A':'#1E3048',color:method===k?'#0D1B2A':'#7A8FA6',border:`1px solid ${method===k?'#C8973A':'#243447'}`,borderRadius:6,padding:'6px 12px',fontSize:12,cursor:'pointer',fontWeight:method===k?700:400}}>{label}</button>
-            ))}
-          </div>
-        </div>
-        <select value={ft} onChange={e=>setFt(e.target.value)} style={{...sel,width:'100%'}}><option value="All">All Teams</option>{TEAMS.map(t=><option key={t}>{t}</option>)}</select>
-        <div style={{background:'#1E3048',borderRadius:8,padding:12,fontSize:12,color:'#7A8FA6'}}>{sc2.length} items · P1/P2 excluded</div>
-        <button onClick={()=>setSession({method,startedAt:new Date().toLocaleString()})} style={{background:'#C8973A',color:'#0D1B2A',border:'none',borderRadius:8,padding:12,fontSize:14,fontWeight:700,cursor:'pointer'}}>Start Session →</button>
-      </div>
-    </div>
-  )
-  return(
-    <div style={{display:'flex',flexDirection:'column',height:'100%'}}>
-      <div style={{display:'flex',alignItems:'center',gap:16,padding:'12px 20px',borderBottom:'1px solid #243447',background:'#162436'}}>
-        <span style={{fontSize:11,color:'#C8973A',fontWeight:700,letterSpacing:1}}>ACTIVE SESSION</span>
-        <span style={{fontSize:12,color:'#7A8FA6'}}>{session.method.toUpperCase()} · {session.startedAt}</span>
-        <div style={{marginLeft:'auto',display:'flex',gap:8}}>
-          <button onClick={()=>{setCp(true);setTimeout(()=>setCp(false),2000)}} style={{...sel,background:cp?'#27AE60':'#1E3048',color:cp?'#fff':'#7A8FA6'}}>{cp?'✓ Copied!':'📋 Copy Link'}</button>
-          <button onClick={()=>setSession(null)} style={{...sel,color:'#E74C3C',border:'1px solid #E74C3C'}}>End</button>
-        </div>
-      </div>
-      <div style={{overflowX:'auto',overflowY:'auto',flex:1}}>
-        <table style={{width:'100%',borderCollapse:'collapse',minWidth:800}}>
-          <thead style={{position:'sticky',top:0,zIndex:5,background:'#162436'}}>
-            <tr>
-              <th style={{...TH,minWidth:200}}>Item</th>
-              <th style={{...TH,width:70}}>Pri</th>
-              {scorers.map(s=><th key={s} style={{...TH,minWidth:80,textAlign:'center' as const,color:'#C8973A'}}>{s.split(' ')[0]}</th>)}
-              <th style={{...TH,width:60,textAlign:'center' as const}}>Avg BV</th>
-              <th style={{...TH,width:60,textAlign:'center' as const}}>Avg Urg</th>
-              <th style={{...TH,width:60,textAlign:'center' as const,color:'#27AE60'}}>WSJF</th>
-            </tr>
-          </thead>
-          <tbody>
-            {sc2.map((item,idx)=>{
-              const ab=avg(item.id,'bv'),au=avg(item.id,'urg')
-              const ew=item.effort==='S'?1:item.effort==='M'?2:item.effort==='L'?3:5
-              const wsjf=ab&&au?((parseFloat(ab)+parseFloat(au))/ew).toFixed(2):null
-              const pclr=pc(item.priority)
-              return(
-                <tr key={item.id} style={{background:idx%2===0?'#0D1B2A':'#162436'}}>
-                  <td style={{padding:'8px 12px',borderBottom:'1px solid #243447'}}><div style={{fontSize:11,color:'#7A8FA6',fontFamily:'monospace'}}>{item.item_id}</div><div style={{fontSize:12,color:'#F4F6F8',marginTop:2}}>{item.name}</div></td>
-                  <td style={{padding:'8px 12px',borderBottom:'1px solid #243447'}}><span style={{background:pclr.bg,color:'#fff',padding:'2px 8px',borderRadius:4,fontSize:11,fontWeight:700}}>{item.priority}</span></td>
-                  {scorers.map(scorer=>(
-                    <td key={scorer} style={{padding:'4px 6px',borderBottom:'1px solid #243447',textAlign:'center' as const}}>
-                      <div style={{display:'flex',gap:3,justifyContent:'center'}}>
-                        {['bv','urg'].map(field=>(
-                          <input key={field} type="number" min={1} max={5} value={scores[item.id]?.[scorer]?.[field]||''} onChange={e=>setScores(prev=>({...prev,[item.id]:{...(prev[item.id]||{}),[scorer]:{...(prev[item.id]?.[scorer]||{}),[field]:e.target.value}}}))} style={{width:30,background:'#1E3048',color:'#F4F6F8',border:'1px solid #243447',borderRadius:4,padding:3,textAlign:'center' as const,fontSize:12}} placeholder="—"/>
-                        ))}
-                      </div>
-                    </td>
-                  ))}
-                  <td style={{padding:'8px 6px',borderBottom:'1px solid #243447',textAlign:'center' as const,color:'#E8B95A',fontWeight:700}}>{ab||'—'}</td>
-                  <td style={{padding:'8px 6px',borderBottom:'1px solid #243447',textAlign:'center' as const,color:'#E8B95A',fontWeight:700}}>{au||'—'}</td>
-                  <td style={{padding:'8px 6px',borderBottom:'1px solid #243447',textAlign:'center' as const,color:wsjf?'#27AE60':'#7A8FA6',fontWeight:700,fontSize:13}}>{wsjf||'—'}</td>
-                </tr>
-              )
-            })}
-          </tbody>
-        </table>
-      </div>
     </div>
   )
 }
@@ -3499,9 +3413,8 @@ useEffect(()=>{
   {key:'projects',label:'Projects',icon:'◈',badge:totalViolations>0?totalViolations:null},
   {key:'backlog',label:'Backlog',icon:'≡'},
   {key:'roadmap',label:'Roadmap',icon:'◫'},
-  {key:'scoring',label:'Scoring',icon:'◎'},
   {key:'teams',label:'Teams',icon:'⬡'},
-  {key:'stakeholder',label:'Stakeholder View',icon:'◉'},
+  {key:'stakeholder',label:'Stakeholder',icon:'◉'},
   {key:'done',label:'Done',icon:'✓'},
 ]
 
@@ -3527,16 +3440,14 @@ useEffect(()=>{
         </div>
         <div style={{display:'flex',height:'100%'}}>
           {TABS.map(tab=>(
-            <button key={tab.key} onClick={()=>setActiveTab(tab.key)} style={{background:activeTab===tab.key?'#0D1B2A':'transparent',color:activeTab===tab.key?'#F4F6F8':'#7A8FA6',border:'none',borderBottom:activeTab===tab.key?'2px solid #C8973A':'2px solid transparent',padding:'0 20px',cursor:'pointer',fontSize:13,fontWeight:activeTab===tab.key?700:400,display:'flex',alignItems:'center',gap:8,height:'100%',position:'relative'}}>
-              <span style={{fontSize:16}}>{tab.icon}</span>
+            <button key={tab.key} onClick={()=>setActiveTab(tab.key)} style={{background:activeTab===tab.key?'#0D1B2A':'transparent',color:activeTab===tab.key?'#F4F6F8':'#7A8FA6',border:'none',borderBottom:activeTab===tab.key?'2px solid #C8973A':'2px solid transparent',padding:'0 13px',cursor:'pointer',fontSize:12.5,fontWeight:activeTab===tab.key?700:400,display:'flex',alignItems:'center',gap:6,height:'100%',position:'relative',whiteSpace:'nowrap' as const}}>
+              <span style={{fontSize:15}}>{tab.icon}</span>
               {tab.label}
               {tab.badge&&<span style={{background:'#E74C3C',color:'#fff',borderRadius:10,padding:'1px 6px',fontSize:10,fontWeight:700,marginLeft:2}}>{tab.badge}</span>}
             </button>
           ))}
         </div>
-        <div style={{marginLeft:'auto',display:'flex',gap:16,padding:'0 20px',alignItems:'center',fontSize:12,color:'#7A8FA6'}}>
-          <span>Deckers Brands · Retail Technology</span>
-          <span style={{color:'#C8973A',fontWeight:700}}>●</span>
+        <div title="Deckers Brands · Retail Technology" style={{marginLeft:'auto',display:'flex',gap:8,padding:'0 16px',alignItems:'center',fontSize:11,color:'#7A8FA6',whiteSpace:'nowrap' as const}}>
           <span>{items.length} items · {projects.length} projects · {milestones.length} milestones</span>
         </div>
       </div>
@@ -3544,7 +3455,6 @@ useEffect(()=>{
         {activeTab==='backlog'&&<Backlog items={items} setItems={setItems} projects={projects} setProjects={setProjects}/>}
         {activeTab==='projects'&&<Projects items={items} setItems={setItems} projects={projects} setProjects={setProjects} milestones={milestones} setMilestones={setMilestones}/>}
 {activeTab==='roadmap'&&<Roadmap items={items} setItems={setItems} projects={projects} setProjects={setProjects} milestones={milestones}/>}
-        {activeTab==='scoring'&&<Scoring items={items}/>}
         {activeTab==='teams'&&<Teams items={items} projects={projects} milestones={milestones}/>}
         {activeTab==='desk'&&<Desk items={items} setItems={setItems} projects={projects} milestones={milestones}/>}
         {activeTab==='stakeholder'&&<Stakeholder items={items} projects={projects} milestones={milestones}/>}
