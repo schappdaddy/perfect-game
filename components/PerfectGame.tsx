@@ -2440,7 +2440,7 @@ function Teams({items,projects,milestones}:{items:any[],projects:any[],milestone
       if(pa<=1&&pb<=1)return pa-pb
       return (a.committed_priority??a.sort_order??999)-(b.committed_priority??b.sort_order??999)
     })
-    const inFlight=rankedX.filter(i=>i.start_date&&i.end_date).sort((a,b)=>a.end_date<b.end_date?-1:1)
+    const inFlight=rankedX.filter(i=>i.start_date&&i.end_date)
     const upNext=rankedX.filter(i=>!(i.start_date&&i.end_date))
     const teamProjs=teamProjects.filter((p:any)=>((p.start_date&&p.end_date)||(p.ongoing&&p.start_date))&&!PROJECT_TERMINAL.includes(p.status))
     // Roadmap grid
