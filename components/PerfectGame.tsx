@@ -17,6 +17,7 @@ const PROJECT_STATUSES=['Queued','Planning','In Progress','Testing','On Hold','C
 const TEAMS=['Consumer Experience','Operational Efficiency']
 const EFFORTS=['S','M','L','XL']
 const REQUEST_TYPES=['Bug','Tech Debt','Enhancement','Strategic Initiative','Business Request']
+const MILESTONE_TYPES_G=['Milestone','Go-Live','Deadline','Review','Release','Code Freeze','UAT','Kickoff']
 const SWIMLANES=['POS','Pricing','Tax','Loyalty','WFM','Inventory','Reporting','SafeSize','Product','Clienteling','Integrations']
 const PRIORITY_ORDER={P1:0,P2:1,P3:2,P4:3,Backlog:4}
 const RAG_COLORS={Green:'#27AE60',Amber:'#D4820A',Red:'#C0392B'}
@@ -2911,6 +2912,16 @@ function Desk({items,setItems,projects,milestones,setMilestones,tasks,setTasks}:
   const [projView,setProjView]=useState<any>(null)
   const [msName,setMsName]=useState('')
   const [msDate,setMsDate]=useState('')
+  const [msEditId,setMsEditId]=useState<any>(null)
+  const [msEdit,setMsEdit]=useState<any>({name:'',date:'',type:'Milestone'})
+  async function saveMsEdit(){
+    if(!msEditId||!msEdit.name.trim()||!msEdit.date)return
+    const upd={name:msEdit.name.trim(),date:msEdit.date,type:msEdit.type}
+    setMilestones((prev:any[])=>prev.map(m=>m.id===msEditId?{...m,...upd}:m))
+    setMsEditId(null)
+    const{error}=await supabase.from('milestones').update(upd).eq('id',msEditId)
+    if(error)alert('Failed to save milestone: '+error.message)
+  }
   const [tasksOpen,setTasksOpen]=useState(true)
   const [showDoneTasks,setShowDoneTasks]=useState(false)
   const [ntProj,setNtProj]=useState('')
@@ -3327,12 +3338,31 @@ function Desk({items,setItems,projects,milestones,setMilestones,tasks,setTasks}:
               <div style={{fontSize:10,fontWeight:700,letterSpacing:1,color:'#C8973A',marginBottom:5}}>MILESTONES</div>
               {pms.map(m=>{
                 const clr=m.completed?'#27AE60':(+new Date(m.date+'T12:00:00')<Date.now()?'#E74C3C':'#C8973A')
+                const editing=msEditId===m.id
+                if(editing)return(
+                  <div key={m.id} style={{display:'flex',gap:6,alignItems:'center',marginBottom:4,padding:'4px 6px',border:'1px solid #C8973A',borderRadius:6}}>
+                    <input value={msEdit.name} onChange={e=>setMsEdit((p:any)=>({...p,name:e.target.value}))} onKeyDown={e=>{if(e.key==='Enter')saveMsEdit()}} autoFocus
+                      style={{flex:1,background:'#0D1B2A',border:'1px solid #243447',borderRadius:4,color:'#F4F6F8',fontSize:11,padding:'3px 6px'}}/>
+                    <input type="date" value={msEdit.date} onChange={e=>setMsEdit((p:any)=>({...p,date:e.target.value}))}
+                      style={{background:'#0D1B2A',border:'1px solid #243447',borderRadius:4,color:'#F4F6F8',fontSize:11,padding:'3px 6px'}}/>
+                    <select value={msEdit.type} onChange={e=>setMsEdit((p:any)=>({...p,type:e.target.value}))}
+                      style={{background:'#0D1B2A',border:'1px solid #243447',borderRadius:4,color:'#F4F6F8',fontSize:11,padding:'3px 4px'}}>
+                      {MILESTONE_TYPES_G.map(t=><option key={t} value={t}>{t}</option>)}
+                    </select>
+                    <button onClick={()=>setMsEditId(null)} style={{background:'none',border:'1px solid #243447',borderRadius:4,color:'#7A8FA6',fontSize:10,padding:'2px 7px',cursor:'pointer'}}>Cancel</button>
+                    <button onClick={saveMsEdit} disabled={!msEdit.name.trim()||!msEdit.date} style={{background:'#C8973A',border:'none',borderRadius:4,color:'#0D1B2A',fontSize:10,fontWeight:700,padding:'2px 9px',cursor:'pointer',opacity:!msEdit.name.trim()||!msEdit.date?0.5:1}}>Save</button>
+                  </div>
+                )
                 return(
-                  <label key={m.id} style={{display:'flex',alignItems:'center',gap:7,fontSize:11,marginBottom:3,cursor:'pointer'}} title={m.completed?'Mark incomplete':'Mark complete'}>
-                    <input type="checkbox" checked={!!m.completed} onChange={()=>toggleMs(m)} style={{cursor:'pointer'}}/>
-                    <span style={{color:clr,fontWeight:700}}>◆ {m.date}</span>
-                    <span style={{color:m.completed?'#7A8FA6':'#F4F6F8',textDecoration:m.completed?'line-through':'none'}}>{m.name}</span>
-                  </label>
+                  <div key={m.id} style={{display:'flex',alignItems:'center',gap:7,fontSize:11,marginBottom:3}}>
+                    <input type="checkbox" checked={!!m.completed} onChange={()=>toggleMs(m)} style={{cursor:'pointer'}} title={m.completed?'Mark incomplete':'Mark complete'}/>
+                    <span onClick={()=>{setMsEditId(m.id);setMsEdit({name:m.name||'',date:m.date||'',type:m.type||'Milestone'})}}
+                      style={{display:'flex',gap:7,alignItems:'center',cursor:'pointer',flex:1}} title="Click to edit name, date, and type">
+                      <span style={{color:clr,fontWeight:700}}>◆ {m.date}</span>
+                      <span style={{color:m.completed?'#7A8FA6':'#F4F6F8',textDecoration:m.completed?'line-through':'none'}}>{m.name}</span>
+                      {m.type&&m.type!=='Milestone'&&<span style={{fontSize:9,color:'#7A8FA6',border:'1px solid #243447',borderRadius:3,padding:'0 5px'}}>{m.type}</span>}
+                    </span>
+                  </div>
                 )
               })}
               {pms.length===0&&<div style={{fontSize:11,color:'#7A8FA6',fontStyle:'italic',marginBottom:4}}>No milestones yet</div>}
