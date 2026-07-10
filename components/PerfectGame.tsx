@@ -2834,7 +2834,7 @@ function crumbAge(dateStr:string){
   return Math.floor((Date.now()-+d)/86400000)
 }
 
-function Desk({items,setItems,projects,milestones}:{items:any[],setItems:any,projects:any[],milestones:any[]}) {
+function Desk({items,setItems,projects,milestones,setMilestones}:{items:any[],setItems:any,projects:any[],milestones:any[],setMilestones:any}) {
   async function unflagDev(item:any){
     // dev-only flag clears; a 'both' flag downgrades to stakeholder-only
     const next=(item.flag_audience==='both')?{flagged:true,flag_audience:'stakeholder'}:{flagged:false,flag_audience:null}
@@ -2859,6 +2859,19 @@ function Desk({items,setItems,projects,milestones}:{items:any[],setItems:any,pro
   const [noteEditId,setNoteEditId]=useState<any>(null)
   const [noteDraft,setNoteDraft]=useState('')
   const [projView,setProjView]=useState<any>(null)
+  const [msName,setMsName]=useState('')
+  const [msDate,setMsDate]=useState('')
+  async function toggleMs(m:any){
+    const v=!m.completed
+    setMilestones((prev:any[])=>prev.map(x=>x.id===m.id?{...x,completed:v}:x))
+    await supabase.from('milestones').update({completed:v}).eq('id',m.id)
+  }
+  async function addMs(){
+    if(!msName.trim()||!msDate||!projView) return
+    const{data,error}=await supabase.from('milestones').insert({project_id:projView.id,name:msName.trim(),date:msDate,type:'milestone',completed:false,sort_order:milestones.filter(m=>m.project_id===projView.id).length}).select().single()
+    if(error){alert('Failed to add milestone: '+error.message);return}
+    if(data){setMilestones((prev:any[])=>[...prev,data]);setMsName('');setMsDate('')}
+  }
   async function saveNote(item:any){
     setItems((prev:any[])=>prev.map(i=>i.id===item.id?{...i,notes:noteDraft}:i))
     setNoteEditId(null)
@@ -3178,22 +3191,37 @@ function Desk({items,setItems,projects,milestones}:{items:any[],setItems:any,pro
               ))}
             </div>
             {projView.description&&<div style={{fontSize:12,color:'#B8C4D0',lineHeight:1.5,marginBottom:12}}>{projView.description}</div>}
-            {pms.length>0&&(
-              <div style={{marginBottom:12}}>
-                <div style={{fontSize:10,fontWeight:700,letterSpacing:1,color:'#C8973A',marginBottom:5}}>MILESTONES</div>
-                {pms.map(m=>{
-                  const clr=m.completed?'#27AE60':(+new Date(m.date+'T12:00:00')<Date.now()?'#E74C3C':'#C8973A')
-                  return <div key={m.id} style={{fontSize:11,marginBottom:3}}><span style={{color:clr,fontWeight:700}}>◆ {m.date}</span> <span style={{color:m.completed?'#7A8FA6':'#F4F6F8',textDecoration:m.completed?'line-through':'none'}}>{m.name}</span></div>
-                })}
+            <div style={{marginBottom:12}}>
+              <div style={{fontSize:10,fontWeight:700,letterSpacing:1,color:'#C8973A',marginBottom:5}}>MILESTONES</div>
+              {pms.map(m=>{
+                const clr=m.completed?'#27AE60':(+new Date(m.date+'T12:00:00')<Date.now()?'#E74C3C':'#C8973A')
+                return(
+                  <label key={m.id} style={{display:'flex',alignItems:'center',gap:7,fontSize:11,marginBottom:3,cursor:'pointer'}} title={m.completed?'Mark incomplete':'Mark complete'}>
+                    <input type="checkbox" checked={!!m.completed} onChange={()=>toggleMs(m)} style={{cursor:'pointer'}}/>
+                    <span style={{color:clr,fontWeight:700}}>◆ {m.date}</span>
+                    <span style={{color:m.completed?'#7A8FA6':'#F4F6F8',textDecoration:m.completed?'line-through':'none'}}>{m.name}</span>
+                  </label>
+                )
+              })}
+              {pms.length===0&&<div style={{fontSize:11,color:'#7A8FA6',fontStyle:'italic',marginBottom:4}}>No milestones yet</div>}
+              <div style={{display:'flex',gap:6,marginTop:6}}>
+                <input placeholder="New milestone..." value={msName} onChange={e=>setMsName(e.target.value)} onKeyDown={e=>{if(e.key==='Enter')addMs()}}
+                  style={{flex:1,background:'#0D1B2A',border:'1px solid #243447',borderRadius:6,color:'#F4F6F8',fontSize:11,padding:'5px 8px'}}/>
+                <input type="date" value={msDate} onChange={e=>setMsDate(e.target.value)}
+                  style={{background:'#0D1B2A',border:'1px solid #243447',borderRadius:6,color:'#F4F6F8',fontSize:11,padding:'5px 8px'}}/>
+                <button onClick={addMs} disabled={!msName.trim()||!msDate} style={{background:'#C8973A',border:'none',borderRadius:6,color:'#0D1B2A',fontSize:11,fontWeight:700,padding:'5px 12px',cursor:'pointer',opacity:!msName.trim()||!msDate?0.5:1}}>+ Add</button>
               </div>
-            )}
+            </div>
             {(()=>{
               const uncommittedP=pis.filter(i=>i.status!=='Done'&&!(i.start_date&&i.end_date))
               const row=(i:any)=>(
-                <div key={i.id} style={{display:'flex',alignItems:'baseline',gap:8,fontSize:11,marginBottom:3}}>
+                <div key={i.id} style={{display:'flex',alignItems:'center',gap:8,fontSize:11,marginBottom:3}}>
                   <span style={{color:'#7A8FA6',fontFamily:'monospace',fontSize:10,flexShrink:0}}>{i.item_id}</span>
                   <span style={{color:'#F4F6F8',flex:1}}>{i.name}</span>
-                  <span style={{color:sc(i.status),fontSize:10,flexShrink:0}}>{i.status}</span>
+                  <select value={i.status||''} onChange={e=>applyItemStatus(items,setItems,i.id,e.target.value)}
+                    style={{background:'#0D1B2A',border:'1px solid #243447',borderRadius:4,color:sc(i.status),fontSize:10,padding:'1px 4px',cursor:'pointer',fontFamily:'inherit',flexShrink:0}}>
+                    {STATUSES.map(st=><option key={st} value={st}>{st}</option>)}
+                  </select>
                   {i.end_date&&<span style={{color:'#7A8FA6',fontSize:10,flexShrink:0}}>{i.end_date}</span>}
                 </div>
               )
@@ -3214,9 +3242,13 @@ function Desk({items,setItems,projects,milestones}:{items:any[],setItems:any,pro
                   <div>
                     <div style={{fontSize:10,fontWeight:700,letterSpacing:1,color:'#16A085',marginBottom:5}}>✓ DONE ({doneP.length})</div>
                     {doneP.map(i=>(
-                      <div key={i.id} style={{display:'flex',alignItems:'baseline',gap:8,fontSize:11,marginBottom:3,opacity:0.7}}>
+                      <div key={i.id} style={{display:'flex',alignItems:'center',gap:8,fontSize:11,marginBottom:3,opacity:0.7}}>
                         <span style={{color:'#7A8FA6',fontFamily:'monospace',fontSize:10,flexShrink:0}}>{i.item_id}</span>
                         <span style={{color:'#9AABBC',flex:1,textDecoration:'line-through',textDecorationColor:'#3A4A5E'}}>{i.name}</span>
+                        <select value={i.status||''} onChange={e=>applyItemStatus(items,setItems,i.id,e.target.value)}
+                          style={{background:'#0D1B2A',border:'1px solid #243447',borderRadius:4,color:'#16A085',fontSize:10,padding:'1px 4px',cursor:'pointer',fontFamily:'inherit',flexShrink:0}}>
+                          {STATUSES.map(st=><option key={st} value={st}>{st}</option>)}
+                        </select>
                         {i.end_date&&<span style={{color:'#7A8FA6',fontSize:10,flexShrink:0}}>{i.end_date}</span>}
                       </div>
                     ))}
@@ -3456,7 +3488,7 @@ useEffect(()=>{
         {activeTab==='projects'&&<Projects items={items} setItems={setItems} projects={projects} setProjects={setProjects} milestones={milestones} setMilestones={setMilestones}/>}
 {activeTab==='roadmap'&&<Roadmap items={items} setItems={setItems} projects={projects} setProjects={setProjects} milestones={milestones}/>}
         {activeTab==='teams'&&<Teams items={items} projects={projects} milestones={milestones}/>}
-        {activeTab==='desk'&&<Desk items={items} setItems={setItems} projects={projects} milestones={milestones}/>}
+        {activeTab==='desk'&&<Desk items={items} setItems={setItems} projects={projects} milestones={milestones} setMilestones={setMilestones}/>}
         {activeTab==='stakeholder'&&<Stakeholder items={items} projects={projects} milestones={milestones}/>}
         {activeTab==='done'&&<DoneTab items={items} setItems={setItems} projects={projects} setProjects={setProjects}/>}
       </div>
