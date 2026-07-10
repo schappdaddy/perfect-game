@@ -79,6 +79,8 @@ async function closeItemsForProject(items:any[],setItems:any,projectName:string,
 function flagDev(i:any){return i.flagged&&(i.flag_audience==='dev'||i.flag_audience==='both'||!i.flag_audience)}
 function flagStk(i:any){return i.flagged&&(i.flag_audience==='stakeholder'||i.flag_audience==='both'||!i.flag_audience)}
 function flagLabel(i:any){return !i.flagged?'':i.flag_audience==='dev'?'D':i.flag_audience==='stakeholder'?'S':'DS'}
+// Request-type glyphs — instant visual ID on item lines
+function rt(t:any){const m:any={'Bug':'🐞','Tech Debt':'🔧','Enhancement':'✨','Strategic Initiative':'🎯','Business Request':'💼'};return m[t]||''}
 function sc(s) {
   const m={'In Progress':'#27AE60','Testing':'#C8973A','Need Requirements':'#E74C3C','Under Review':'#E8B95A','Will Not Implement':'#7A8FA6','Ready to Score':'#8E44AD','Accepted':'#2E86AB','Done':'#16A085'}
   return m[s]||'#7A8FA6'
@@ -350,7 +352,7 @@ function ProjectDetail({project,items,setItems,projects,milestones,setMilestones
                 <div style={{display:'flex',alignItems:'center',gap:6,marginBottom:3,flexWrap:'wrap' as const}}>
                   <span style={{background:pclr.bg,color:'#fff',padding:'1px 5px',borderRadius:3,fontSize:9,fontWeight:700}}>{item.priority}</span>
                   <span style={{fontSize:10,color:'#7A8FA6',fontFamily:'monospace'}}>{item.item_id}</span>
-                  <span style={{fontSize:11,color:'#F4F6F8',fontWeight:600,flex:1,overflow:'hidden',whiteSpace:'nowrap' as const,textOverflow:'ellipsis'}}>{item.name}</span>
+                  <span style={{fontSize:11,color:'#F4F6F8',fontWeight:600,flex:1,overflow:'hidden',whiteSpace:'nowrap' as const,textOverflow:'ellipsis'}}>{rt(item.request_type)} {item.name}</span>
                   {item.effort&&<span style={{fontSize:9,color:'#7A8FA6'}}>{item.effort}</span>}
                 </div>
                 <div style={{display:'flex',gap:10,fontSize:10,color:'#7A8FA6',alignItems:'center'}}>
@@ -444,7 +446,7 @@ function ProjectDetail({project,items,setItems,projects,milestones,setMilestones
                 <div style={{display:'flex',alignItems:'center',gap:6,flexWrap:'wrap' as const}}>
                   <span style={{background:pclr.bg,color:'#fff',padding:'1px 5px',borderRadius:3,fontSize:9,fontWeight:700}}>{item.priority}</span>
                   <span style={{fontSize:10,color:'#7A8FA6',fontFamily:'monospace'}}>{item.item_id}</span>
-                  <span style={{fontSize:11,color:'#C8C8D4',flex:1,overflow:'hidden',whiteSpace:'nowrap' as const,textOverflow:'ellipsis'}}>{item.name}</span>
+                  <span style={{fontSize:11,color:'#C8C8D4',flex:1,overflow:'hidden',whiteSpace:'nowrap' as const,textOverflow:'ellipsis'}}>{rt(item.request_type)} {item.name}</span>
                   <select value={item.status||''} onClick={e=>e.stopPropagation()}
                     onChange={e=>applyItemStatus(items,setItems,item.id,e.target.value)}
                     style={{background:'#0F1C2B',border:'1px solid #243447',borderRadius:4,color:sc(item.status),fontSize:10,padding:'1px 4px',cursor:'pointer',fontFamily:'inherit',flexShrink:0}}>
@@ -477,7 +479,7 @@ function ProjectDetail({project,items,setItems,projects,milestones,setMilestones
             {doneItems.map(item=>(
               <div key={item.id} style={{display:'flex',alignItems:'center',gap:6,padding:'5px 10px',background:'#12202F',border:'1px solid #1A2838',borderRadius:6,marginBottom:4,opacity:0.75}}>
                 <span style={{fontSize:10,color:'#7A8FA6',fontFamily:'monospace',flexShrink:0}}>{item.item_id}</span>
-                <span style={{fontSize:11,color:'#9AABBC',flex:1,overflow:'hidden',whiteSpace:'nowrap' as const,textOverflow:'ellipsis',textDecoration:'line-through',textDecorationColor:'#3A4A5E'}}>{item.name}</span>
+                <span style={{fontSize:11,color:'#9AABBC',flex:1,overflow:'hidden',whiteSpace:'nowrap' as const,textOverflow:'ellipsis',textDecoration:'line-through',textDecorationColor:'#3A4A5E'}}>{rt(item.request_type)} {item.name}</span>
                 {item.end_date&&<span style={{fontSize:9,color:'#7A8FA6',flexShrink:0}}>{item.end_date}</span>}
                 <select value={item.status||''} onClick={e=>e.stopPropagation()}
                   onChange={e=>applyItemStatus(items,setItems,item.id,e.target.value)}
@@ -1272,7 +1274,7 @@ const sorted=items.filter(i=>!isItemDone(i)).sort((a,b)=>{
                     <td style={{...TD,color:'#7A8FA6',fontFamily:'monospace',fontSize:10}}>{item.item_id}</td>
                     <td style={TD}>
                       <div style={{display:'flex',alignItems:'center',gap:6}}>
-                        <div style={{fontSize:12,color:'#F4F6F8',fontWeight:isSel?700:400}}>{item.name}</div>
+                        <div style={{fontSize:12,color:'#F4F6F8',fontWeight:isSel?700:400}}>{rt(item.request_type)} {item.name}</div>
                         {item.start_date&&item.end_date&&(
                           <span title={`Committed: ${item.start_date} → ${item.end_date}`}
                             style={{background:'rgba(39,174,96,0.15)',color:'#27AE60',border:'1px solid rgba(39,174,96,0.4)',borderRadius:4,padding:'1px 6px',fontSize:9,fontWeight:700,flexShrink:0}}>
@@ -1797,7 +1799,7 @@ function Roadmap({items,setItems,projects,setProjects,milestones}:{items:any[],p
                   onClick={()=>{if(!noteOpen){setDiscussNoteId(item.id);setDiscussNoteDraft(item.notes||'')}}}
                   style={{background:'#1E3048',border:noteOpen?'1px solid #C8973A':'1px solid rgba(200,151,58,0.3)',borderRadius:6,padding:'6px 8px',marginBottom:6,cursor:noteOpen?'default':'pointer'}}>
                   <div style={{fontSize:10,color:'#7A8FA6',fontFamily:'monospace'}}>{item.item_id}</div>
-                  <div style={{fontSize:11,color:'#F4F6F8',marginTop:2,lineHeight:1.3}}>{item.name}</div>
+                  <div style={{fontSize:11,color:'#F4F6F8',marginTop:2,lineHeight:1.3}}>{rt(item.request_type)} {item.name}</div>
                   <div style={{marginTop:4,display:'flex',alignItems:'center',gap:6}}>
                     <span style={{background:pc(item.priority).bg,color:'#fff',padding:'1px 6px',borderRadius:3,fontSize:9,fontWeight:700}}>{item.priority}</span>
                     {item.notes&&!noteOpen&&<span title="Has notes" style={{fontSize:10}}>📝</span>}
@@ -1859,7 +1861,7 @@ function Roadmap({items,setItems,projects,setProjects,milestones}:{items:any[],p
                           <div style={{width:1,height:20,background:'#243447',flexShrink:0}}/>
                           <span style={{background:pc(item.priority).bg,color:'#fff',padding:'1px 5px',borderRadius:3,fontSize:9,fontWeight:700,flexShrink:0}}>{item.priority}</span>
                           <div style={{overflow:'hidden'}}>
-                            <div style={{fontSize:11,color:isViolation?'#E74C3C':'#C8C8D4',overflow:'hidden',whiteSpace:'nowrap' as const,textOverflow:'ellipsis',maxWidth:130}}>{item.name}{isViolation?' ⚠️':''}</div>
+                            <div style={{fontSize:11,color:isViolation?'#E74C3C':'#C8C8D4',overflow:'hidden',whiteSpace:'nowrap' as const,textOverflow:'ellipsis',maxWidth:130}}>{rt(item.request_type)} {item.name}{isViolation?' ⚠️':''}</div>
                             <div style={{fontSize:9,color:'#7A8FA6',overflow:'hidden',whiteSpace:'nowrap' as const,textOverflow:'ellipsis'}}><span style={{fontFamily:'monospace'}}>{item.item_id}</span> <span style={{color:sc(item.status),fontWeight:700}}>● {item.status}</span></div>
                           </div>
                         </div>
@@ -1883,7 +1885,7 @@ function Roadmap({items,setItems,projects,setProjects,milestones}:{items:any[],p
                     <div key={item.id} style={{height:ROW_H,borderBottom:'1px solid #243447',background:idx%2===0?'#0D1B2A':'#111D2C',display:'flex',alignItems:'center',padding:'0 8px 0 28px',gap:6}}>
                       <span style={{background:pc(item.priority).bg,color:'#fff',padding:'1px 5px',borderRadius:3,fontSize:9,fontWeight:700}}>{item.priority}</span>
                       <div style={{overflow:'hidden'}}>
-                        <div style={{fontSize:11,color:'#C8C8D4',overflow:'hidden',whiteSpace:'nowrap' as const,textOverflow:'ellipsis',maxWidth:140}}>{item.name}</div>
+                        <div style={{fontSize:11,color:'#C8C8D4',overflow:'hidden',whiteSpace:'nowrap' as const,textOverflow:'ellipsis',maxWidth:140}}>{rt(item.request_type)} {item.name}</div>
                         <div style={{fontSize:9,color:'#7A8FA6',fontFamily:'monospace'}}>{item.item_id}</div>
                       </div>
                     </div>
@@ -2122,7 +2124,7 @@ function Roadmap({items,setItems,projects,setProjects,milestones}:{items:any[],p
                             <span style={{fontSize:9,color:'#7A8FA6',fontFamily:'monospace'}}>{item.item_id}</span>
                             {item.effort&&<span style={{fontSize:9,color:'#7A8FA6',marginLeft:'auto'}}>{item.effort}</span>}
                           </div>
-                          <div style={{fontSize:11,color:'#F4F6F8',lineHeight:1.3,marginBottom:3}}>{item.name}</div>
+                          <div style={{fontSize:11,color:'#F4F6F8',lineHeight:1.3,marginBottom:3}}>{rt(item.request_type)} {item.name}</div>
                           <div style={{display:'flex',alignItems:'center',gap:6,marginBottom:3,flexWrap:'wrap' as const}}>
                             {item.status&&<span style={{fontSize:9,fontWeight:700,color:sc(item.status)}}>{item.status}</span>}
                             {item.vendor_delivery_date&&<span style={{fontSize:9,color:'#7A8FA6'}}>🚚 {item.vendor_delivery_date}</span>}
@@ -2409,7 +2411,7 @@ function Teams({items,projects,milestones}:{items:any[],projects:any[],milestone
                     <div style={{flex:1,minWidth:0}}>
                       <div style={{display:'flex',alignItems:'center',gap:8,flexWrap:'wrap' as const}}>
                         <span style={{fontSize:10,color:'#7A8FA6',fontFamily:'monospace'}}>{item.item_id}</span>
-                        <span style={{fontSize:13,color:'#F4F6F8',fontWeight:600}}>{item.name}</span>
+                        <span style={{fontSize:13,color:'#F4F6F8',fontWeight:600}}>{rt(item.request_type)} {item.name}</span>
                         {committed&&<span style={{fontSize:9,color:'#27AE60',border:'1px solid rgba(39,174,96,0.4)',borderRadius:3,padding:'1px 5px'}}>✓ committed</span>}
                         {item.flagged&&<span style={{fontSize:11}}>🚩</span>}
                       </div>
@@ -2734,7 +2736,7 @@ function Stakeholder({items,projects,milestones}:{items:any[],projects:any[],mil
       {[...p1,...p2].map(item=>(
         <div key={item.id} style={{background:item.priority==='P1'?'#2D1515':'#2D1E0A',border:`1px solid ${(item.priority==='P1'?'#C00000':'#D4820A')}44`,borderRadius:8,padding:'12px 16px',marginBottom:8,display:'flex',alignItems:'center',gap:12}}>
           <span style={{background:pc(item.priority).bg,color:'#fff',padding:'2px 8px',borderRadius:4,fontSize:11,fontWeight:700}}>{item.priority}</span>
-          <div style={{flex:1}}><div style={{fontSize:13,fontWeight:600,color:'#F4F6F8'}}>{item.name}</div><div style={{fontSize:11,color:'#7A8FA6'}}>{item.item_id} · {item.swimlane} · {item.status}</div></div>
+          <div style={{flex:1}}><div style={{fontSize:13,fontWeight:600,color:'#F4F6F8'}}>{rt(item.request_type)} {item.name}</div><div style={{fontSize:11,color:'#7A8FA6'}}>{item.item_id} · {item.swimlane} · {item.status}</div></div>
           <button onClick={()=>setFl(p=>({...p,[item.id]:!p[item.id]}))} style={{background:'none',border:'none',cursor:'pointer',fontSize:18,opacity:fl[item.id]||item.flagged?1:0.3}}>🚩</button>
         </div>
       ))}
@@ -3018,7 +3020,7 @@ function Desk({items,setItems,projects,milestones,setMilestones}:{items:any[],se
                   style={{fontSize:11,marginBottom:10,lineHeight:1.4,position:'relative' as const,paddingRight:16,cursor:editing?'default':'pointer',borderLeft:editing?'2px solid #C8973A':'2px solid transparent',paddingLeft:6}}>
                   <button onClick={e=>{e.stopPropagation();unflag(i)}} title="Remove from this list"
                     style={{position:'absolute',right:0,top:0,background:'none',border:'none',color:'#7A8FA6',fontSize:12,cursor:'pointer',padding:0,lineHeight:1}}>✕</button>
-                  <span style={{color:'#F4F6F8',fontWeight:600}}>{i.name}</span> <span style={{color:'#7A8FA6',fontSize:10}}>{i.item_id}</span>
+                  <span style={{color:'#F4F6F8',fontWeight:600}}>{rt(i.request_type)} {i.name}</span> <span style={{color:'#7A8FA6',fontSize:10}}>{i.item_id}</span>
                   {!editing&&i.notes&&<div style={{color:'#7A8FA6',fontSize:10,marginTop:1,overflow:'hidden',display:'-webkit-box',WebkitLineClamp:3,WebkitBoxOrient:'vertical' as const}}>{i.notes}</div>}
                   {editing&&(
                     <div style={{marginTop:5}} onClick={e=>e.stopPropagation()}>
@@ -3115,7 +3117,7 @@ function Desk({items,setItems,projects,milestones,setMilestones}:{items:any[],se
           {dueSoon.length===0&&<div style={{fontSize:11,color:'#7A8FA6',fontStyle:'italic'}}>Nothing due</div>}
           {dueSoon.map(i=>{const overdue=+new Date(i.end_date+'T12:00:00')<+now;return(
             <div key={i.id} style={{fontSize:11,marginBottom:6,lineHeight:1.4}}>
-              <span style={{color:overdue?'#E74C3C':'#C8973A',fontWeight:700}}>{fmtDt(i.end_date)}{overdue?' ⚠':''}</span> <span style={{color:'#F4F6F8'}}>{i.name}</span>
+              <span style={{color:overdue?'#E74C3C':'#C8973A',fontWeight:700}}>{fmtDt(i.end_date)}{overdue?' ⚠':''}</span> <span style={{color:'#F4F6F8'}}>{rt(i.request_type)} {i.name}</span>
               <div style={{color:'#7A8FA6',fontSize:10}}>{i.item_id}{i.parent_project?` · ${i.parent_project}`:''} · <span style={{color:sc(i.status)}}>{i.status}</span></div>
             </div>
           )})}
@@ -3139,7 +3141,7 @@ function Desk({items,setItems,projects,milestones,setMilestones}:{items:any[],se
           {vend.length===0&&<div style={{fontSize:11,color:'#7A8FA6',fontStyle:'italic'}}>None due</div>}
           {vend.map(i=>{const overdue=+new Date(i.vendor_delivery_date+'T12:00:00')<+now;return(
             <div key={i.id} style={{fontSize:11,marginBottom:6,lineHeight:1.4}}>
-              <span style={{color:overdue?'#E74C3C':'#C8973A',fontWeight:700}}>{fmtDt(i.vendor_delivery_date)}{overdue?' ⚠':''}</span> <span style={{color:'#F4F6F8'}}>{i.name}</span>
+              <span style={{color:overdue?'#E74C3C':'#C8973A',fontWeight:700}}>{fmtDt(i.vendor_delivery_date)}{overdue?' ⚠':''}</span> <span style={{color:'#F4F6F8'}}>{rt(i.request_type)} {i.name}</span>
               <div style={{color:'#7A8FA6',fontSize:10}}>{i.item_id}{i.vendor?` · ${i.vendor}`:''}</div>
             </div>
           )})}
@@ -3160,7 +3162,7 @@ function Desk({items,setItems,projects,milestones,setMilestones}:{items:any[],se
                 </div>
                 {shown.map(i=>(
                   <div key={i.id} style={{fontSize:10,color:'#B8C4D0',lineHeight:1.5,paddingLeft:14,overflow:'hidden',whiteSpace:'nowrap' as const,textOverflow:'ellipsis'}}>
-                    {i.name} <span style={{color:'#7A8FA6'}}>· {i.status}</span>
+                    {rt(i.request_type)} {i.name} <span style={{color:'#7A8FA6'}}>· {i.status}</span>
                   </div>
                 ))}
                 {pis.length>5&&<div style={{fontSize:9,color:'#7A8FA6',paddingLeft:14}}>+{pis.length-5} more</div>}
@@ -3217,7 +3219,7 @@ function Desk({items,setItems,projects,milestones,setMilestones}:{items:any[],se
               const row=(i:any)=>(
                 <div key={i.id} style={{display:'flex',alignItems:'center',gap:8,fontSize:11,marginBottom:3}}>
                   <span style={{color:'#7A8FA6',fontFamily:'monospace',fontSize:10,flexShrink:0}}>{i.item_id}</span>
-                  <span style={{color:'#F4F6F8',flex:1}}>{i.name}</span>
+                  <span style={{color:'#F4F6F8',flex:1}}>{rt(i.request_type)} {i.name}</span>
                   <select value={i.status||''} onChange={e=>applyItemStatus(items,setItems,i.id,e.target.value)}
                     style={{background:'#0D1B2A',border:'1px solid #243447',borderRadius:4,color:sc(i.status),fontSize:10,padding:'1px 4px',cursor:'pointer',fontFamily:'inherit',flexShrink:0}}>
                     {STATUSES.map(st=><option key={st} value={st}>{st}</option>)}
@@ -3244,7 +3246,7 @@ function Desk({items,setItems,projects,milestones,setMilestones}:{items:any[],se
                     {doneP.map(i=>(
                       <div key={i.id} style={{display:'flex',alignItems:'center',gap:8,fontSize:11,marginBottom:3,opacity:0.7}}>
                         <span style={{color:'#7A8FA6',fontFamily:'monospace',fontSize:10,flexShrink:0}}>{i.item_id}</span>
-                        <span style={{color:'#9AABBC',flex:1,textDecoration:'line-through',textDecorationColor:'#3A4A5E'}}>{i.name}</span>
+                        <span style={{color:'#9AABBC',flex:1,textDecoration:'line-through',textDecorationColor:'#3A4A5E'}}>{rt(i.request_type)} {i.name}</span>
                         <select value={i.status||''} onChange={e=>applyItemStatus(items,setItems,i.id,e.target.value)}
                           style={{background:'#0D1B2A',border:'1px solid #243447',borderRadius:4,color:'#16A085',fontSize:10,padding:'1px 4px',cursor:'pointer',fontFamily:'inherit',flexShrink:0}}>
                           {STATUSES.map(st=><option key={st} value={st}>{st}</option>)}
@@ -3363,7 +3365,7 @@ function DoneTab({items,setItems,projects,setProjects}:{items:any[],setItems:any
               <tbody>{doneItems.map(i=>(
                 <tr key={i.id}>
                   <td style={{...TDD,fontFamily:'monospace',fontSize:10,color:'#7A8FA6'}}>{i.item_id}</td>
-                  <td style={{...TDD,color:'#F4F6F8'}}>{i.name}</td>
+                  <td style={{...TDD,color:'#F4F6F8'}}>{rt(i.request_type)} {i.name}</td>
                   <td style={TDD}>
                     <select value={i.status} onChange={e=>applyItemStatus(items,setItems,i.id,e.target.value)}
                       style={{background:'#1E3048',border:'1px solid #243447',borderRadius:4,color:i.status==='Done'?'#16A085':'#7A8FA6',fontSize:11,fontWeight:700,padding:'2px 6px',cursor:'pointer',fontFamily:'inherit'}}>
