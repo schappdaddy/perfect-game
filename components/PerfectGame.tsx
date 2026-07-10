@@ -12,7 +12,7 @@ const T = {
 }
 
 const PRIORITIES=['P1','P2','P3','P4','Backlog']
-const STATUSES=['Accepted','Testing','Awaiting Vendor Deliverable','Need Requirements','Under Review','In Progress','Will Not Implement','Ready to Score','Triage']
+const STATUSES=['Accepted','Testing','Awaiting Vendor Deliverable','Need Requirements','Under Review','In Progress','Will Not Implement','Ready to Score','Triage','Done']
 const PROJECT_STATUSES=['Queued','Planning','In Progress','Testing','On Hold','Complete','Cancelled']
 const TEAMS=['Consumer Experience','Operational Efficiency']
 const EFFORTS=['S','M','L','XL']
@@ -27,8 +27,60 @@ function pc(p) {
   if(p==='P3') return {bg:'#2E86AB',text:'#fff'}
   return {bg:'#1E3048',text:'#7A8FA6'}
 }
+// Terminal statuses — these move records to the Done tab and out of working views
+const ITEM_TERMINAL=['Done','Will Not Implement']
+const PROJECT_TERMINAL=['Complete','Cancelled']
+const isItemDone=(i:any)=>ITEM_TERMINAL.includes(i?.status)
+const isProjectDone=(p:any)=>PROJECT_TERMINAL.includes(p?.status)
+// Set an item's status; if terminal, retire its rank and compact remaining ranks
+async function applyItemStatus(items:any[],setItems:any,id:any,v:string){
+  const target=items.find(i=>i.id===id)
+  if(!target) return
+  if(!ITEM_TERMINAL.includes(v)){
+    setItems((prev:any[])=>prev.map(i=>i.id===id?{...i,status:v}:i))
+    await supabase.from('items').update({status:v}).eq('id',id)
+    return
+  }
+  const active=items.filter(i=>i.id!==id&&!ITEM_TERMINAL.includes(i.status)&&i.priority!=='P1'&&i.priority!=='P2')
+    .sort((a,b)=>(a.committed_priority??a.sort_order??999)-(b.committed_priority??b.sort_order??999))
+  const changed=active.map((i,idx)=>({id:i.id,committed_priority:idx})).filter(r=>{
+    const o=items.find(i=>i.id===r.id);return o&&o.committed_priority!==r.committed_priority
+  })
+  setItems((prev:any[])=>prev.map(i=>{
+    if(i.id===id) return {...i,status:v,committed_priority:null}
+    const u=changed.find(c=>c.id===i.id);return u?{...i,committed_priority:u.committed_priority}:i
+  }))
+  await supabase.from('items').update({status:v,committed_priority:null}).eq('id',id)
+  await Promise.all(changed.map(c=>supabase.from('items').update({committed_priority:c.committed_priority}).eq('id',c.id)))
+}
+
+// Bulk-close a project's open items (Complete → Done, Cancelled → Will Not Implement), compacting ranks once
+async function closeItemsForProject(items:any[],setItems:any,projectName:string,newStatus:string){
+  const targets=items.filter(i=>i.parent_project===projectName&&!ITEM_TERMINAL.includes(i.status))
+  if(!targets.length) return 0
+  const tIds=new Set(targets.map(t=>t.id))
+  const active=items.filter(i=>!tIds.has(i.id)&&!ITEM_TERMINAL.includes(i.status)&&i.priority!=='P1'&&i.priority!=='P2')
+    .sort((a,b)=>(a.committed_priority??a.sort_order??999)-(b.committed_priority??b.sort_order??999))
+  const changed=active.map((i,idx)=>({id:i.id,committed_priority:idx})).filter(r=>{
+    const o=items.find(i=>i.id===r.id);return o&&o.committed_priority!==r.committed_priority
+  })
+  setItems((prev:any[])=>prev.map(i=>{
+    if(tIds.has(i.id)) return {...i,status:newStatus,committed_priority:null}
+    const u=changed.find(c=>c.id===i.id);return u?{...i,committed_priority:u.committed_priority}:i
+  }))
+  await Promise.all([
+    ...targets.map(t=>supabase.from('items').update({status:newStatus,committed_priority:null}).eq('id',t.id)),
+    ...changed.map(c=>supabase.from('items').update({committed_priority:c.committed_priority}).eq('id',c.id)),
+  ])
+  return targets.length
+}
+
+// Flag audiences — legacy flags with no audience count as both
+function flagDev(i:any){return i.flagged&&(i.flag_audience==='dev'||i.flag_audience==='both'||!i.flag_audience)}
+function flagStk(i:any){return i.flagged&&(i.flag_audience==='stakeholder'||i.flag_audience==='both'||!i.flag_audience)}
+function flagLabel(i:any){return !i.flagged?'':i.flag_audience==='dev'?'D':i.flag_audience==='stakeholder'?'S':'DS'}
 function sc(s) {
-  const m={'In Progress':'#27AE60','Testing':'#C8973A','Need Requirements':'#E74C3C','Under Review':'#E8B95A','Will Not Implement':'#7A8FA6','Ready to Score':'#8E44AD','Accepted':'#2E86AB'}
+  const m={'In Progress':'#27AE60','Testing':'#C8973A','Need Requirements':'#E74C3C','Under Review':'#E8B95A','Will Not Implement':'#7A8FA6','Ready to Score':'#8E44AD','Accepted':'#2E86AB','Done':'#16A085'}
   return m[s]||'#7A8FA6'
 }
 // Sequential item IDs — max existing RTL number + 1. Random IDs collided with real data.
@@ -133,8 +185,9 @@ function ProjectDetail({project,items,setItems,projects,milestones,setMilestones
     if(b.start_date) return 1
     return 0
   })
-  const withDates=projectItems.filter(i=>i.start_date&&i.end_date)
-  const noDates=projectItems.filter(i=>!i.start_date||!i.end_date)
+  const doneItems=projectItems.filter(i=>i.status==='Done')
+  const withDates=projectItems.filter(i=>i.status!=='Done'&&i.start_date&&i.end_date)
+  const noDates=projectItems.filter(i=>i.status!=='Done'&&(!i.start_date||!i.end_date))
   const projectMilestones=milestones.filter(m=>m.project_id===project.id).sort((a,b)=>new Date(a.date).getTime()-new Date(b.date).getTime())
   const ragColor=RAG_COLORS[project.rag]||'#27AE60'
 
@@ -188,7 +241,7 @@ function ProjectDetail({project,items,setItems,projects,milestones,setMilestones
           <div style={{fontSize:14,fontWeight:700,color:'#F4F6F8',overflow:'hidden',whiteSpace:'nowrap' as const,textOverflow:'ellipsis'}}>{project.name}</div>
           <div style={{fontSize:11,color:'#7A8FA6',marginTop:1}}>{projectItems.length} items · {projectMilestones.length} milestones</div>
         </div>
-        <span style={{color:ragColor,fontSize:14}}>{project.rag==='Green'?'🟢':project.rag==='Amber'?'🟡':'🔴'}</span>
+        <span style={{color:ragColor,fontSize:14}}>{project.rag==='Green'?'🟢':project.rag==='Amber'?'🟡':project.rag==='Red'?'🔴':'⚪'}</span>
         <button onClick={onClose} style={{background:'none',border:'none',cursor:'pointer',fontSize:20,color:'#7A8FA6',padding:'0 4px'}}>×</button>
       </div>
 
@@ -303,7 +356,11 @@ function ProjectDetail({project,items,setItems,projects,milestones,setMilestones
                 <div style={{display:'flex',gap:10,fontSize:10,color:'#7A8FA6',alignItems:'center'}}>
                   <span>📅 {new Date(item.start_date+'T12:00:00').toLocaleDateString('default',{month:'short',day:'numeric'})} → {new Date(item.end_date+'T12:00:00').toLocaleDateString('default',{month:'short',day:'numeric',year:'2-digit'})}</span>
                   {daysLeft!==null&&<span style={{color:daysLeft<0?'#E74C3C':daysLeft<14?'#D4820A':'#7A8FA6',fontWeight:daysLeft<14?700:400}}>{daysLeft<0?`${Math.abs(daysLeft)}d overdue`:daysLeft===0?'Due today':`${daysLeft}d left`}</span>}
-                  <span style={{color:sc(item.status)}}>{item.status}</span>
+                  <select value={item.status||''} onClick={e=>e.stopPropagation()}
+                    onChange={e=>applyItemStatus(items,setItems,item.id,e.target.value)}
+                    style={{background:'#0F1C2B',border:'1px solid #243447',borderRadius:4,color:sc(item.status),fontSize:10,padding:'1px 4px',cursor:'pointer',fontFamily:'inherit'}}>
+                    {STATUSES.map(st=><option key={st} value={st}>{st}</option>)}
+                  </select>
                   <button
                     onClick={async()=>{
                       setItems(items.map(i=>i.id===item.id?{...i,start_date:null,end_date:null}:i))
@@ -388,6 +445,11 @@ function ProjectDetail({project,items,setItems,projects,milestones,setMilestones
                   <span style={{background:pclr.bg,color:'#fff',padding:'1px 5px',borderRadius:3,fontSize:9,fontWeight:700}}>{item.priority}</span>
                   <span style={{fontSize:10,color:'#7A8FA6',fontFamily:'monospace'}}>{item.item_id}</span>
                   <span style={{fontSize:11,color:'#C8C8D4',flex:1,overflow:'hidden',whiteSpace:'nowrap' as const,textOverflow:'ellipsis'}}>{item.name}</span>
+                  <select value={item.status||''} onClick={e=>e.stopPropagation()}
+                    onChange={e=>applyItemStatus(items,setItems,item.id,e.target.value)}
+                    style={{background:'#0F1C2B',border:'1px solid #243447',borderRadius:4,color:sc(item.status),fontSize:10,padding:'1px 4px',cursor:'pointer',fontFamily:'inherit',flexShrink:0}}>
+                    {STATUSES.map(st=><option key={st} value={st}>{st}</option>)}
+                  </select>
                   <button
                     onClick={async()=>{
                       if(!project.start_date||!project.end_date){
@@ -407,6 +469,25 @@ function ProjectDetail({project,items,setItems,projects,milestones,setMilestones
             )
           })}
         </div>
+
+        {/* Done items */}
+        {doneItems.length>0&&(
+          <div style={{padding:'14px 16px',borderTop:'1px solid #243447'}}>
+            <div style={{fontSize:12,fontWeight:700,color:'#16A085',letterSpacing:1,marginBottom:10}}>✓ DONE ({doneItems.length})</div>
+            {doneItems.map(item=>(
+              <div key={item.id} style={{display:'flex',alignItems:'center',gap:6,padding:'5px 10px',background:'#12202F',border:'1px solid #1A2838',borderRadius:6,marginBottom:4,opacity:0.75}}>
+                <span style={{fontSize:10,color:'#7A8FA6',fontFamily:'monospace',flexShrink:0}}>{item.item_id}</span>
+                <span style={{fontSize:11,color:'#9AABBC',flex:1,overflow:'hidden',whiteSpace:'nowrap' as const,textOverflow:'ellipsis',textDecoration:'line-through',textDecorationColor:'#3A4A5E'}}>{item.name}</span>
+                {item.end_date&&<span style={{fontSize:9,color:'#7A8FA6',flexShrink:0}}>{item.end_date}</span>}
+                <select value={item.status||''} onClick={e=>e.stopPropagation()}
+                  onChange={e=>applyItemStatus(items,setItems,item.id,e.target.value)}
+                  style={{background:'#0F1C2B',border:'1px solid #243447',borderRadius:4,color:'#16A085',fontSize:10,padding:'1px 4px',cursor:'pointer',fontFamily:'inherit',flexShrink:0}}>
+                  {STATUSES.map(st=><option key={st} value={st}>{st}</option>)}
+                </select>
+              </div>
+            ))}
+          </div>
+        )}
       </div>
     </div>
   )
@@ -425,11 +506,12 @@ function Projects({items,setItems,projects,setProjects,milestones,setMilestones}
   const [savingMilestone,setSavingMilestone]=useState(false)
   const COLORS=['#C0392B','#D4820A','#2E86AB','#27AE60','#8E44AD','#E74C3C','#C8973A','#1ABC9C','#2C3E50','#E67E22']
   const MILESTONE_TYPES=['Milestone','Go-Live','Deadline','Review','Release','Code Freeze','UAT','Kickoff']
-  const empty={name:'',description:'',priority:'P3',status:'Planning',rag:'Green',team:'Consumer Experience',start_date:'',end_date:'',color:'#2E86AB'}
+  const empty={name:'',description:'',priority:'P3',status:'Planning',rag:'Green',team:'Consumer Experience',start_date:'',end_date:'',color:'#2E86AB',ongoing:false}
   const [form,setForm]=useState({...empty})
   
 
   const filtered=projects.filter(p=>{
+    if(isProjectDone(p)) return false // completed/cancelled live in the Done tab
     if(filterTeam!=='All'&&p.team!==filterTeam) return false
     if(filterRAG!=='All'&&p.rag!==filterRAG) return false
     return true
@@ -483,11 +565,12 @@ function Projects({items,setItems,projects,setProjects,milestones,setMilestones}
     if(!form.name.trim()) return
     setSaving(true)
     // Empty strings are invalid for Postgres date columns — send null instead
-    const payload={...form,start_date:form.start_date||null,end_date:form.end_date||null}
+    const payload={...form,start_date:form.start_date||null,end_date:form.ongoing?null:(form.end_date||null)}
     if(editing) {
       const{data,error}=await supabase.from('projects').update({...payload,updated_at:new Date().toISOString()}).eq('id',editing.id).select().single()
       if(error){alert('Failed to save project: '+error.message);setSaving(false);return}
       if(data) setProjects(projects.map(p=>p.id===editing.id?data:p))
+      await maybeCloseItems(editing,payload.status)
       setEditing(null)
     } else {
       const{data,error}=await supabase.from('projects').insert({...payload,sort_order:projects.length}).select().single()
@@ -505,15 +588,26 @@ function Projects({items,setItems,projects,setProjects,milestones,setMilestones}
     await supabase.from('projects').delete().eq('id',id)
   }
 
+  async function maybeCloseItems(project:any,newStatus:string){
+    // Fires when a project transitions into a terminal status
+    if(!PROJECT_TERMINAL.includes(newStatus)||PROJECT_TERMINAL.includes(project.status)) return
+    const open=items.filter(i=>i.parent_project===project.name&&!ITEM_TERMINAL.includes(i.status))
+    if(!open.length) return
+    const itemStatus=newStatus==='Cancelled'?'Will Not Implement':'Done'
+    const yes=confirm(`"${project.name}" is now ${newStatus}. Also mark its ${open.length} open item${open.length!==1?'s':''} as ${itemStatus}?\n\nOK — close the items (they move to the Done tab)\nCancel — leave them in the backlog`)
+    if(yes) await closeItemsForProject(items,setItems,project.name,itemStatus)
+  }
   async function updateField(id,field,val) {
+    const project=projects.find(p=>p.id===id)
     setProjects(projects.map(p=>p.id===id?{...p,[field]:val}:p))
     if(selectedProject?.id===id) setSelectedProject(p=>({...p,[field]:val}))
     await supabase.from('projects').update({[field]:val}).eq('id',id)
+    if(field==='status'&&project) await maybeCloseItems(project,val)
   }
 
   function startEdit(project) {
     setEditing(project)
-    setForm({name:project.name,description:project.description||'',priority:project.priority,status:project.status,rag:project.rag,team:project.team,start_date:project.start_date||'',end_date:project.end_date||'',color:project.color||'#2E86AB'})
+    setForm({name:project.name,description:project.description||'',priority:project.priority,status:project.status,rag:project.rag,team:project.team,start_date:project.start_date||'',end_date:project.end_date||'',color:project.color||'#2E86AB',ongoing:!!project.ongoing})
     setAdding(true)
   }
 
@@ -580,7 +674,7 @@ function Projects({items,setItems,projects,setProjects,milestones,setMilestones}
             ['In Progress',projects.filter(p=>p.status==='In Progress').length,'#2E86AB'],
             ['Planning',projects.filter(p=>p.status==='Planning').length,'#8E44AD'],
             ['Queued',projects.filter(p=>p.status==='Queued').length,'#7A8FA6'],
-          ].map(([label,val,color])=>(
+          ].map(([label,val,color]:[string,number,string])=>(
             <div key={label} style={{background:'#162436',border:'1px solid #243447',borderRadius:8,padding:'8px 14px',display:'flex',gap:8,alignItems:'center'}}>
               <span style={{fontSize:18,fontWeight:700,color}}>{val}</span>
               <span style={{fontSize:11,color:'#7A8FA6'}}>{label}</span>
@@ -622,7 +716,7 @@ function Projects({items,setItems,projects,setProjects,milestones,setMilestones}
                       <span style={{fontSize:15,fontWeight:700,color:'#F4F6F8'}}>{project.name}</span>
                       <span style={{background:pclr.bg,color:'#fff',padding:'2px 7px',borderRadius:4,fontSize:11,fontWeight:700}}>{project.priority}</span>
                       <span style={{background:ragColor+'22',color:ragColor,border:`1px solid ${ragColor}44`,padding:'2px 8px',borderRadius:10,fontSize:11,fontWeight:700}}>
-                        {project.rag==='Green'?'🟢':project.rag==='Amber'?'🟡':'🔴'} {project.rag}
+                        {project.rag==='Green'?'🟢':project.rag==='Amber'?'🟡':project.rag==='Red'?'🔴':'⚪'} {project.rag}
                       </span>
                       <span style={{color:sc(project.status),fontSize:11,fontWeight:600}}>{project.status}</span>
                       <span style={{fontSize:11,color:'#7A8FA6'}}>{project.team==='Consumer Experience'?'CE':'OE'}</span>
@@ -667,10 +761,10 @@ function Projects({items,setItems,projects,setProjects,milestones,setMilestones}
                 <div style={{display:'flex',gap:6,flexWrap:'wrap' as const,alignItems:'center'}} onClick={e=>e.stopPropagation()}>
                   <div style={{display:'flex',alignItems:'center',gap:3,fontSize:11}}>
                     <span style={{color:'#7A8FA6'}}>RAG:</span>
-                    {['Green','Amber','Red'].map(r=>(
-                      <button key={r} onClick={()=>updateField(project.id,'rag',r)}
-                        style={{background:project.rag===r?RAG_COLORS[r]+'33':'transparent',color:RAG_COLORS[r],border:`1px solid ${project.rag===r?RAG_COLORS[r]:'#243447'}`,borderRadius:4,padding:'2px 7px',fontSize:11,cursor:'pointer',fontWeight:project.rag===r?700:400}}>
-                        {r==='Green'?'🟢':r==='Amber'?'🟡':'🔴'} {r}
+                    {['Green','Amber','Red','—'].map(r=>(
+                      <button key={r} onClick={()=>updateField(project.id,'rag',r==='—'?null:r)}
+                        style={{background:(project.rag===r||(!project.rag&&r==='—'))?(RAG_COLORS[r]||'#7A8FA6')+'33':'transparent',color:RAG_COLORS[r]||'#7A8FA6',border:`1px solid ${(project.rag===r||(!project.rag&&r==='—'))?(RAG_COLORS[r]||'#7A8FA6'):'#243447'}`,borderRadius:4,padding:'2px 7px',fontSize:11,cursor:'pointer',fontWeight:(project.rag===r||(!project.rag&&r==='—'))?700:400}}>
+                        {r==='Green'?'🟢':r==='Amber'?'🟡':r==='Red'?'🔴':'⚪'} {r}
                       </button>
                     ))}
                   </div>
@@ -765,10 +859,14 @@ function Projects({items,setItems,projects,setProjects,milestones,setMilestones}
                 </div>
                 <div>
                   <div style={{fontSize:11,color:'#7A8FA6',marginBottom:4}}>End Date</div>
-                  <input type="date" value={form.end_date} onChange={e=>setForm(p=>({...p,end_date:e.target.value}))}
-                    style={{width:'100%',background:'#1E3048',color:'#F4F6F8',border:'1px solid #243447',borderRadius:6,padding:'7px 10px',fontSize:12,boxSizing:'border-box' as const}}/>
+                  <input type="date" value={form.end_date} disabled={!!form.ongoing} onChange={e=>setForm(p=>({...p,end_date:e.target.value}))}
+                    style={{width:'100%',background:'#1E3048',color:'#F4F6F8',border:'1px solid #243447',borderRadius:6,padding:'7px 10px',fontSize:12,boxSizing:'border-box' as const,opacity:form.ongoing?0.4:1}}/>
                 </div>
               </div>
+              <label style={{display:'flex',alignItems:'center',gap:8,fontSize:12,color:'#F4F6F8',cursor:'pointer'}}>
+                <input type="checkbox" checked={!!form.ongoing} onChange={e=>setForm(p=>({...p,ongoing:e.target.checked}))}/>
+                ∞ Ongoing / open-ended — no fixed end date (long-running vendor deliverables); track via milestones
+              </label>
               <div>
                 <div style={{fontSize:11,color:'#7A8FA6',marginBottom:8}}>Project Color</div>
                 <div style={{display:'flex',gap:8,flexWrap:'wrap' as const}}>
@@ -874,7 +972,7 @@ function Backlog({items,setItems,projects,setProjects}:{items:any[],setItems:any
     }
   }
 
-const sorted=[...items].sort((a,b)=>{
+const sorted=items.filter(i=>!isItemDone(i)).sort((a,b)=>{
     const pa=PRIORITY_ORDER[a.priority]??4,pb=PRIORITY_ORDER[b.priority]??4
     // P1/P2 always stay at top
     if(pa<=1&&pb>1) return -1
@@ -898,7 +996,7 @@ const sorted=[...items].sort((a,b)=>{
   // Manual rank entry — place item at typed position, renumber everything else
   function setRank(item,target){
     if(item.priority==='P1'||item.priority==='P2') return
-    const nonP12=items.filter(i=>i.priority!=='P1'&&i.priority!=='P2')
+    const nonP12=items.filter(i=>i.priority!=='P1'&&i.priority!=='P2'&&!isItemDone(i))
       .sort((a,b)=>(a.committed_priority??a.sort_order??999)-(b.committed_priority??b.sort_order??999))
     const without=nonP12.filter(i=>i.id!==item.id)
     const pos=Math.max(0,Math.min(isNaN(target)?0:target,without.length))
@@ -962,6 +1060,11 @@ const sorted=[...items].sort((a,b)=>{
   }
 
   async function upd(id,field,val) {
+    if(field==='status'){
+      if(selected?.id===id) setSelected(s=>({...s,status:val,...(ITEM_TERMINAL.includes(val)?{committed_priority:null}:{})}))
+      await applyItemStatus(items,setItems,id,val)
+      return
+    }
     setItems(items.map(i=>i.id===id?{...i,[field]:val}:i))
     if(selected?.id===id) setSelected(s=>({...s,[field]:val}))
     await supabase.from('items').update({[field]:val}).eq('id',id)
@@ -969,10 +1072,15 @@ const sorted=[...items].sort((a,b)=>{
   async function flag(id) {
     const item=items.find(i=>i.id===id)
     if(!item) return
-    const v=!item.flagged
-    setItems(items.map(i=>i.id===id?{...i,flagged:v}:i))
-    if(selected?.id===id) setSelected(s=>({...s,flagged:v}))
-    await supabase.from('items').update({flagged:v}).eq('id',id)
+    // Cycle: none -> dev -> stakeholder -> both -> none
+    const cur=!item.flagged?null:(item.flag_audience||'both')
+    const next=cur===null?{flagged:true,flag_audience:'dev'}
+      :cur==='dev'?{flagged:true,flag_audience:'stakeholder'}
+      :cur==='stakeholder'?{flagged:true,flag_audience:'both'}
+      :{flagged:false,flag_audience:null}
+    setItems(items.map(i=>i.id===id?{...i,...next}:i))
+    if(selected?.id===id) setSelected(s=>({...s,...next}))
+    await supabase.from('items').update(next).eq('id',id)
   }
   function ds(e,id){setDid(id);e.dataTransfer.effectAllowed='move'}
   function dov(e,id){e.preventDefault();setDoid(id)}
@@ -987,7 +1095,7 @@ const sorted=[...items].sort((a,b)=>{
     if(fi===-1||ti===-1){setDid(null);setDoid(null);return}
     const down=fi<ti
     // Splice into the GLOBAL rank order — never renumber just the filtered subset
-    const nonP12=items.filter(i=>i.priority!=='P1'&&i.priority!=='P2')
+    const nonP12=items.filter(i=>i.priority!=='P1'&&i.priority!=='P2'&&!isItemDone(i))
       .sort((a,b)=>(a.committed_priority??a.sort_order??999)-(b.committed_priority??b.sort_order??999))
     const without=nonP12.filter(i=>i.id!==did)
     const gIdx=without.findIndex(i=>i.id===tid)
@@ -1110,7 +1218,7 @@ const sorted=[...items].sort((a,b)=>{
                   ['wsjf','WSJF',65],['rice','RICE',65],['reach','Reach',55],
                   ['impact','Impact',55],['confidence','Confidence',80],
                   ['owner','Owner',90],['start_date','Start Date',95],['end_date','End Date',95],
-                ].map(([col,label,w])=>(
+                ].map(([col,label,w]:[string,string,number])=>(
                   <th key={col} style={{...TH,width:w,cursor:'pointer',userSelect:'none' as const}}
                     onClick={()=>{
                       if(sortCol===col) setSortDir(d=>d==='asc'?'desc':'asc')
@@ -1204,7 +1312,7 @@ const sorted=[...items].sort((a,b)=>{
                       {violation&&<span title="Outside project timeline" style={{fontSize:14}}>⚠️</span>}
                     </td>
                     <td style={{...TD,textAlign:'center' as const}} onClick={e=>{e.stopPropagation();flag(item.id)}}>
-                      <button style={{background:'none',border:'none',cursor:'pointer',fontSize:15,opacity:item.flagged?1:0.25}}>🚩</button>
+                      <button title={item.flagged?`Flagged: ${item.flag_audience||'both'} — click to cycle`:'Click to flag for dev'} style={{background:'none',border:'none',cursor:'pointer',fontSize:15,opacity:item.flagged?1:0.25,whiteSpace:'nowrap' as const}}>🚩{item.flagged&&<span style={{fontSize:9,fontWeight:800,color:'#C8973A',verticalAlign:'top'}}>{flagLabel(item)}</span>}</button>
                     </td>
                     {cc.map(c=><td key={c.key} style={TD}><input placeholder="—" style={{background:'transparent',color:'#F4F6F8',border:'none',fontSize:12,width:70}}/></td>)}
                   </tr>
@@ -1223,7 +1331,7 @@ const sorted=[...items].sort((a,b)=>{
                 <div style={{fontSize:13,fontWeight:700,color:'#F4F6F8',marginTop:2,lineHeight:1.3}}>{selected.name}</div>
               </div>
               {hasViolation(selected)&&<span title="Outside project timeline" style={{fontSize:16}}>⚠️</span>}
-              <button onClick={()=>flag(selected.id)} style={{background:'none',border:'none',cursor:'pointer',fontSize:18,opacity:selected.flagged?1:0.3}}>🚩</button>
+              <button onClick={()=>flag(selected.id)} title={selected.flagged?`Flagged: ${selected.flag_audience||'both'} — click to cycle`:'Click to flag for dev'} style={{background:'none',border:'none',cursor:'pointer',fontSize:18,opacity:selected.flagged?1:0.3}}>🚩{selected.flagged&&<span style={{fontSize:10,fontWeight:800,color:'#C8973A',verticalAlign:'top'}}>{flagLabel(selected)}</span>}</button>
               <button onClick={()=>setSelected(null)} style={{background:'none',border:'none',cursor:'pointer',fontSize:20,color:'#7A8FA6'}}>×</button>
             </div>
             {hasViolation(selected)&&(()=>{
@@ -1319,10 +1427,10 @@ const sorted=[...items].sort((a,b)=>{
               </div>
             ))}
             <div style={{display:'grid',gridTemplateColumns:'1fr 1fr',gap:12,marginBottom:12}}>
-              {[['Priority','priority',PRIORITIES],['Team','team',TEAMS],['Swimlane','swimlane',swimlaneOpts],['Status','status',statusOpts],['Effort','effort',EFFORTS],['Request Type','request_type',rtOpts],['Region','region',regionOpts],['Vendor','vendor',vendors]].map(([label,field,opts])=>(
+              {([['Priority','priority',PRIORITIES],['Team','team',TEAMS],['Swimlane','swimlane',swimlaneOpts],['Status','status',statusOpts],['Effort','effort',EFFORTS],['Request Type','request_type',rtOpts],['Region','region',regionOpts],['Vendor','vendor',vendors]] as [string,string,string[]][]).map(([label,field,opts])=>(
                 <div key={field}>
                   <div style={{fontSize:11,color:'#7A8FA6',marginBottom:4}}>{label}</div>
-                  <select value={ni[field]} onChange={e=>setNi(p=>({...p,[field]:e.target.value}))} style={{width:'100%',background:'#1E3048',color:'#F4F6F8',border:'1px solid #243447',borderRadius:6,padding:'6px 8px',fontSize:12}}>{opts.map(o=><option key={o}>{o}</option>)}</select>
+                  <select value={(ni as any)[field]} onChange={e=>setNi((p:any)=>({...p,[field]:e.target.value}))} style={{width:'100%',background:'#1E3048',color:'#F4F6F8',border:'1px solid #243447',borderRadius:6,padding:'6px 8px',fontSize:12}}>{opts.map(o=><option key={o}>{o}</option>)}</select>
                 </div>
               ))}
             </div>
@@ -1340,6 +1448,7 @@ const sorted=[...items].sort((a,b)=>{
 // ── ROADMAP ───────────────────────────────────────────────────────────────
 function Roadmap({items,setItems,projects,setProjects,milestones}:{items:any[],projects:any[],setItems:any,setProjects:any,milestones:any[]}) {
   const [view,setView]=useState('quarter')
+  const [colorBy,setColorBy]=useState('status')
   const [ft,setFt]=useState('All')
   const [zoom,setZoom]=useState(1)
   const [editing,setEditing]=useState(null)
@@ -1390,7 +1499,7 @@ function Roadmap({items,setItems,projects,setProjects,milestones}:{items:any[],p
     return am-bm
   })
   const filteredProjects=projects.filter(p=>ft==='All'||p.team===ft)
-  const flaggedItems=items.filter(i=>i.flagged)
+  const flaggedItems=items.filter(flagStk) // roadmap discussion = stakeholder audience
 
   async function saveDiscussNote(item){
     setItems((prev:any[])=>prev.map(i=>i.id===item.id?{...i,notes:discussNoteDraft}:i))
@@ -1408,8 +1517,10 @@ function Roadmap({items,setItems,projects,setProjects,milestones}:{items:any[],p
       if(!project.start_date||!project.end_date) return false
       return new Date(i.start_date+'T12:00:00')<new Date(project.start_date+'T12:00:00')||new Date(i.end_date+'T12:00:00')>new Date(project.end_date+'T12:00:00')
     })
-    return{...project,items:children,violations,bar_start:project.start_date,bar_end:project.end_date}
+    return{...project,items:children,violations,bar_start:project.start_date,bar_end:project.ongoing?(project.end_date||'9999-12-31'):project.end_date}
   }).filter((g:any)=>g.items.length>0||(g.bar_start&&g.bar_end)).sort((a:any,b:any)=>{
+    // Ongoing (∞) projects always pin to the bottom regardless of sort
+    if(!!a.ongoing!==!!b.ongoing) return a.ongoing?1:-1
     let av,bv
     if(sortBy==='start_date'){av=new Date((a.bar_start||'9999')+'T12:00:00');bv=new Date((b.bar_start||'9999')+'T12:00:00')}
     else if(sortBy==='end_date'){av=new Date((a.bar_end||'9999')+'T12:00:00');bv=new Date((b.bar_end||'9999')+'T12:00:00')}
@@ -1602,7 +1713,7 @@ function Roadmap({items,setItems,projects,setProjects,milestones}:{items:any[],p
 
   function GanttBar({item,groupColor,isViolation}:{item:any,groupColor:string,isViolation:boolean}){
     const isDragging=draggingBar===item.id
-    const itemColor=item.roadmap_color||groupColor
+    const itemColor=colorBy==='status'?sc(item.status):(item.roadmap_color||groupColor)
     const leftPx=pct(item.start_date)
     const widthPx=barPx(item.start_date,item.end_date)
     return(
@@ -1630,6 +1741,14 @@ function Roadmap({items,setItems,projects,setProjects,milestones}:{items:any[],p
           ))}
         </div>
         <div style={{display:'flex',alignItems:'center',gap:6}}>
+          <span style={{fontSize:12,color:'#7A8FA6'}}>Color</span>
+          <div style={{display:'flex',gap:3}}>
+            {[['project','Project'],['status','Status']].map(([k,label])=>(
+              <button key={k} onClick={()=>setColorBy(k)} style={{background:colorBy===k?'#C8973A':'#1E3048',color:colorBy===k?'#0D1B2A':'#7A8FA6',border:`1px solid ${colorBy===k?'#C8973A':'#243447'}`,borderRadius:6,padding:'4px 10px',fontSize:11,cursor:'pointer',fontWeight:colorBy===k?700:400}}>{label}</button>
+            ))}
+          </div>
+        </div>
+        <div style={{display:'flex',alignItems:'center',gap:6}}>
           <span style={{fontSize:12,color:'#7A8FA6'}}>Sort</span>
           <select value={sortBy} onChange={e=>setSortBy(e.target.value)} style={{...sel,fontSize:11,padding:'4px 8px'}}>
             <option value="start_date">Start Date</option>
@@ -1652,6 +1771,11 @@ function Roadmap({items,setItems,projects,setProjects,milestones}:{items:any[],p
         {totalViolations>0&&<div style={{background:'rgba(192,57,43,0.15)',border:'1px solid rgba(192,57,43,0.4)',borderRadius:6,padding:'4px 10px',fontSize:11,color:'#E74C3C'}}>⚠️ {totalViolations} violation{totalViolations!==1?'s':''}</div>}
         <div style={{display:'flex',gap:10,fontSize:11,marginLeft:'auto',color:'#7A8FA6',alignItems:'center'}}>
           <span>{groups.length} projects · {withDates.length} committed · {uncommitted.length} backlog</span>
+          <span style={{display:'flex',gap:10,flexWrap:'wrap' as const,alignItems:'center'}}>
+            {[...new Set(withDates.map(i=>i.status).filter(Boolean))].map((st:any)=>(
+              <span key={st} style={{fontSize:9,color:sc(st),fontWeight:700,whiteSpace:'nowrap' as const}}>● {st}</span>
+            ))}
+          </span>
           <span style={{display:'flex',alignItems:'center',gap:3}}><span style={{width:2,height:10,background:'#E74C3C',display:'inline-block'}}/> Today</span>
         </div>
       </div>
@@ -1721,8 +1845,8 @@ function Roadmap({items,setItems,projects,setProjects,milestones}:{items:any[],p
                       </button>
                       <div style={{overflow:'hidden',flex:1}}>
                         <div style={{display:'flex',alignItems:'center',gap:5,marginBottom:2}}>
-                          <span style={{fontSize:12,fontWeight:700,color:'#F4F6F8',overflow:'hidden',whiteSpace:'nowrap' as const,textOverflow:'ellipsis',maxWidth:110}}>{group.name}</span>
-                          <span style={{fontSize:10,color:rc,fontWeight:700,flexShrink:0}}>{group.rag==='Green'?'🟢':group.rag==='Amber'?'🟡':'🔴'}</span>
+                          <span style={{fontSize:12,fontWeight:700,color:'#F4F6F8',overflow:'hidden',whiteSpace:'nowrap' as const,textOverflow:'ellipsis',maxWidth:110}}>{group.name}{group.ongoing?' ∞':''}</span>
+                          <span style={{fontSize:10,color:rc,fontWeight:700,flexShrink:0}}>{group.rag==='Green'?'🟢':group.rag==='Amber'?'🟡':group.rag==='Red'?'🔴':'⚪'}</span>
                           {group.violations.length>0&&<span style={{fontSize:9,color:'#E74C3C',flexShrink:0}}>⚠️</span>}
                         </div>
                         <div style={{fontSize:9,color:'#7A8FA6'}}>{childItems.length} committed · {group.status}</div>
@@ -1736,7 +1860,7 @@ function Roadmap({items,setItems,projects,setProjects,milestones}:{items:any[],p
                           <span style={{background:pc(item.priority).bg,color:'#fff',padding:'1px 5px',borderRadius:3,fontSize:9,fontWeight:700,flexShrink:0}}>{item.priority}</span>
                           <div style={{overflow:'hidden'}}>
                             <div style={{fontSize:11,color:isViolation?'#E74C3C':'#C8C8D4',overflow:'hidden',whiteSpace:'nowrap' as const,textOverflow:'ellipsis',maxWidth:130}}>{item.name}{isViolation?' ⚠️':''}</div>
-                            <div style={{fontSize:9,color:'#7A8FA6',fontFamily:'monospace'}}>{item.item_id}</div>
+                            <div style={{fontSize:9,color:'#7A8FA6',overflow:'hidden',whiteSpace:'nowrap' as const,textOverflow:'ellipsis'}}><span style={{fontFamily:'monospace'}}>{item.item_id}</span> <span style={{color:sc(item.status),fontWeight:700}}>● {item.status}</span></div>
                           </div>
                         </div>
                       )
@@ -1829,12 +1953,12 @@ function Roadmap({items,setItems,projects,setProjects,milestones}:{items:any[],p
                           onDrop={e=>handleGanttDrop(e,group.name,col)}/>
                       ))}
                       {group.bar_start&&group.bar_end&&(
-                        <div style={{position:'absolute',top:10,height:32,left:pct(group.bar_start),width:barPx(group.bar_start,group.bar_end),zIndex:3,minWidth:8}}>
+                        <div style={{position:'absolute',top:10,height:32,left:pct(group.bar_start),width:group.ongoing?Math.max(cols.length*COL_W-pct(group.bar_start),8):barPx(group.bar_start,group.bar_end),zIndex:3,minWidth:8}}>
                           <div onMouseDown={e=>startProjectBarDrag(e,group,'left')} style={{position:'absolute',left:0,top:0,bottom:0,width:10,cursor:'ew-resize',zIndex:5,background:'rgba(255,255,255,0.2)',borderRadius:'4px 0 0 4px'}}/>
                           <div draggable onDragStart={e=>{e.dataTransfer.setData('projectId',group.id);e.dataTransfer.effectAllowed='move'}}
                             onMouseDown={e=>startProjectBarDrag(e,group,'move')}
-                            style={{position:'absolute',left:0,right:0,top:0,bottom:0,background:rc,borderRadius:6,display:'flex',alignItems:'center',padding:'0 14px',fontSize:11,fontWeight:700,color:'#fff',overflow:'hidden',whiteSpace:'nowrap' as const,opacity:draggingBar===group.id?0.7:0.9,border:group.violations.length>0?'2px dashed rgba(255,255,255,0.5)':'none',boxShadow:`0 2px 8px ${rc}55`,cursor:draggingBar===group.id?'grabbing':'grab'}}>
-                            {group.rag==='Red'?'🔴':group.rag==='Amber'?'🟡':'🟢'} {group.name}
+                            style={{position:'absolute',left:0,right:0,top:0,bottom:0,background:group.ongoing?`linear-gradient(90deg, ${rc} 0%, ${rc} 55%, ${rc}33 100%)`:rc,borderRadius:6,display:'flex',alignItems:'center',padding:'0 14px',fontSize:11,fontWeight:700,color:'#fff',overflow:'hidden',whiteSpace:'nowrap' as const,opacity:draggingBar===group.id?0.7:0.9,border:group.ongoing?'1px dashed rgba(255,255,255,0.45)':group.violations.length>0?'2px dashed rgba(255,255,255,0.5)':'none',boxShadow:`0 2px 8px ${rc}55`,cursor:draggingBar===group.id?'grabbing':'grab'}}>
+                            {group.rag==='Red'?'🔴':group.rag==='Amber'?'🟡':group.rag==='Green'?'🟢':'⚪'} {group.name}{group.ongoing?' ∞':''}
                             {group.violations.length>0&&<span style={{marginLeft:6,fontSize:10}}>⚠️</span>}
                           </div>
                           <div onMouseDown={e=>startProjectBarDrag(e,group,'right')} style={{position:'absolute',right:0,top:0,bottom:0,width:10,cursor:'ew-resize',zIndex:5,background:'rgba(255,255,255,0.2)',borderRadius:'0 4px 4px 0'}}/>
@@ -1957,7 +2081,7 @@ function Roadmap({items,setItems,projects,setProjects,milestones}:{items:any[],p
                           onMouseLeave={e=>{e.currentTarget.style.borderTopColor='#243447';e.currentTarget.style.borderRightColor='#243447';e.currentTarget.style.borderBottomColor='#243447'}}>
                           <div style={{display:'flex',alignItems:'center',gap:5,marginBottom:3}}>
                             <span style={{background:pclr.bg,color:'#fff',padding:'1px 5px',borderRadius:3,fontSize:9,fontWeight:700}}>{project.priority}</span>
-                            <span style={{fontSize:10,color:rc,fontWeight:700}}>{project.rag==='Green'?'🟢':project.rag==='Amber'?'🟡':'🔴'}</span>
+                            <span style={{fontSize:10,color:rc,fontWeight:700}}>{project.rag==='Green'?'🟢':project.rag==='Amber'?'🟡':project.rag==='Red'?'🔴':'⚪'}</span>
                             <span style={{fontSize:9,color:'#7A8FA6',marginLeft:'auto'}}>{project.team==='Consumer Experience'?'CE':'OE'}</span>
                           </div>
                           <div style={{fontSize:11,color:'#F4F6F8',fontWeight:600,lineHeight:1.3,marginBottom:3}}>{project.name}</div>
@@ -2443,38 +2567,41 @@ function ComposeUpdate({projects,milestones,items,onClose}:{projects:any[],miles
       .sort((x,y)=>x.date<y.date?-1:1)
     const RAGT:any={Green:'#217346',Amber:'#B8860B',Red:'#C0392B'}
     const PCLRT:any={P1:'#C0392B',P2:'#C55A11',P3:'#2E5E8C',P4:'#595959'}
-    const ragTxt=(rg:string)=>`<span style="color:${RAGT[rg]||'#595959'};font-weight:bold;">${rg||''}</span>`
+    const ragTxt=(rg:string)=>`<span style="color:${RAGT[rg]||'#7F7F7F'};font-weight:bold;">${rg||'—'}</span>`
     const priTxt=(pr:string)=>`<span style="color:${PCLRT[pr]||'#595959'};font-weight:bold;">${pr||''}</span>`
     // Excel-paste table styling
     const TD_='padding:3px 7px;border:1px solid #D9D9D9;font-size:13px;color:#222222;vertical-align:top;'
     const TH_='padding:3px 7px;border:1px solid #D9D9D9;font-size:13px;color:#222222;background:#F2F2F2;font-weight:bold;text-align:left;'
-    const H2='font-size:14px;font-weight:bold;color:#1F1F1F;margin:20px 0 6px;'
+    const H2='font-size:18px;font-weight:bold;color:#1F1F1F;margin:26px 0 10px;border-bottom:3px solid #1F1F1F;padding-bottom:4px;'
 
     // Roadmap grid (Excel-style)
-    const dated=selected.filter(p=>p.start_date&&p.end_date)
+    const dated=selected.filter(p=>(p.start_date&&p.end_date)||(p.ongoing&&p.start_date))
     let roadmapHtml=''
     if(dated.length){
       const m0=(dstr:string)=>{const x=new Date(dstr+'T12:00:00');return new Date(x.getFullYear(),x.getMonth(),1)}
       const curM=new Date(new Date().getFullYear(),new Date().getMonth(),1)
       const floor=new Date(curM.getFullYear(),curM.getMonth()-1,1)
       let minM=Math.max(Math.min(...dated.map(p=>+m0(p.start_date)),+curM),+floor)
-      const maxTarget=Math.max(...dated.map(p=>+m0(p.end_date)),+curM)
+      const maxTarget=Math.max(...dated.filter(p=>p.end_date).map(p=>+m0(p.end_date)),+curM)
       const months:Date[]=[]
       {const d=new Date(minM);let n=0;while(+d<=maxTarget&&n<12){months.push(new Date(d));d.setMonth(d.getMonth()+1);n++}}
       const idxOf=(dstr:string)=>{const t=+m0(dstr);let i=-1;months.forEach((m,j)=>{if(+m===t)i=j});return i}
-      const rows=dated.map(p=>{
-        const si=+m0(p.start_date),ei=+m0(p.end_date)
+      const datedSorted=[...dated].sort((a,b)=>(!!a.ongoing===!!b.ongoing)?0:(a.ongoing?1:-1))
+      const rows=datedSorted.map(p=>{
+        const si=+m0(p.start_date),ei=p.ongoing?+months[months.length-1]:+m0(p.end_date)
         const msMonths=new Set(milestones.filter(m=>m.project_id===p.id&&!m.completed).map(m=>idxOf(m.date)).filter(i=>i>=0))
         const startsBefore=si<+months[0]
-        const endsAfter=ei>+months[months.length-1]
+        const endsAfter=p.ongoing||ei>+months[months.length-1]
         const cells=months.map((m,ci)=>{
           const active=(+m>=si&&+m<=ei)||(startsBefore&&+m<=ei)
           const freeze=m.getMonth()>=9
-          const bg=active?(p.color||'#2E5E8C'):(freeze?'#FBEAEA':'#FFFFFF')
-          const mark=msMonths.has(ci)?'◆':(endsAfter&&ci===months.length-1&&active?'→':'')
-          return `<td style="padding:0;height:18px;background:${bg};border:1px solid #D9D9D9;text-align:center;font-size:10px;color:#FFFFFF;font-weight:bold;">${mark}</td>`
+          // Ongoing rows shade in a distinct muted gray-blue so they read differently from dated commitments
+          const bg=active?(p.ongoing?'#B7C4D0':(p.color||'#2E5E8C')):(freeze?'#FBEAEA':'#FFFFFF')
+          const mark=msMonths.has(ci)?'◆':(endsAfter&&ci===months.length-1&&active?(p.ongoing?'∞':'→'):'')
+          return `<td style="padding:0;height:18px;background:${bg};border:1px solid #D9D9D9;text-align:center;font-size:10px;color:${p.ongoing?'#44515E':'#FFFFFF'};font-weight:bold;">${mark}</td>`
         }).join('')
-        return `<tr><td style="${TD_}white-space:nowrap;font-weight:bold;">${hs(p.name.length>28?p.name.slice(0,27)+'…':p.name)}</td>${cells}</tr>`
+        const nm=(p.ongoing?'∞ ':'')+(p.name.length>26?p.name.slice(0,25)+'…':p.name)
+        return `<tr><td style="${TD_}white-space:nowrap;font-weight:bold;">${hs(nm)}</td>${cells}</tr>`
       }).join('')
       const header=`<tr><td style="${TH_}"></td>${months.map(m=>{
         const isCur=+m===+curM
@@ -2483,7 +2610,7 @@ function ComposeUpdate({projects,milestones,items,onClose}:{projects:any[],miles
       }).join('')}</tr>`
       roadmapHtml=`<div style="${H2}">Roadmap</div>
       <table cellspacing="0" style="border-collapse:collapse;width:100%;table-layout:fixed;"><colgroup><col style="width:200px;"/>${months.map(()=>'<col/>').join('')}</colgroup>${header}${rows}</table>
-      <div style="font-size:11px;color:#595959;margin:4px 0 0;">◆ upcoming milestone&nbsp;&nbsp;→ continues beyond window&nbsp;&nbsp;<span style="color:#C0392B;">Oct–Dec: code freeze</span>&nbsp;&nbsp;(committed projects only)</div>`
+      <div style="font-size:11px;color:#595959;margin:4px 0 0;">◆ upcoming milestone&nbsp;&nbsp;→ continues beyond window&nbsp;&nbsp;<span style="background:#B7C4D0;padding:0 6px;">&nbsp;</span> ∞ ongoing (vendor-dependent)&nbsp;&nbsp;<span style="color:#C0392B;">Oct–Dec: code freeze</span>&nbsp;&nbsp;(committed projects only)</div>`
     }
 
     // Item sections
@@ -2491,7 +2618,7 @@ function ComposeUpdate({projects,milestones,items,onClose}:{projects:any[],miles
       .sort((a:any,b:any)=>(PRIORITY_ORDER[a.priority]??4)-(PRIORITY_ORDER[b.priority]??4)||((a.committed_priority??999)-(b.committed_priority??999)))
     const top10=items.filter((i:any)=>i.priority!=='P1'&&i.priority!=='P2'&&!(i.start_date&&i.end_date))
       .sort((a:any,b:any)=>(a.committed_priority??a.sort_order??999)-(b.committed_priority??b.sort_order??999)).slice(0,10)
-    const flagged=items.filter((i:any)=>i.flagged)
+    const flagged=items.filter(flagStk)
     const itemRow=(i:any,n?:number)=>`<tr>
       ${n!=null?`<td style="${TD_}text-align:center;font-weight:bold;">${n}</td>`:''}
       <td style="${TD_}white-space:nowrap;">${hs(i.item_id)}</td>
@@ -2515,14 +2642,17 @@ function ComposeUpdate({projects,milestones,items,onClose}:{projects:any[],miles
         <td style="${TD_}line-height:1.5;">${i.notes||'<span style="color:#7F7F7F;font-style:italic;">No discussion notes yet.</span>'}</td>
       </tr>`).join('')}</table>`:''
 
-    const projBlock=(p:any)=>{
+    const projBlock=(p:any,tag?:string)=>{
       const d=drafts[p.id]||{}
       const upd=(d.update||'').trim()||(last[p.id]?.update_text||'')
       const blk=(d.blockers||'').trim()
       const pItems=items.filter((i:any)=>i.parent_project===p.name&&i.start_date&&i.end_date)
         .sort((a:any,b:any)=>(a.end_date<b.end_date?-1:a.end_date>b.end_date?1:0))
-      return `<div style="margin:0 0 16px;">
-        <div style="font-size:13px;margin-bottom:3px;"><b>${p.name}</b> — ${ragTxt(p.rag)}${p.status?` | ${p.status}`:''}${p.start_date&&p.end_date?` | ${hs(fmtD(p.start_date))} – ${hs(fmtD(p.end_date))}`:''}</div>
+      const pUncommitted=items.filter((i:any)=>i.parent_project===p.name&&!(i.start_date&&i.end_date)&&!/done|will not/i.test(i.status||''))
+        .sort((a:any,b:any)=>((PRIORITY_ORDER[a.priority]??4)-(PRIORITY_ORDER[b.priority]??4))||((a.committed_priority??999)-(b.committed_priority??999)))
+      const timeline=p.ongoing?`${p.start_date?hs(fmtD(p.start_date))+' – ':''}Ongoing ∞`:(p.start_date&&p.end_date?`${hs(fmtD(p.start_date))} – ${hs(fmtD(p.end_date))}`:'')
+      return `<div style="margin:0 0 18px;">
+        <div style="font-size:14px;font-weight:bold;color:#1F1F1F;border-bottom:1px solid #D9D9D9;padding-bottom:3px;margin-bottom:5px;">${p.name}${tag?` <span style="font-size:11px;font-weight:bold;color:#7F7F7F;">[${tag}]</span>`:''} <span style="font-size:12px;font-weight:normal;color:#595959;">— ${ragTxt(p.rag)}${p.status?` | ${p.status}`:''}${timeline?` | ${timeline}`:''}</span></div>
         ${upd?`<div style="font-size:13px;color:#222222;line-height:1.55;">${upd}</div>`:`<div style="font-size:13px;color:#7F7F7F;font-style:italic;">No update provided this period.</div>`}
         ${blk?`<div style="font-size:13px;color:#222222;line-height:1.5;margin-top:4px;"><b style="color:#C0392B;">Risks / Blockers:</b> ${blk}</div>`:''}
         ${pItems.length?`<table cellspacing="0" style="border-collapse:collapse;width:100%;margin-top:6px;">
@@ -2533,16 +2663,28 @@ function ComposeUpdate({projects,milestones,items,onClose}:{projects:any[],miles
             <td style="${TD_}white-space:nowrap;">${hs(i.status)}</td>
             <td style="${TD_}white-space:nowrap;font-weight:bold;">${hs(fmtD(i.end_date))}</td>
           </tr>`).join('')}</table>`:''}
+        ${pUncommitted.length?`<div style="font-size:12px;font-weight:bold;color:#595959;margin:8px 0 3px;">Not Committed (${pUncommitted.length})</div>
+        <table cellspacing="0" style="border-collapse:collapse;width:100%;">
+          ${pUncommitted.map((i:any)=>`<tr>
+            <td style="${TD_}white-space:nowrap;width:64px;">${hs(i.item_id)}</td>
+            <td style="${TD_}">${i.name}</td>
+            <td style="${TD_}white-space:nowrap;width:38px;">${priTxt(i.priority)}</td>
+            <td style="${TD_}white-space:nowrap;width:170px;">${hs(i.status)}</td>
+          </tr>`).join('')}</table>`:''}
       </div>`
     }
     const html=`<div style="font-family:Calibri,'Segoe UI',Arial,sans-serif;max-width:900px;color:#222222;">
-      <div style="font-size:17px;font-weight:bold;color:#1F1F1F;">Retail Technology — Program Update</div>
+      <div style="font-size:22px;font-weight:bold;color:#1F1F1F;">Retail Technology — Program Update</div>
       <div style="font-size:13px;color:#595959;margin-bottom:12px;">${today}</div>
       <div style="font-size:13px;color:#222222;margin-bottom:4px;"><b>${selected.length} active project${selected.length!==1?'s':''}:</b> <span style="color:#217346;font-weight:bold;">${g} Green</span>, <span style="color:#B8860B;font-weight:bold;">${a} Amber</span>, <span style="color:#C0392B;font-weight:bold;">${r} Red</span></div>
       ${p12Html}
       ${roadmapHtml}
-      <div style="${H2}">Project Updates</div>
-      ${selected.map(projBlock).join('')}
+      ${(()=>{
+        const onRoadmap=selected.filter(p=>(p.start_date&&p.end_date)||(p.ongoing&&p.start_date))
+        const backlogP=selected.filter(p=>!((p.start_date&&p.end_date)||(p.ongoing&&p.start_date)))
+        return `${onRoadmap.length?`<div style="${H2}">Project Updates — On Roadmap</div>${onRoadmap.map(p=>projBlock(p)).join('')}`:''}
+        ${backlogP.length?`<div style="${H2}">Project Updates — Backlog</div>${backlogP.map(p=>projBlock(p,'BACKLOG')).join('')}`:''}`
+      })()}
       ${upcoming.length?`<div style="${H2}">Upcoming Milestones — Next 4 Weeks</div>
       <table cellspacing="0" style="border-collapse:collapse;width:100%;">
       <tr><th style="${TH_}width:70px;">Date</th><th style="${TH_}width:220px;">Project</th><th style="${TH_}">Milestone</th></tr>
@@ -2587,7 +2729,7 @@ function ComposeUpdate({projects,milestones,items,onClose}:{projects:any[],miles
                 <label style={{display:'flex',alignItems:'center',gap:10,cursor:'pointer'}}>
                   <input type="checkbox" checked={sel.has(p.id)} onChange={()=>toggle(p.id)}/>
                   <span style={{fontSize:13,fontWeight:700}}>{p.name}</span>
-                  <span style={{fontSize:11,color:p.rag==='Green'?'#27AE60':p.rag==='Amber'?'#E8B95A':'#E74C3C',fontWeight:700}}>{p.rag}</span>
+                  <span style={{fontSize:11,color:p.rag==='Green'?'#27AE60':p.rag==='Amber'?'#E8B95A':p.rag==='Red'?'#E74C3C':'#7A8FA6',fontWeight:700}}>{p.rag}</span>
                   <span style={{fontSize:11,color:'#7A8FA6'}}>{p.status}</span>
                 </label>
                 {sel.has(p.id)&&(
@@ -2628,7 +2770,7 @@ function Stakeholder({items,projects,milestones}:{items:any[],projects:any[],mil
   const p1=items.filter(i=>i.priority==='P1')
   const p2=items.filter(i=>i.priority==='P2')
   const bl=items.filter(i=>i.priority!=='P1'&&i.priority!=='P2').slice(0,10)
-  const disc=items.filter(i=>i.flagged)
+  const disc=items.filter(flagStk)
   const redProjects=projects.filter(p=>p.rag==='Red')
   const amberProjects=projects.filter(p=>p.rag==='Amber')
   return(
@@ -2644,7 +2786,7 @@ function Stakeholder({items,projects,milestones}:{items:any[],projects:any[],mil
 
       {/* Stats */}
       <div style={{display:'grid',gridTemplateColumns:'repeat(4,1fr)',gap:12,marginBottom:24}}>
-        {[['P1 Active',p1.length,'#C00000'],['P2 Active',p2.length,'#D4820A'],['Projects',projects.length,'#2E86AB'],['For Discussion',disc.length,'#C8973A']].map(([label,val,color])=>(
+        {([['P1 Active',p1.length,'#C00000'],['P2 Active',p2.length,'#D4820A'],['Projects',projects.length,'#2E86AB'],['For Discussion',disc.length,'#C8973A']] as [string,number,string][]).map(([label,val,color])=>(
           <div key={label} style={{background:'#162436',border:'1px solid #243447',borderRadius:10,padding:'16px 20px'}}>
             <div style={{fontSize:28,fontWeight:700,color,lineHeight:1}}>{val}</div>
             <div style={{fontSize:12,color:'#7A8FA6',marginTop:4}}>{label}</div>
@@ -2710,6 +2852,594 @@ function Stakeholder({items,projects,milestones}:{items:any[],projects:any[],mil
 }
 
 // ── MAIN APP ──────────────────────────────────────────────────────────────
+// ── DESK — daily notes & planning ─────────────────────────────────────────
+// Section syntax: a plain line ending with ':' is a section header.
+// A header ending with ': ↻' is marked to carry the whole section to the next day.
+const isDeskHeader=(l:string)=>{const t=l.trim();return t.length>1&&!t.startsWith('[ ]')&&!t.startsWith('[x]')&&/:\s*↻?$/.test(t)}
+const isCarriedHeader=(l:string)=>/:\s*↻$/.test(l.trim())
+// Sub-section: header with a numbered/bulleted prefix (1) 2. -) or leading indentation
+const isSubHeader=(l:string)=>isDeskHeader(l)&&(/^\s+\S/.test(l)||/^(\d+[).]|[-•])\s*/.test(l.trim()))
+function buildCarry(prev:string,priorDate:string){
+  const fmt=new Date(priorDate+'T12:00:00').toLocaleDateString('default',{month:'short',day:'numeric'})
+  const lines=prev.split('\n')
+  const tops:any[]=[];const loose:string[]=[];let curTop:any=null;let curSub:any=null
+  for(const l of lines){
+    if(isDeskHeader(l)&&!isSubHeader(l)){curTop={header:l,lines:[],subs:[]};curSub=null;tops.push(curTop)}
+    else if(isDeskHeader(l)&&isSubHeader(l)){
+      if(!curTop){curTop={header:null,lines:[],subs:[]};tops.push(curTop)}
+      curSub={header:l,lines:[]};curTop.subs.push(curSub)
+    }
+    else if(curSub)curSub.lines.push(l)
+    else if(curTop)curTop.lines.push(l)
+    else loose.push(l)
+  }
+  const keepAll=(ls:string[])=>ls.filter(l=>{const t=l.trim();return t!==''&&!t.startsWith('[x]')})
+  const keepUn=(ls:string[])=>ls.filter(l=>l.trim().startsWith('[ ]'))
+  const clean=(h:any)=>{
+    if(!h)return ''
+    const t=String(h).trim().replace(/\s*↻$/,'').replace(/:$/,'')
+    // Legacy/system carry headers aren't real context — don't breadcrumb with them
+    return /^carried over/i.test(t)?'':t
+  }
+  // Residue tasks get a breadcrumb + origin date; already-annotated tasks keep their original date (aging)
+  const annotate=(l:string,crumb:string)=>l.includes(' ⌁ ')?l:l.trimEnd()+` ⌁ ${crumb?crumb+' · ':''}${fmt}`
+  const residue:string[]=[];const blocks:string[]=[]
+  keepUn(loose).forEach(l=>residue.push(annotate(l,'')))
+  for(const top of tops){
+    const topCarried=top.header?isCarriedHeader(top.header):false
+    if(topCarried){
+      // Deliberate continuation: carry the whole block, structure intact, ↻ preserved
+      blocks.push(top.header,...keepAll(top.lines))
+      for(const sub of top.subs)blocks.push(sub.header,...keepAll(sub.lines))
+      blocks.push('')
+      continue
+    }
+    keepUn(top.lines).forEach(l=>residue.push(annotate(l,clean(top.header))))
+    const carriedSubs=top.subs.filter((sub:any)=>isCarriedHeader(sub.header))
+    for(const sub of top.subs){
+      if(isCarriedHeader(sub.header))continue
+      const crumb=[clean(top.header),clean(sub.header)].filter(Boolean).join(' › ')
+      keepUn(sub.lines).forEach(l=>residue.push(annotate(l,crumb)))
+    }
+    if(carriedSubs.length){
+      if(top.header)blocks.push(top.header.replace(/\s*↻$/,''))
+      for(const sub of carriedSubs)blocks.push(sub.header,...keepAll(sub.lines))
+      blocks.push('')
+    }
+  }
+  const out:string[]=[]
+  if(residue.length)out.push('Carried over:',...residue,'')
+  out.push(...blocks)
+  return out.length?out.join('\n'):''
+}
+// Days since a breadcrumb date like 'Jul 8' (year-wrap tolerant)
+function crumbAge(dateStr:string){
+  const d=new Date(`${dateStr} ${new Date().getFullYear()}`)
+  if(isNaN(+d))return 0
+  if(+d>Date.now()+86400000)d.setFullYear(d.getFullYear()-1)
+  return Math.floor((Date.now()-+d)/86400000)
+}
+
+function Desk({items,setItems,projects,milestones}:{items:any[],setItems:any,projects:any[],milestones:any[]}) {
+  async function unflagDev(item:any){
+    // dev-only flag clears; a 'both' flag downgrades to stakeholder-only
+    const next=(item.flag_audience==='both')?{flagged:true,flag_audience:'stakeholder'}:{flagged:false,flag_audience:null}
+    setItems((prev:any[])=>prev.map(i=>i.id===item.id?{...i,...next}:i))
+    await supabase.from('items').update(next).eq('id',item.id)
+  }
+  async function unflagStk(item:any){
+    const next=(item.flag_audience==='both')?{flagged:true,flag_audience:'dev'}:{flagged:false,flag_audience:null}
+    setItems((prev:any[])=>prev.map(i=>i.id===item.id?{...i,...next}:i))
+    await supabase.from('items').update(next).eq('id',item.id)
+  }
+  const localISO=(d:Date)=>`${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,'0')}-${String(d.getDate()).padStart(2,'0')}`
+  const [devOpen,setDevOpen]=useState(true)
+  const [stkOpen,setStkOpen]=useState(true)
+  const [railOpen,setRailOpen]=useState<any>({due:true,ms:true,vend:true,proj:true})
+  const railToggle=(k:string)=>setRailOpen((o:any)=>({...o,[k]:!o[k]}))
+  const RailHead=({k,children}:{k:string,children:any})=>(
+    <button onClick={()=>railToggle(k)} style={{background:'none',border:'none',padding:0,cursor:'pointer',width:'100%',display:'flex',alignItems:'center',gap:6,...railTitle as any,marginBottom:railOpen[k]?8:0}}>
+      <span style={{fontSize:9}}>{railOpen[k]?'▾':'▸'}</span>{children}
+    </button>
+  )
+  const [noteEditId,setNoteEditId]=useState<any>(null)
+  const [noteDraft,setNoteDraft]=useState('')
+  const [projView,setProjView]=useState<any>(null)
+  async function saveNote(item:any){
+    setItems((prev:any[])=>prev.map(i=>i.id===item.id?{...i,notes:noteDraft}:i))
+    setNoteEditId(null)
+    await supabase.from('items').update({notes:noteDraft}).eq('id',item.id)
+  }
+  const [date,setDate]=useState(localISO(new Date()))
+  const [noteId,setNoteId]=useState<any>(null)
+  const [content,setContent]=useState('')
+  const [raw,setRaw]=useState(false)
+  const [savedAt,setSavedAt]=useState<any>(null)
+  const saveTimer=useRef<any>(null)
+  const inputRefs=useRef<any>({})
+  const pendingFocus=useRef<any>(null)
+
+  useEffect(()=>{(async()=>{
+    const{data}=await supabase.from('daily_notes').select('*').order('note_date',{ascending:false})
+    const rows=data||[]
+    const exact=rows.find((r:any)=>r.note_date===date)
+    if(exact){setNoteId(exact.id);setContent(exact.content||'')}
+    else{
+      setNoteId(null)
+      const prior=rows.find((r:any)=>r.note_date<date)
+      if(prior&&date===localISO(new Date())){
+        setContent(buildCarry(prior.content||'',prior.note_date))
+      } else setContent('')
+    }
+    setSavedAt(null)
+  })()},[date])
+
+  useEffect(()=>{
+    if(pendingFocus.current!=null){
+      const{idx,caret}=pendingFocus.current
+      const el=inputRefs.current[idx]
+      if(el){el.focus();if(caret!=null)try{el.setSelectionRange(caret,caret)}catch{}}
+      pendingFocus.current=null
+    }
+  },[content])
+
+  function persist(next:string){
+    setContent(next)
+    clearTimeout(saveTimer.current)
+    saveTimer.current=setTimeout(async()=>{
+      if(noteId){
+        const{error}=await supabase.from('daily_notes').update({content:next,updated_at:new Date().toISOString()}).eq('id',noteId)
+        if(!error)setSavedAt(new Date())
+      }else{
+        const{data,error}=await supabase.from('daily_notes').insert({note_date:date,content:next}).select().single()
+        if(error){if(!String(error.message).includes('duplicate'))alert('Save failed: '+error.message);return}
+        if(data){setNoteId(data.id);setSavedAt(new Date())}
+      }
+    },700)
+  }
+
+  const lines=content.split('\n')
+  const isTask=(l:string)=>l.trimStart().startsWith('[ ]')||l.trimStart().startsWith('[x]')
+  function setLine(idx:number,val:string){
+    // typing "[]" or "[ ]" at the start of a plain line turns it into a task
+    const v=val.replace(/^\[\]\s?/,'[ ] ')
+    const ls=content.split('\n');ls[idx]=v;persist(ls.join('\n'))
+  }
+  function toggle(idx:number){
+    const ls=content.split('\n');const l=ls[idx]
+    ls[idx]=l.trimStart().startsWith('[ ]')?l.replace('[ ]','[x]'):l.replace('[x]','[ ]')
+    persist(ls.join('\n'))
+  }
+  async function pullCarry(){
+    const{data}=await supabase.from('daily_notes').select('*').order('note_date',{ascending:false})
+    const rows=data||[]
+    const prior=rows.find((r:any)=>r.note_date<date)
+    if(!prior){alert('No earlier note to carry from.');return}
+    const carry=buildCarry(prior.content||'',prior.note_date)
+    if(!carry){alert(`Nothing to carry from ${prior.note_date} — no ↻ sections or unchecked tasks.`);return}
+    const stripMeta=(l:string)=>{const i=l.indexOf(' ⌁ ');return (i>=0?l.slice(0,i):l).trim()}
+    const existing=new Set(content.split('\n').map(stripMeta).filter(t=>t!==''))
+    const fresh=carry.split('\n').filter(l=>{const t=stripMeta(l);return t===''||!existing.has(t)})
+    // drop a leading 'Carried over:' header if today already has one and nothing new under it
+    const meaningful=fresh.filter(l=>{const t=stripMeta(l);return t!==''&&t!=='Carried over:'})
+    if(!meaningful.length){alert('Everything from the last note is already on this page.');return}
+    persist((fresh.join('\n').trimEnd()+'\n\n'+content).replace(/\n{3,}/g,'\n\n'))
+  }
+  function toggleCarry(idx:number){
+    const ls=content.split('\n');const l=ls[idx]
+    ls[idx]=isCarriedHeader(l)?l.replace(/\s*↻$/,''):l.trimEnd()+' ↻'
+    persist(ls.join('\n'))
+  }
+  function onKey(e:any,idx:number){
+    const ls=content.split('\n')
+    if(e.key==='Enter'){
+      e.preventDefault()
+      const el=e.currentTarget
+      const caret=el.selectionStart??el.value.length
+      const before=el.value.slice(0,caret),after=el.value.slice(caret)
+      const task=isTask(ls[idx])
+      const prefix=task?(ls[idx].trimStart().slice(0,3)==='[x]'?'[ ] ':'[ ] '):''
+      ls[idx]=task?ls[idx].slice(0,ls[idx].length-el.value.length)+before:before
+      ls.splice(idx+1,0,task?prefix+after:after)
+      persist(ls.join('\n'))
+      pendingFocus.current={idx:idx+1,caret:task?prefix.length:0}
+    }
+    if(e.key==='Backspace'&&e.currentTarget.value===''){
+      e.preventDefault()
+      if(isTask(ls[idx])){ls[idx]=''}          // first backspace: unwrap task to plain empty line
+      else if(ls.length>1){ls.splice(idx,1);pendingFocus.current={idx:Math.max(0,idx-1),caret:null}}
+      persist(ls.join('\n'))
+    }
+  }
+  function shiftDate(days:number){const d=new Date(date+'T12:00:00');d.setDate(d.getDate()+days);setDate(localISO(d))}
+
+  const now=new Date();now.setHours(0,0,0,0)
+  const in14=+now+14*86400000, in7=+now+7*86400000
+  const upMs=milestones.filter(m=>!m.completed&&+new Date(m.date+'T12:00:00')>=+now&&+new Date(m.date+'T12:00:00')<=in14)
+    .sort((a,b)=>a.date<b.date?-1:1)
+  const flaggedDevL=items.filter(flagDev)
+  const flaggedStkL=items.filter(flagStk)
+  const vend=items.filter(i=>i.vendor_delivery_date&&+new Date(i.vendor_delivery_date+'T12:00:00')<=in7&&!/done|complete|closed|cancel/i.test(i.status||''))
+    .sort((a,b)=>a.vendor_delivery_date<b.vendor_delivery_date?-1:1)
+  const in5=+now+5*86400000
+  const dueSoon=items.filter(i=>i.end_date&&+new Date(i.end_date+'T12:00:00')<=in5&&!/done|complete|closed|cancel|will not/i.test(i.status||''))
+    .sort((a,b)=>a.end_date<b.end_date?-1:1)
+  const activeProjects=[...projects].filter(p=>p.status!=='Complete'&&p.status!=='Cancelled').sort((a,b)=>(a.sort_order??999)-(b.sort_order??999))
+  const projItems=(p:any)=>items.filter(i=>i.parent_project===p.name&&!/done|complete|closed|cancel|will not/i.test(i.status||''))
+    .sort((a:any,b:any)=>((PRIORITY_ORDER[a.priority]??4)-(PRIORITY_ORDER[b.priority]??4))||((a.committed_priority??999)-(b.committed_priority??999)))
+  const fmtDt=(str:string)=>new Date(str+'T12:00:00').toLocaleDateString('default',{month:'short',day:'numeric'})
+  const isToday=date===localISO(new Date())
+  const dispDate=new Date(date+'T12:00:00').toLocaleDateString('default',{weekday:'long',month:'long',day:'numeric'})
+  const railCard={background:'#162436',border:'1px solid #243447',borderRadius:8,padding:'10px 12px',marginBottom:12}
+  const railTitle={fontSize:10,fontWeight:700,letterSpacing:1,color:'#C8973A',marginBottom:8}
+  const lineInput={flex:1,background:'transparent',border:'none',outline:'none',color:'#F4F6F8',fontSize:14,lineHeight:1.6,fontFamily:'inherit',padding:0}
+
+  return(
+    <div style={{height:'100%',display:'flex',gap:0,overflow:'hidden'}}>
+      {/* Left rail — flagged for discussion, split by audience */}
+      <div style={{width:270,flexShrink:0,borderRight:'1px solid #243447',padding:'18px 14px',overflowY:'auto'}}>
+        {([['🚩 DEV FLAGGED',flaggedDevL,devOpen,setDevOpen,unflagDev],['◉ STAKEHOLDER FLAGGED',flaggedStkL,stkOpen,setStkOpen,unflagStk]] as any[]).map(([title,list,open,setOpen,unflag]:any)=>(
+          <div key={title} style={railCard as any}>
+            <button onClick={()=>setOpen((o:boolean)=>!o)} style={{background:'none',border:'none',padding:0,cursor:'pointer',width:'100%',display:'flex',alignItems:'center',gap:6,...railTitle as any,marginBottom:open?8:0}}>
+              <span style={{fontSize:9}}>{open?'▾':'▸'}</span>{title} ({list.length})
+            </button>
+            {open&&list.length===0&&<div style={{fontSize:11,color:'#7A8FA6',fontStyle:'italic'}}>Nothing flagged</div>}
+            {open&&list.map((i:any)=>{
+              const editing=noteEditId===i.id
+              return(
+                <div key={i.id} onClick={()=>{if(!editing){setNoteEditId(i.id);setNoteDraft(i.notes||'')}}}
+                  style={{fontSize:11,marginBottom:10,lineHeight:1.4,position:'relative' as const,paddingRight:16,cursor:editing?'default':'pointer',borderLeft:editing?'2px solid #C8973A':'2px solid transparent',paddingLeft:6}}>
+                  <button onClick={e=>{e.stopPropagation();unflag(i)}} title="Remove from this list"
+                    style={{position:'absolute',right:0,top:0,background:'none',border:'none',color:'#7A8FA6',fontSize:12,cursor:'pointer',padding:0,lineHeight:1}}>✕</button>
+                  <span style={{color:'#F4F6F8',fontWeight:600}}>{i.name}</span> <span style={{color:'#7A8FA6',fontSize:10}}>{i.item_id}</span>
+                  {!editing&&i.notes&&<div style={{color:'#7A8FA6',fontSize:10,marginTop:1,overflow:'hidden',display:'-webkit-box',WebkitLineClamp:3,WebkitBoxOrient:'vertical' as const}}>{i.notes}</div>}
+                  {editing&&(
+                    <div style={{marginTop:5}} onClick={e=>e.stopPropagation()}>
+                      <textarea value={noteDraft} onChange={e=>setNoteDraft(e.target.value)} rows={4} autoFocus placeholder="Discussion notes..."
+                        style={{width:'100%',boxSizing:'border-box' as const,background:'#0D1B2A',border:'1px solid #243447',borderRadius:4,color:'#F4F6F8',fontSize:11,padding:6,resize:'vertical' as const,fontFamily:'inherit',lineHeight:1.4}}/>
+                      <div style={{display:'flex',gap:6,marginTop:4,justifyContent:'flex-end'}}>
+                        <button onClick={()=>setNoteEditId(null)} style={{background:'none',border:'1px solid #243447',borderRadius:4,color:'#7A8FA6',fontSize:10,padding:'2px 8px',cursor:'pointer'}}>Cancel</button>
+                        <button onClick={()=>saveNote(i)} style={{background:'#C8973A',border:'none',borderRadius:4,color:'#0D1B2A',fontSize:10,fontWeight:700,padding:'2px 10px',cursor:'pointer'}}>Save</button>
+                      </div>
+                    </div>
+                  )}
+                </div>
+              )
+            })}
+          </div>
+        ))}
+      </div>
+      <div style={{flex:1,display:'flex',flexDirection:'column' as const,padding:'18px 24px',overflow:'hidden'}}>
+        <div style={{display:'flex',alignItems:'center',gap:10,marginBottom:12}}>
+          <button onClick={()=>shiftDate(-1)} style={{background:'#1E3048',border:'1px solid #243447',borderRadius:6,color:'#7A8FA6',padding:'4px 10px',cursor:'pointer'}}>‹</button>
+          <div style={{fontSize:17,fontWeight:800}}>{dispDate}{isToday&&<span style={{fontSize:11,color:'#C8973A',marginLeft:8}}>TODAY</span>}</div>
+          <button onClick={()=>shiftDate(1)} style={{background:'#1E3048',border:'1px solid #243447',borderRadius:6,color:'#7A8FA6',padding:'4px 10px',cursor:'pointer'}}>›</button>
+          {!isToday&&<button onClick={()=>setDate(localISO(new Date()))} style={{background:'none',border:'1px solid #243447',borderRadius:6,color:'#C8973A',padding:'4px 10px',fontSize:11,cursor:'pointer'}}>Today</button>}
+          <span style={{marginLeft:'auto',fontSize:10,color:'#7A8FA6'}}>{savedAt?`Saved ${savedAt.toLocaleTimeString()}`:''}</span>
+          <button onClick={pullCarry} title="Re-pull unchecked tasks and ↻ sections from the most recent earlier note (skips anything already on this page)" style={{background:'#1E3048',border:'1px solid #243447',borderRadius:6,color:'#C8973A',padding:'4px 12px',fontSize:11,fontWeight:700,cursor:'pointer'}}>↻ Pull carry-over</button>
+          <button onClick={()=>setRaw(r=>!r)} style={{background:raw?'#C8973A':'#1E3048',border:'1px solid #243447',borderRadius:6,color:raw?'#0D1B2A':'#7A8FA6',padding:'4px 14px',fontSize:11,fontWeight:700,cursor:'pointer'}}>{raw?'Done':'Raw'}</button>
+        </div>
+        {raw?(
+          <textarea value={content} onChange={e=>persist(e.target.value)} autoFocus
+            style={{flex:1,background:'#0F1C2B',border:'1px solid #243447',borderRadius:10,color:'#F4F6F8',fontSize:14,lineHeight:1.7,padding:16,resize:'none' as const,fontFamily:'inherit',outline:'none'}}/>
+        ):(
+          <div style={{flex:1,overflowY:'auto',background:'#0F1C2B',border:'1px solid #243447',borderRadius:10,padding:'14px 16px'}}
+               onClick={e=>{if(e.target===e.currentTarget){const el=inputRefs.current[lines.length-1];el?.focus()}}}>
+            {lines.map((l,idx)=>{
+              const t=l.trimStart()
+              const task=isTask(l)
+              const done=t.startsWith('[x]')
+              const header=!task&&isDeskHeader(l)
+              const carried=header&&isCarriedHeader(l)
+              if(header){
+                const sub=isSubHeader(l)
+                const shown=l.replace(/\s*↻$/,'')
+                return(
+                  <div key={idx} style={{display:'flex',alignItems:'center',gap:8,padding:'2px 0',marginTop:idx===0?0:(sub?6:14),borderBottom:sub?'1px dashed #243447':'2px solid #2E4258',paddingLeft:sub?14:0}}>
+                    <input ref={el=>{if(el)inputRefs.current[idx]=el}} value={shown}
+                      onChange={e=>setLine(idx,carried?e.target.value.trimEnd()+' ↻':e.target.value)}
+                      onKeyDown={e=>{
+                        if(e.key==='Tab'){
+                          e.preventDefault()
+                          const ls=content.split('\n')
+                          if(e.shiftKey) ls[idx]=ls[idx].replace(/^\s+/,'')
+                          else if(!isSubHeader(ls[idx])) ls[idx]='  '+ls[idx]
+                          persist(ls.join('\n'));return
+                        }
+                        onKey(e,idx)
+                      }}
+                      style={{...lineInput as any,color:sub?'#E8B95A':'#C8973A',fontWeight:800,fontSize:sub?13:16,letterSpacing:sub?0.2:0.5,textTransform:sub?'none' as const:'none' as const}}/>
+                    <button onClick={()=>toggleCarry(idx)} title={carried?'Carries this whole section to tomorrow — click to unmark':'Click to carry this whole section to tomorrow'}
+                      style={{background:carried?'#C8973A':'transparent',color:carried?'#0D1B2A':'#7A8FA6',border:`1px solid ${carried?'#C8973A':'#243447'}`,borderRadius:4,fontSize:11,fontWeight:700,padding:'1px 8px',cursor:'pointer',flexShrink:0,lineHeight:1.4}}>↻{carried?' carries':''}</button>
+                  </div>
+                )
+              }
+              const raw=task?t.slice(3).replace(/^\s/,''):l
+              const mIdx=task?raw.indexOf(' ⌁ '):-1
+              const main=mIdx>=0?raw.slice(0,mIdx):raw
+              const meta=mIdx>=0?raw.slice(mIdx+3):null
+              const metaDate=meta?meta.split(' · ').pop()||'':''
+              const age=meta?crumbAge(metaDate):0
+              return(
+                <div key={idx} style={{display:'flex',alignItems:'center',gap:8,padding:'2px 0',paddingLeft:task?24:14}}>
+                  {task&&<input type="checkbox" checked={done} onChange={()=>toggle(idx)} style={{cursor:'pointer',flexShrink:0}}/>}
+                  <input ref={el=>{if(el)inputRefs.current[idx]=el}} value={main}
+                    onChange={e=>setLine(idx,task?((done?'[x] ':'[ ] ')+e.target.value+(meta?' ⌁ '+meta:'')):e.target.value)}
+                    onKeyDown={e=>onKey(e,idx)}
+                    placeholder={idx===0&&lines.length===1&&!l?'Plan your day...  (type [ ] for a task, end a line with : for a section)':''}
+                    style={{...lineInput as any,color:done?'#7A8FA6':'#F4F6F8',textDecoration:done?'line-through':'none'}}/>
+                  {meta&&(
+                    <span style={{fontSize:10,color:'#5C6E80',flexShrink:0,whiteSpace:'nowrap' as const,marginLeft:'auto',maxWidth:280,overflow:'hidden',textOverflow:'ellipsis',paddingLeft:12}} title={`Carried since ${metaDate}`}>
+                      {meta.includes(' · ')?meta.slice(0,meta.lastIndexOf(' · ')):''}{meta.includes(' · ')?' · ':''}
+                      <span style={{color:age>=5?'#E74C3C':age>=2?'#E8B95A':'#5C6E80',fontWeight:age>=2?700:400}}>{metaDate}</span>
+                    </span>
+                  )}
+                </div>
+              )
+            })}
+          </div>
+        )}
+        <div style={{fontSize:10,color:'#7A8FA6',marginTop:6}}>Autosaves · [ ] = task · line ending with : = section · start it with 1) or press Tab = sub-section (Shift+Tab promotes) · ↻ carries a section to tomorrow · unchecked tasks always carry under their headers</div>
+      </div>
+      <div style={{width:300,flexShrink:0,borderLeft:'1px solid #243447',padding:'18px 16px',overflowY:'auto'}}>
+        <div style={railCard as any}>
+          <RailHead k="due">🎯 DUE — NEXT 5 DAYS ({dueSoon.length})</RailHead>
+          {railOpen.due&&<>
+          {dueSoon.length===0&&<div style={{fontSize:11,color:'#7A8FA6',fontStyle:'italic'}}>Nothing due</div>}
+          {dueSoon.map(i=>{const overdue=+new Date(i.end_date+'T12:00:00')<+now;return(
+            <div key={i.id} style={{fontSize:11,marginBottom:6,lineHeight:1.4}}>
+              <span style={{color:overdue?'#E74C3C':'#C8973A',fontWeight:700}}>{fmtDt(i.end_date)}{overdue?' ⚠':''}</span> <span style={{color:'#F4F6F8'}}>{i.name}</span>
+              <div style={{color:'#7A8FA6',fontSize:10}}>{i.item_id}{i.parent_project?` · ${i.parent_project}`:''} · <span style={{color:sc(i.status)}}>{i.status}</span></div>
+            </div>
+          )})}
+          </>}
+        </div>
+        <div style={railCard as any}>
+          <RailHead k="ms">📅 MILESTONES — NEXT 14 DAYS ({upMs.length})</RailHead>
+          {railOpen.ms&&<>
+          {upMs.length===0&&<div style={{fontSize:11,color:'#7A8FA6',fontStyle:'italic'}}>None due</div>}
+          {upMs.map(m=>{const pr=projects.find(p=>p.id===m.project_id);return(
+            <div key={m.id} style={{fontSize:11,marginBottom:6,lineHeight:1.4}}>
+              <span style={{color:'#C8973A',fontWeight:700}}>{fmtDt(m.date)}</span> <span style={{color:'#F4F6F8'}}>{m.name}</span>
+              {pr&&<div style={{color:'#7A8FA6',fontSize:10}}>{pr.name}</div>}
+            </div>
+          )})}
+          </>}
+        </div>
+        <div style={railCard as any}>
+          <RailHead k="vend">🚚 VENDOR DATES — THIS WEEK ({vend.length})</RailHead>
+          {railOpen.vend&&<>
+          {vend.length===0&&<div style={{fontSize:11,color:'#7A8FA6',fontStyle:'italic'}}>None due</div>}
+          {vend.map(i=>{const overdue=+new Date(i.vendor_delivery_date+'T12:00:00')<+now;return(
+            <div key={i.id} style={{fontSize:11,marginBottom:6,lineHeight:1.4}}>
+              <span style={{color:overdue?'#E74C3C':'#C8973A',fontWeight:700}}>{fmtDt(i.vendor_delivery_date)}{overdue?' ⚠':''}</span> <span style={{color:'#F4F6F8'}}>{i.name}</span>
+              <div style={{color:'#7A8FA6',fontSize:10}}>{i.item_id}{i.vendor?` · ${i.vendor}`:''}</div>
+            </div>
+          )})}
+          </>}
+        </div>
+        <div style={railCard as any}>
+          <RailHead k="proj">◈ PRIORITY PROJECTS ({activeProjects.length})</RailHead>
+          {railOpen.proj&&<>
+          {activeProjects.length===0&&<div style={{fontSize:11,color:'#7A8FA6',fontStyle:'italic'}}>No active projects</div>}
+          {activeProjects.map((p,pi)=>{
+            const pis=projItems(p)
+            const shown=pis.slice(0,5)
+            return(
+              <div key={p.id} onClick={()=>setProjView(p)} style={{marginBottom:10,paddingLeft:8,borderLeft:`3px solid ${p.color||'#3A4A5E'}`,cursor:'pointer'}}>
+                <div style={{fontSize:11,fontWeight:700,color:'#F4F6F8',display:'flex',alignItems:'center',gap:6}}>
+                  <span style={{color:'#C8973A'}}>{pi+1}.</span> {p.name}
+                  <span style={{width:7,height:7,borderRadius:'50%',flexShrink:0,background:p.rag==='Green'?'#27AE60':p.rag==='Amber'?'#E8B95A':p.rag==='Red'?'#E74C3C':'#3A4A5E'}}/>
+                </div>
+                {shown.map(i=>(
+                  <div key={i.id} style={{fontSize:10,color:'#B8C4D0',lineHeight:1.5,paddingLeft:14,overflow:'hidden',whiteSpace:'nowrap' as const,textOverflow:'ellipsis'}}>
+                    {i.name} <span style={{color:'#7A8FA6'}}>· {i.status}</span>
+                  </div>
+                ))}
+                {pis.length>5&&<div style={{fontSize:9,color:'#7A8FA6',paddingLeft:14}}>+{pis.length-5} more</div>}
+              </div>
+            )
+          })}
+          </>}
+        </div>
+      </div>
+      {projView&&(()=>{
+        const pms=milestones.filter(m=>m.project_id===projView.id).sort((a,b)=>a.date<b.date?-1:1)
+        const pis=items.filter(i=>i.parent_project===projView.name)
+          .sort((a:any,b:any)=>((PRIORITY_ORDER[a.priority]??4)-(PRIORITY_ORDER[b.priority]??4))||((a.committed_priority??999)-(b.committed_priority??999)))
+        const doneP=pis.filter(i=>i.status==='Done')
+        const committed=pis.filter(i=>i.status!=='Done'&&i.start_date&&i.end_date)
+        return(
+        <div onClick={()=>setProjView(null)} style={{position:'fixed',inset:0,background:'rgba(0,0,0,0.6)',zIndex:250,display:'flex',alignItems:'center',justifyContent:'center'}}>
+          <div onClick={e=>e.stopPropagation()} style={{background:'#162436',border:'1px solid #243447',borderRadius:12,width:560,maxWidth:'92vw',maxHeight:'82vh',overflowY:'auto',padding:20}}>
+            <div style={{display:'flex',alignItems:'center',gap:10,marginBottom:6}}>
+              <span style={{width:12,height:12,borderRadius:3,background:projView.color||'#3A4A5E'}}/>
+              <span style={{fontSize:16,fontWeight:800}}>{projView.name}</span>
+              <span style={{fontSize:11,fontWeight:700,color:projView.rag==='Green'?'#27AE60':projView.rag==='Amber'?'#E8B95A':projView.rag==='Red'?'#E74C3C':'#7A8FA6'}}>{projView.rag}</span>
+              <button onClick={()=>setProjView(null)} style={{marginLeft:'auto',background:'none',border:'none',color:'#7A8FA6',fontSize:18,cursor:'pointer',lineHeight:1}}>✕</button>
+            </div>
+            <div style={{display:'flex',gap:8,flexWrap:'wrap' as const,marginBottom:10}}>
+              {[['Status',projView.status],['Priority',projView.priority],['Team',projView.team],['Timeline',projView.start_date&&projView.end_date?`${projView.start_date} → ${projView.end_date}`:null],['Items',`${committed.length} committed / ${pis.length} total`]].filter(([,v])=>v).map(([k,v]:any)=>(
+                <span key={k} style={{background:'#1E3048',border:'1px solid #243447',borderRadius:4,padding:'3px 8px',fontSize:10,color:'#7A8FA6'}}>{k}: <span style={{color:'#F4F6F8',fontWeight:600}}>{v}</span></span>
+              ))}
+            </div>
+            {projView.description&&<div style={{fontSize:12,color:'#B8C4D0',lineHeight:1.5,marginBottom:12}}>{projView.description}</div>}
+            {pms.length>0&&(
+              <div style={{marginBottom:12}}>
+                <div style={{fontSize:10,fontWeight:700,letterSpacing:1,color:'#C8973A',marginBottom:5}}>MILESTONES</div>
+                {pms.map(m=>{
+                  const clr=m.completed?'#27AE60':(+new Date(m.date+'T12:00:00')<Date.now()?'#E74C3C':'#C8973A')
+                  return <div key={m.id} style={{fontSize:11,marginBottom:3}}><span style={{color:clr,fontWeight:700}}>◆ {m.date}</span> <span style={{color:m.completed?'#7A8FA6':'#F4F6F8',textDecoration:m.completed?'line-through':'none'}}>{m.name}</span></div>
+                })}
+              </div>
+            )}
+            {(()=>{
+              const uncommittedP=pis.filter(i=>i.status!=='Done'&&!(i.start_date&&i.end_date))
+              const row=(i:any)=>(
+                <div key={i.id} style={{display:'flex',alignItems:'baseline',gap:8,fontSize:11,marginBottom:3}}>
+                  <span style={{color:'#7A8FA6',fontFamily:'monospace',fontSize:10,flexShrink:0}}>{i.item_id}</span>
+                  <span style={{color:'#F4F6F8',flex:1}}>{i.name}</span>
+                  <span style={{color:sc(i.status),fontSize:10,flexShrink:0}}>{i.status}</span>
+                  {i.end_date&&<span style={{color:'#7A8FA6',fontSize:10,flexShrink:0}}>{i.end_date}</span>}
+                </div>
+              )
+              return(<>
+                {committed.length>0&&(
+                  <div style={{marginBottom:12}}>
+                    <div style={{fontSize:10,fontWeight:700,letterSpacing:1,color:'#27AE60',marginBottom:5}}>✓ COMMITTED ({committed.length})</div>
+                    {[...committed].sort((a:any,b:any)=>a.end_date<b.end_date?-1:1).map(row)}
+                  </div>
+                )}
+                {uncommittedP.length>0&&(
+                  <div style={{marginBottom:12}}>
+                    <div style={{fontSize:10,fontWeight:700,letterSpacing:1,color:'#C8973A',marginBottom:5}}>◌ NOT COMMITTED ({uncommittedP.length})</div>
+                    {uncommittedP.map(row)}
+                  </div>
+                )}
+                {doneP.length>0&&(
+                  <div>
+                    <div style={{fontSize:10,fontWeight:700,letterSpacing:1,color:'#16A085',marginBottom:5}}>✓ DONE ({doneP.length})</div>
+                    {doneP.map(i=>(
+                      <div key={i.id} style={{display:'flex',alignItems:'baseline',gap:8,fontSize:11,marginBottom:3,opacity:0.7}}>
+                        <span style={{color:'#7A8FA6',fontFamily:'monospace',fontSize:10,flexShrink:0}}>{i.item_id}</span>
+                        <span style={{color:'#9AABBC',flex:1,textDecoration:'line-through',textDecorationColor:'#3A4A5E'}}>{i.name}</span>
+                        {i.end_date&&<span style={{color:'#7A8FA6',fontSize:10,flexShrink:0}}>{i.end_date}</span>}
+                      </div>
+                    ))}
+                  </div>
+                )}
+              </>)
+            })()}
+          </div>
+        </div>
+        )
+      })()}
+    </div>
+  )
+}
+
+// ── DONE — history of completed projects and items ───────────────────────
+function DoneTab({items,setItems,projects,setProjects}:{items:any[],setItems:any,projects:any[],setProjects:any}) {
+  const [projOpen,setProjOpen]=useState(true)
+  const [itemOpen,setItemOpen]=useState(true)
+  const [pSrch,setPSrch]=useState('');const [pTeam,setPTeam]=useState('All');const [pStatus,setPStatus]=useState('All')
+  const [iSrch,setISrch]=useState('');const [iTeam,setITeam]=useState('All');const [iPri,setIPri]=useState('All')
+  const [iSwim,setISwim]=useState('All');const [iProj,setIProj]=useState('All');const [iStatus,setIStatus]=useState('All')
+
+  const doneProjects=projects.filter(isProjectDone).filter(p=>{
+    if(pTeam!=='All'&&p.team!==pTeam) return false
+    if(pStatus!=='All'&&p.status!==pStatus) return false
+    if(pSrch&&!p.name?.toLowerCase().includes(pSrch.toLowerCase())) return false
+    return true
+  }).sort((a,b)=>(a.end_date||'')<(b.end_date||'')?1:-1)
+
+  const allDoneItems=items.filter(isItemDone)
+  const doneItems=allDoneItems.filter(i=>{
+    if(iTeam!=='All'&&i.team!==iTeam) return false
+    if(iPri!=='All'&&i.priority!==iPri) return false
+    if(iSwim!=='All'&&i.swimlane!==iSwim) return false
+    if(iProj!=='All'&&i.parent_project!==iProj) return false
+    if(iStatus!=='All'&&i.status!==iStatus) return false
+    if(iSrch&&!i.name?.toLowerCase().includes(iSrch.toLowerCase())&&!i.item_id?.toLowerCase().includes(iSrch.toLowerCase())) return false
+    return true
+  }).sort((a,b)=>(a.end_date||'')<(b.end_date||'')?1:-1)
+
+  const swimOpts=[...new Set(allDoneItems.map(i=>i.swimlane).filter(Boolean))].sort()
+  const projOpts=[...new Set(allDoneItems.map(i=>i.parent_project).filter(Boolean))].sort()
+  const selS={background:'#1E3048',color:'#F4F6F8',border:'1px solid #243447',borderRadius:6,padding:'5px 8px',fontSize:11}
+  const TDD={padding:'6px 10px',borderBottom:'1px solid #1A2838',fontSize:12,color:'#B8C4D0'}
+  const THD={padding:'6px 10px',borderBottom:'1px solid #243447',fontSize:10,fontWeight:700,letterSpacing:0.5,color:'#7A8FA6',textAlign:'left' as const}
+  const secBtn=(open:boolean)=>({background:'none',border:'none',padding:0,cursor:'pointer',display:'flex',alignItems:'center',gap:8,fontSize:14,fontWeight:800,color:'#16A085',letterSpacing:1,marginBottom:open?12:0})
+
+  return(
+    <div style={{height:'100%',overflowY:'auto',padding:'20px 28px'}}>
+      <div style={{fontSize:12,color:'#7A8FA6',marginBottom:18}}>History of completed work — records land here automatically when marked {ITEM_TERMINAL.join(' / ')} (items) or {PROJECT_TERMINAL.join(' / ')} (projects)</div>
+
+      {/* Projects */}
+      <div style={{background:'#12202F',border:'1px solid #243447',borderRadius:10,padding:'14px 18px',marginBottom:20}}>
+        <button onClick={()=>setProjOpen(o=>!o)} style={secBtn(projOpen) as any}><span style={{fontSize:11}}>{projOpen?'▾':'▸'}</span>◈ PROJECTS ({doneProjects.length})</button>
+        {projOpen&&(
+          <>
+          <div style={{display:'flex',gap:8,marginBottom:12,flexWrap:'wrap' as const}}>
+            <input placeholder="Search projects..." value={pSrch} onChange={e=>setPSrch(e.target.value)} style={{...selS,width:200}}/>
+            <select value={pTeam} onChange={e=>setPTeam(e.target.value)} style={selS}><option value="All">All Teams</option>{TEAMS.map(t=><option key={t}>{t}</option>)}</select>
+            <select value={pStatus} onChange={e=>setPStatus(e.target.value)} style={selS}><option value="All">All Statuses</option>{PROJECT_TERMINAL.map(t=><option key={t}>{t}</option>)}</select>
+          </div>
+          {doneProjects.length===0&&<div style={{fontSize:12,color:'#7A8FA6',fontStyle:'italic'}}>No completed projects{pSrch||pTeam!=='All'||pStatus!=='All'?' matching filters':''}</div>}
+          {doneProjects.length>0&&(
+            <table style={{borderCollapse:'collapse',width:'100%'}}>
+              <thead><tr><th style={THD}>Project</th><th style={THD}>Status</th><th style={THD}>Priority</th><th style={THD}>Team</th><th style={THD}>Timeline</th><th style={THD}>Items</th></tr></thead>
+              <tbody>{doneProjects.map(p=>{
+                const pi=items.filter(i=>i.parent_project===p.name)
+                return(
+                  <tr key={p.id}>
+                    <td style={{...TDD,fontWeight:600,color:'#F4F6F8'}}><span style={{display:'inline-block',width:8,height:8,borderRadius:2,background:p.color||'#3A4A5E',marginRight:8}}/>{p.name}</td>
+                    <td style={TDD}>
+                      <select value={p.status} onChange={async e=>{
+                        const v=e.target.value
+                        setProjects((prev:any[])=>prev.map(x=>x.id===p.id?{...x,status:v}:x))
+                        const{error}=await supabase.from('projects').update({status:v}).eq('id',p.id)
+                        if(error)alert('Failed to update: '+error.message)
+                      }} style={{background:'#1E3048',border:'1px solid #243447',borderRadius:4,color:p.status==='Complete'?'#16A085':'#7A8FA6',fontSize:11,fontWeight:700,padding:'2px 6px',cursor:'pointer',fontFamily:'inherit'}}>
+                        {PROJECT_STATUSES.map(st=><option key={st} value={st}>{st}</option>)}
+                      </select>
+                    </td>
+                    <td style={TDD}>{p.priority}</td>
+                    <td style={TDD}>{p.team}</td>
+                    <td style={TDD}>{p.start_date&&p.end_date?`${p.start_date} → ${p.end_date}`:'—'}</td>
+                    <td style={TDD}>{pi.filter(isItemDone).length} done / {pi.length}</td>
+                  </tr>
+                )
+              })}</tbody>
+            </table>
+          )}
+          </>
+        )}
+      </div>
+
+      {/* Items */}
+      <div style={{background:'#12202F',border:'1px solid #243447',borderRadius:10,padding:'14px 18px'}}>
+        <button onClick={()=>setItemOpen(o=>!o)} style={secBtn(itemOpen) as any}><span style={{fontSize:11}}>{itemOpen?'▾':'▸'}</span>≡ ITEMS ({doneItems.length})</button>
+        {itemOpen&&(
+          <>
+          <div style={{display:'flex',gap:8,marginBottom:12,flexWrap:'wrap' as const}}>
+            <input placeholder="Search items..." value={iSrch} onChange={e=>setISrch(e.target.value)} style={{...selS,width:200}}/>
+            <select value={iTeam} onChange={e=>setITeam(e.target.value)} style={selS}><option value="All">All Teams</option>{TEAMS.map(t=><option key={t}>{t}</option>)}</select>
+            <select value={iPri} onChange={e=>setIPri(e.target.value)} style={selS}><option value="All">All Priorities</option>{PRIORITIES.map(t=><option key={t}>{t}</option>)}</select>
+            <select value={iSwim} onChange={e=>setISwim(e.target.value)} style={selS}><option value="All">All Swimlanes</option>{swimOpts.map(t=><option key={t}>{t}</option>)}</select>
+            <select value={iProj} onChange={e=>setIProj(e.target.value)} style={selS}><option value="All">All Projects</option>{projOpts.map(t=><option key={t}>{t}</option>)}</select>
+            <select value={iStatus} onChange={e=>setIStatus(e.target.value)} style={selS}><option value="All">All Statuses</option>{ITEM_TERMINAL.map(t=><option key={t}>{t}</option>)}</select>
+          </div>
+          {doneItems.length===0&&<div style={{fontSize:12,color:'#7A8FA6',fontStyle:'italic'}}>No done items{iSrch||iTeam!=='All'||iPri!=='All'||iSwim!=='All'||iProj!=='All'||iStatus!=='All'?' matching filters':''}</div>}
+          {doneItems.length>0&&(
+            <table style={{borderCollapse:'collapse',width:'100%'}}>
+              <thead><tr><th style={THD}>ID</th><th style={THD}>Item</th><th style={THD}>Status</th><th style={THD}>Priority</th><th style={THD}>Swimlane</th><th style={THD}>Team</th><th style={THD}>Project</th><th style={THD}>End Date</th></tr></thead>
+              <tbody>{doneItems.map(i=>(
+                <tr key={i.id}>
+                  <td style={{...TDD,fontFamily:'monospace',fontSize:10,color:'#7A8FA6'}}>{i.item_id}</td>
+                  <td style={{...TDD,color:'#F4F6F8'}}>{i.name}</td>
+                  <td style={TDD}>
+                    <select value={i.status} onChange={e=>applyItemStatus(items,setItems,i.id,e.target.value)}
+                      style={{background:'#1E3048',border:'1px solid #243447',borderRadius:4,color:i.status==='Done'?'#16A085':'#7A8FA6',fontSize:11,fontWeight:700,padding:'2px 6px',cursor:'pointer',fontFamily:'inherit'}}>
+                      {STATUSES.map(st=><option key={st} value={st}>{st}</option>)}
+                    </select>
+                  </td>
+                  <td style={TDD}>{i.priority}</td>
+                  <td style={TDD}>{i.swimlane}</td>
+                  <td style={TDD}>{i.team}</td>
+                  <td style={TDD}>{i.parent_project||'—'}</td>
+                  <td style={TDD}>{i.end_date||'—'}</td>
+                </tr>
+              ))}</tbody>
+            </table>
+          )}
+          </>
+        )}
+      </div>
+    </div>
+  )
+}
+
 export default function DeckTech() {
   const [items,setItems]=useState([])
   const [projects,setProjects]=useState([])
@@ -2765,12 +3495,14 @@ useEffect(()=>{
   },0)
 
   const TABS=[
+  {key:'desk',label:'Desk',icon:'✎'},
   {key:'projects',label:'Projects',icon:'◈',badge:totalViolations>0?totalViolations:null},
   {key:'backlog',label:'Backlog',icon:'≡'},
   {key:'roadmap',label:'Roadmap',icon:'◫'},
   {key:'scoring',label:'Scoring',icon:'◎'},
   {key:'teams',label:'Teams',icon:'⬡'},
   {key:'stakeholder',label:'Stakeholder View',icon:'◉'},
+  {key:'done',label:'Done',icon:'✓'},
 ]
 
   if(loading) return(
@@ -2814,7 +3546,9 @@ useEffect(()=>{
 {activeTab==='roadmap'&&<Roadmap items={items} setItems={setItems} projects={projects} setProjects={setProjects} milestones={milestones}/>}
         {activeTab==='scoring'&&<Scoring items={items}/>}
         {activeTab==='teams'&&<Teams items={items} projects={projects} milestones={milestones}/>}
+        {activeTab==='desk'&&<Desk items={items} setItems={setItems} projects={projects} milestones={milestones}/>}
         {activeTab==='stakeholder'&&<Stakeholder items={items} projects={projects} milestones={milestones}/>}
+        {activeTab==='done'&&<DoneTab items={items} setItems={setItems} projects={projects} setProjects={setProjects}/>}
       </div>
     </div>
   )
