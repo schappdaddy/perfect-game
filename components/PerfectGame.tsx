@@ -258,6 +258,17 @@ function ProjectDetail({project,items,setItems,projects,milestones,setMilestones
     await supabase.from('milestones').delete().eq('id',id)
   }
 
+  const [editMsId,setEditMsId]=useState<any>(null)
+  const [editMs,setEditMs]=useState<any>({name:'',date:'',type:'Milestone',notes:''})
+  async function saveEditMs(){
+    if(!editMsId||!editMs.name.trim()||!editMs.date)return
+    const upd={name:editMs.name.trim(),date:editMs.date,type:editMs.type,notes:editMs.notes||null}
+    setMilestones(milestones.map(m=>m.id===editMsId?{...m,...upd}:m))
+    setEditMsId(null)
+    const{error}=await supabase.from('milestones').update(upd).eq('id',editMsId)
+    if(error)alert('Failed to save milestone: '+error.message)
+  }
+
   return(
     <div style={{width:440,flexShrink:0,background:'#0D1B2A',display:'flex',flexDirection:'column',overflow:'hidden',borderLeft:'1px solid #243447'}}>
 
@@ -341,7 +352,28 @@ function ProjectDetail({project,items,setItems,projects,milestones,setMilestones
                   style={{width:16,height:16,borderRadius:3,border:`2px solid ${m.color||'#C8973A'}`,background:m.completed?m.color||'#C8973A':'transparent',cursor:'pointer',flexShrink:0,marginTop:2,display:'flex',alignItems:'center',justifyContent:'center',fontSize:10,color:'#fff'}}>
                   {m.completed&&'✓'}
                 </button>
-                <div style={{flex:1,minWidth:0}}>
+                {editMsId===m.id?(
+                  <div style={{flex:1,minWidth:0}} onClick={e=>e.stopPropagation()}>
+                    <div style={{display:'flex',gap:6,marginBottom:6}}>
+                      <input value={editMs.name} onChange={e=>setEditMs((p:any)=>({...p,name:e.target.value}))} onKeyDown={e=>{if(e.key==='Enter')saveEditMs()}} autoFocus
+                        style={{flex:1,background:'#0F1C2B',border:'1px solid #243447',borderRadius:5,color:'#F4F6F8',fontSize:12,padding:'4px 8px'}}/>
+                      <input type="date" value={editMs.date} onChange={e=>setEditMs((p:any)=>({...p,date:e.target.value}))}
+                        style={{background:'#0F1C2B',border:'1px solid #243447',borderRadius:5,color:'#F4F6F8',fontSize:11,padding:'4px 6px'}}/>
+                      <select value={editMs.type} onChange={e=>setEditMs((p:any)=>({...p,type:e.target.value}))}
+                        style={{background:'#0F1C2B',border:'1px solid #243447',borderRadius:5,color:'#F4F6F8',fontSize:11,padding:'4px 4px'}}>
+                        {MILESTONE_TYPES_G.map(t=><option key={t} value={t}>{t}</option>)}
+                      </select>
+                    </div>
+                    <div style={{display:'flex',gap:6,alignItems:'center'}}>
+                      <input value={editMs.notes||''} onChange={e=>setEditMs((p:any)=>({...p,notes:e.target.value}))} placeholder="Notes..."
+                        style={{flex:1,background:'#0F1C2B',border:'1px solid #243447',borderRadius:5,color:'#F4F6F8',fontSize:11,padding:'4px 8px'}}/>
+                      <button onClick={()=>setEditMsId(null)} style={{background:'none',border:'1px solid #243447',borderRadius:5,color:'#7A8FA6',fontSize:10,padding:'3px 9px',cursor:'pointer'}}>Cancel</button>
+                      <button onClick={saveEditMs} disabled={!editMs.name.trim()||!editMs.date} style={{background:'#C8973A',border:'none',borderRadius:5,color:'#0D1B2A',fontSize:10,fontWeight:700,padding:'3px 11px',cursor:'pointer',opacity:!editMs.name.trim()||!editMs.date?0.5:1}}>Save</button>
+                    </div>
+                  </div>
+                ):(
+                <div style={{flex:1,minWidth:0,cursor:'pointer'}} title="Click to edit name, date, type, and notes"
+                  onClick={()=>{setEditMsId(m.id);setEditMs({name:m.name||'',date:m.date||'',type:m.type||'Milestone',notes:m.notes||''})}}>
                   <div style={{display:'flex',alignItems:'center',gap:6,flexWrap:'wrap' as const}}>
                     <span style={{fontSize:12,color:m.completed?'#7A8FA6':'#F4F6F8',fontWeight:600,textDecoration:m.completed?'line-through':'none'}}>{m.name}</span>
                     <span style={{background:'#1E3048',color:'#7A8FA6',borderRadius:3,padding:'1px 5px',fontSize:9}}>{m.type}</span>
@@ -356,6 +388,7 @@ function ProjectDetail({project,items,setItems,projects,milestones,setMilestones
                     {m.notes&&<span style={{color:'#7A8FA6',fontStyle:'italic',overflow:'hidden',whiteSpace:'nowrap' as const,textOverflow:'ellipsis',maxWidth:150}}>{m.notes}</span>}
                   </div>
                 </div>
+                )}
                 <button onClick={()=>deleteMilestone(m.id)}
                   style={{background:'none',border:'none',cursor:'pointer',color:'#7A8FA6',fontSize:14,padding:'0 2px',flexShrink:0}}
                   onMouseEnter={e=>(e.currentTarget.style.color='#E74C3C')}
@@ -2338,6 +2371,8 @@ function Roadmap({items,setItems,projects,setProjects,milestones}:{items:any[],p
 // ── TEAMS ─────────────────────────────────────────────────────────────────
 // Read-only per-team work queue. All editing happens in Backlog/Projects/Roadmap.
 function Teams({items,projects,milestones}:{items:any[],projects:any[],milestones:any[]}) {
+  const [extractHtml,setExtractHtml]=useState<string|null>(null)
+  const [copiedX,setCopiedX]=useState(false)
   const teams=[...new Set(items.map(i=>i.team).filter(Boolean))].sort() as string[]
   const [team,setTeam]=useState(teams[0]||'')
   const [showDone,setShowDone]=useState(false)
@@ -2387,8 +2422,144 @@ function Teams({items,projects,milestones}:{items:any[],projects:any[],milestone
    while(+d<tlMax){monthTicks.push({pct:tlPct(+d),label:d.toLocaleDateString('default',{month:'short'})});d.setMonth(d.getMonth()+1)}}
   const msClr=(m:any)=>m.completed?'#27AE60':(+new Date(m.date+'T12:00:00')<+now?'#E74C3C':'#C8973A')
 
+  function generateExtract(){
+    const hs=(t:string)=>(t||'').replace(/ /g,'&nbsp;')
+    const fmtD=(str:string)=>str?new Date(str+'T12:00:00').toLocaleDateString('default',{month:'short',day:'numeric'}):''
+    const today=new Date().toLocaleDateString('default',{month:'long',day:'numeric',year:'numeric'})
+    const TD_='padding:3px 7px;border:1px solid #D9D9D9;font-size:13px;color:#222222;vertical-align:top;'
+    const TH_='padding:3px 7px;border:1px solid #D9D9D9;font-size:13px;color:#222222;background:#F2F2F2;font-weight:bold;text-align:left;'
+    const H2='font-size:18px;font-weight:bold;color:#1F1F1F;margin:24px 0 8px;border-bottom:3px solid #1F1F1F;padding-bottom:4px;'
+    const PCLRT:any={P1:'#C0392B',P2:'#C55A11',P3:'#2E5E8C',P4:'#595959'}
+    const priTxt=(pr:string)=>`<span style="color:${PCLRT[pr]||'#595959'};font-weight:bold;">${pr||''}</span>`
+    // Active items for this team only — Done/WNI excluded regardless of the on-screen toggle
+    const active=items.filter(i=>i.team===team&&!ITEM_TERMINAL.includes(i.status))
+    const rankedX=[...active].sort((a,b)=>{
+      const pa=PRIORITY_ORDER[a.priority]??4,pb=PRIORITY_ORDER[b.priority]??4
+      if(pa<=1&&pb>1)return -1
+      if(pa>1&&pb<=1)return 1
+      if(pa<=1&&pb<=1)return pa-pb
+      return (a.committed_priority??a.sort_order??999)-(b.committed_priority??b.sort_order??999)
+    })
+    const inFlight=rankedX.filter(i=>i.start_date&&i.end_date).sort((a,b)=>a.end_date<b.end_date?-1:1)
+    const upNext=rankedX.filter(i=>!(i.start_date&&i.end_date))
+    const teamProjs=teamProjects.filter((p:any)=>((p.start_date&&p.end_date)||(p.ongoing&&p.start_date))&&!PROJECT_TERMINAL.includes(p.status))
+    // Roadmap grid
+    let roadmapHtml=''
+    if(teamProjs.length){
+      const m0=(dstr:string)=>{const x=new Date(dstr+'T12:00:00');return new Date(x.getFullYear(),x.getMonth(),1)}
+      const curM=new Date(new Date().getFullYear(),new Date().getMonth(),1)
+      const floor=new Date(curM.getFullYear(),curM.getMonth()-1,1)
+      const minM=Math.max(Math.min(...teamProjs.map((p:any)=>+m0(p.start_date)),+curM),+floor)
+      const maxTarget=Math.max(...teamProjs.filter((p:any)=>p.end_date).map((p:any)=>+m0(p.end_date)),+curM)
+      const months:Date[]=[]
+      {const d0=new Date(minM);let n=0;while(+d0<=maxTarget&&n<12){months.push(new Date(d0));d0.setMonth(d0.getMonth()+1);n++}}
+      const idxOf=(dstr:string)=>{const t=+m0(dstr);let i=-1;months.forEach((m,j)=>{if(+m===t)i=j});return i}
+      const sorted2=[...teamProjs].sort((a:any,b:any)=>(!!a.ongoing===!!b.ongoing)?0:(a.ongoing?1:-1))
+      const rows=sorted2.map((p:any)=>{
+        const si=+m0(p.start_date),ei=p.ongoing?+months[months.length-1]:+m0(p.end_date)
+        const msM=new Set(milestones.filter(m=>m.project_id===p.id&&!m.completed).map(m=>idxOf(m.date)).filter(i=>i>=0))
+        const startsBefore=si<+months[0],endsAfter=p.ongoing||ei>+months[months.length-1]
+        const cells=months.map((m,ci)=>{
+          const activeC=(+m>=si&&+m<=ei)||(startsBefore&&+m<=ei)
+          const freeze=m.getMonth()>=9
+          const bg=activeC?(p.ongoing?'#B7C4D0':(p.color||'#2E5E8C')):(freeze?'#FBEAEA':'#FFFFFF')
+          const mark=msM.has(ci)?'◆':(endsAfter&&ci===months.length-1&&activeC?(p.ongoing?'∞':'→'):'')
+          return `<td style="padding:0;height:18px;background:${bg};border:1px solid ${freeze?'#F0C9C4':'#D9D9D9'};text-align:center;font-size:10px;color:${p.ongoing?'#44515E':'#FFFFFF'};font-weight:bold;">${mark}</td>`
+        }).join('')
+        const nm=(p.ongoing?'∞ ':'')+(p.name.length>26?p.name.slice(0,25)+'…':p.name)
+        return `<tr><td style="${TD_}white-space:nowrap;font-weight:bold;">${hs(nm)}</td>${cells}</tr>`
+      }).join('')
+      const header=`<tr><td style="${TH_}"></td>${months.map(m=>{
+        const isCur=+m===+curM,freeze=m.getMonth()>=9
+        return `<td style="${TH_}text-align:center;color:${freeze?'#C0392B':'#222222'};${isCur?'background:#DDEBF7;':''}">${m.toLocaleDateString('default',{month:'short'})}${m.getMonth()===0||+m===+months[0]?`&nbsp;${String(m.getFullYear()).slice(2)}`:''}</td>`
+      }).join('')}</tr>`
+      roadmapHtml=`<div style="${H2}">Roadmap</div>
+      <table cellspacing="0" style="border-collapse:collapse;width:100%;table-layout:fixed;"><colgroup><col style="width:200px;"/>${months.map(()=>'<col/>').join('')}</colgroup>${header}${rows}</table>
+      <div style="font-size:11px;color:#595959;margin:4px 0 0;">◆ milestone&nbsp;&nbsp;→ continues&nbsp;&nbsp;∞ ongoing&nbsp;&nbsp;<span style="color:#C0392B;">Oct–Dec: code freeze</span></div>`
+    }
+    const itemCell=(i:any)=>`${i.name}${i.description?`<div style="font-size:11px;color:#595959;margin-top:1px;">${i.description}</div>`:''}${i.vendor_delivery_date?`<div style="font-size:11px;color:#8A6D1F;">Vendor deliverable: ${hs(fmtD(i.vendor_delivery_date))}</div>`:''}`
+    const inFlightHtml=inFlight.length?`<div style="${H2}">In Flight — Committed (${inFlight.length})</div>
+      <table cellspacing="0" style="border-collapse:collapse;width:100%;">
+      <tr><th style="${TH_}width:60px;">ID</th><th style="${TH_}">Item</th><th style="${TH_}width:100px;">Type</th><th style="${TH_}width:36px;">Pri</th><th style="${TH_}width:150px;">Status</th><th style="${TH_}width:170px;">Project</th><th style="${TH_}width:40px;">Size</th><th style="${TH_}width:76px;">Target</th></tr>
+      ${inFlight.map(i=>`<tr>
+        <td style="${TD_}white-space:nowrap;">${hs(i.item_id)}</td>
+        <td style="${TD_}">${itemCell(i)}</td>
+        <td style="${TD_}white-space:nowrap;">${hs(i.request_type)}</td>
+        <td style="${TD_}white-space:nowrap;">${priTxt(i.priority)}</td>
+        <td style="${TD_}white-space:nowrap;">${hs(i.status)}</td>
+        <td style="${TD_}">${i.parent_project||''}</td>
+        <td style="${TD_}text-align:center;">${i.effort||''}</td>
+        <td style="${TD_}white-space:nowrap;font-weight:bold;">${hs(fmtD(i.end_date))}</td>
+      </tr>`).join('')}</table>`:''
+    const upNextHtml=upNext.length?`<div style="${H2}">Up Next — Ranked Intake (${upNext.length})</div>
+      <div style="font-size:12px;color:#595959;margin-bottom:6px;">Pull into Jira from the top. Order is the committed priority.</div>
+      <table cellspacing="0" style="border-collapse:collapse;width:100%;">
+      <tr><th style="${TH_}width:26px;">#</th><th style="${TH_}width:60px;">ID</th><th style="${TH_}">Item</th><th style="${TH_}width:100px;">Type</th><th style="${TH_}width:36px;">Pri</th><th style="${TH_}width:100px;">Swimlane</th><th style="${TH_}width:40px;">Size</th><th style="${TH_}width:150px;">Status</th></tr>
+      ${upNext.map((i,n)=>`<tr>
+        <td style="${TD_}text-align:center;font-weight:bold;">${n+1}</td>
+        <td style="${TD_}white-space:nowrap;">${hs(i.item_id)}</td>
+        <td style="${TD_}">${itemCell(i)}</td>
+        <td style="${TD_}white-space:nowrap;">${hs(i.request_type)}</td>
+        <td style="${TD_}white-space:nowrap;">${priTxt(i.priority)}</td>
+        <td style="${TD_}white-space:nowrap;">${hs(i.swimlane)}</td>
+        <td style="${TD_}text-align:center;">${i.effort||''}</td>
+        <td style="${TD_}white-space:nowrap;">${hs(i.status)}</td>
+      </tr>`).join('')}</table>`:''
+    const in4w=+new Date()+28*86400000
+    const upc=milestones.filter(m=>!m.completed&&teamProjects.some((p:any)=>p.id===m.project_id)&&+new Date(m.date+'T12:00:00')>=Date.now()-86400000&&+new Date(m.date+'T12:00:00')<=in4w).sort((a,b)=>a.date<b.date?-1:1)
+    const msHtml=upc.length?`<div style="${H2}">Milestones — Next 4 Weeks</div>
+      <table cellspacing="0" style="border-collapse:collapse;width:100%;">
+      <tr><th style="${TH_}width:70px;">Date</th><th style="${TH_}width:220px;">Project</th><th style="${TH_}">Milestone</th></tr>
+      ${upc.map(m=>{const pr=projects.find(p=>p.id===m.project_id);return `<tr><td style="${TD_}white-space:nowrap;">${hs(fmtD(m.date))}</td><td style="${TD_}">${pr?.name||''}</td><td style="${TD_}">${m.name}${m.type&&m.type!=='Milestone'?` <span style="color:#595959;font-size:11px;">(${m.type})</span>`:''}</td></tr>`}).join('')}</table>`:''
+    const devFlags=items.filter(i=>i.team===team&&flagDev(i))
+    const flagsHtml=devFlags.length?`<div style="${H2}">For Discussion</div>
+      <table cellspacing="0" style="border-collapse:collapse;width:100%;">
+      <tr><th style="${TH_}width:60px;">ID</th><th style="${TH_}width:260px;">Item</th><th style="${TH_}">Notes</th></tr>
+      ${devFlags.map(i=>`<tr><td style="${TD_}white-space:nowrap;">${hs(i.item_id)}</td><td style="${TD_}font-weight:bold;">${i.name}</td><td style="${TD_}line-height:1.5;">${i.notes||'<span style="color:#7F7F7F;font-style:italic;">—</span>'}</td></tr>`).join('')}</table>`:''
+    const html=`<div style="font-family:Calibri,'Segoe UI',Arial,sans-serif;max-width:900px;color:#222222;">
+      <div style="font-size:22px;font-weight:bold;color:#1F1F1F;">${team} — Work Queue</div>
+      <div style="font-size:13px;color:#595959;margin-bottom:12px;">${today}</div>
+      <div style="font-size:13px;color:#222222;margin-bottom:4px;"><b>${inFlight.length} in flight</b> · <b>${upNext.length} ranked up next</b>${devFlags.length?` · ${devFlags.length} for discussion`:''}</div>
+      ${roadmapHtml}
+      ${inFlightHtml}
+      ${upNextHtml}
+      ${msHtml}
+      ${flagsHtml}
+    </div>`
+    setExtractHtml(html)
+  }
+  async function copyExtract(){
+    try{
+      const blob=new Blob([extractHtml||''],{type:'text/html'})
+      const txt=new Blob([(extractHtml||'').replace(/<[^>]+>/g,' ')],{type:'text/plain'})
+      await (navigator.clipboard as any).write([new (window as any).ClipboardItem({'text/html':blob,'text/plain':txt})])
+      setCopiedX(true);setTimeout(()=>setCopiedX(false),2000)
+    }catch{alert('Copy failed — use Download instead')}
+  }
+  function downloadExtract(){
+    const a=document.createElement('a')
+    a.href=URL.createObjectURL(new Blob([extractHtml||''],{type:'text/html'}))
+    a.download=`${team.toLowerCase().replace(/\s+/g,'-')}-work-queue-${new Date().toISOString().slice(0,10)}.html`
+    a.click()
+  }
+
   return(
     <div style={{height:'100%',overflowY:'auto',padding:'20px 28px'}}>
+      {extractHtml&&(
+        <div onClick={()=>setExtractHtml(null)} style={{position:'fixed',inset:0,background:'rgba(0,0,0,0.65)',zIndex:300,display:'flex',alignItems:'center',justifyContent:'center'}}>
+          <div onClick={e=>e.stopPropagation()} style={{background:'#162436',border:'1px solid #243447',borderRadius:12,width:920,maxWidth:'96vw',maxHeight:'88vh',display:'flex',flexDirection:'column' as const}}>
+            <div style={{display:'flex',alignItems:'center',padding:'14px 20px',borderBottom:'1px solid #243447'}}>
+              <span style={{fontSize:15,fontWeight:800}}>{team} — Work Queue Extract</span>
+              <button onClick={()=>setExtractHtml(null)} style={{marginLeft:'auto',background:'none',border:'none',color:'#7A8FA6',fontSize:18,cursor:'pointer'}}>✕</button>
+            </div>
+            <div style={{overflowY:'auto',flex:1,background:'#ffffff',margin:'14px 20px',borderRadius:8,padding:20}} dangerouslySetInnerHTML={{__html:extractHtml}}/>
+            <div style={{padding:'12px 20px',borderTop:'1px solid #243447',display:'flex',justifyContent:'flex-end',gap:10}}>
+              <button onClick={downloadExtract} style={{background:'none',border:'1px solid #243447',borderRadius:6,color:'#7A8FA6',fontSize:12,padding:'8px 16px',cursor:'pointer'}}>Download .html</button>
+              <button onClick={copyExtract} style={{background:'#27AE60',border:'none',borderRadius:6,color:'#fff',fontSize:12,fontWeight:700,padding:'8px 18px',cursor:'pointer'}}>{copiedX?'✓ Copied!':'Copy for Outlook / Teams'}</button>
+            </div>
+          </div>
+        </div>
+      )}
       <div style={{display:'flex',alignItems:'center',gap:10,marginBottom:6,flexWrap:'wrap' as const}}>
         {teams.map(t=>(
           <button key={t} onClick={()=>setTeam(t)} style={{background:team===t?'#C8973A':'#1E3048',color:team===t?'#0D1B2A':'#7A8FA6',border:`1px solid ${team===t?'#C8973A':'#243447'}`,borderRadius:20,padding:'6px 16px',fontSize:13,fontWeight:700,cursor:'pointer'}}>{t}</button>
@@ -2396,6 +2567,7 @@ function Teams({items,projects,milestones}:{items:any[],projects:any[],milestone
         <label style={{marginLeft:'auto',display:'flex',alignItems:'center',gap:6,fontSize:12,color:'#7A8FA6',cursor:'pointer'}}>
           <input type="checkbox" checked={showDone} onChange={e=>setShowDone(e.target.checked)}/> Show completed
         </label>
+        <button onClick={generateExtract} style={{background:'#C8973A',border:'none',borderRadius:6,color:'#0D1B2A',fontSize:12,fontWeight:700,padding:'7px 16px',cursor:'pointer'}}>⬇ Extract for {team}</button>
       </div>
       <div style={{fontSize:12,color:'#7A8FA6',marginBottom:18}}>{ranked.length} items · read-only view · numbers show this team's queue order</div>
 
