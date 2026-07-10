@@ -79,6 +79,23 @@ async function closeItemsForProject(items:any[],setItems:any,projectName:string,
 function flagDev(i:any){return i.flagged&&(i.flag_audience==='dev'||i.flag_audience==='both'||!i.flag_audience)}
 function flagStk(i:any){return i.flagged&&(i.flag_audience==='stakeholder'||i.flag_audience==='both'||!i.flag_audience)}
 function flagLabel(i:any){return !i.flagged?'':i.flag_audience==='dev'?'D':i.flag_audience==='stakeholder'?'S':'DS'}
+// Project tasks — personal operational reminders attached to projects (never shown to teams/stakeholders)
+async function addProjectTask(setTasks:any,projectId:any,title:string,dueDate:string|null){
+  const{data,error}=await supabase.from('tasks').insert({project_id:projectId,title:title.trim(),due_date:dueDate||null,done:false}).select().single()
+  if(error){alert('Failed to add task: '+error.message);return null}
+  if(data)setTasks((prev:any[])=>[...prev,data])
+  return data
+}
+async function toggleProjectTask(setTasks:any,t:any){
+  const v=!t.done
+  setTasks((prev:any[])=>prev.map(x=>x.id===t.id?{...x,done:v}:x))
+  await supabase.from('tasks').update({done:v}).eq('id',t.id)
+}
+async function deleteProjectTask(setTasks:any,t:any){
+  setTasks((prev:any[])=>prev.filter(x=>x.id!==t.id))
+  await supabase.from('tasks').delete().eq('id',t.id)
+}
+
 // Request-type glyphs — instant visual ID on item lines
 function rt(t:any){const m:any={'Bug':'🐞','Tech Debt':'🔧','Enhancement':'✨','Strategic Initiative':'🎯','Business Request':'💼'};return m[t]||''}
 function sc(s) {
@@ -168,7 +185,14 @@ function ViolationRow({v,project,fmt,d}:{v:any,project:any,fmt:any,d:any}) {
     </div>
   )
 }
-function ProjectDetail({project,items,setItems,projects,milestones,setMilestones,onClose,d,fmt}:any) {
+function ProjectDetail({project,items,setItems,projects,milestones,setMilestones,tasks,setTasks,onClose,d,fmt}:any) {
+  const [pdTitle,setPdTitle]=useState('')
+  const [pdDate,setPdDate]=useState('')
+  async function submitPdTask(){
+    if(!pdTitle.trim())return
+    const ok=await addProjectTask(setTasks,project.id,pdTitle,pdDate||null)
+    if(ok){setPdTitle('');setPdDate('')}
+  }
   const [addingItem,setAddingItem]=useState(false)
   const [savingItem,setSavingItem]=useState(false)
   const [newItem,setNewItem]=useState({name:'',priority:'P3',swimlane:'POS',effort:'M',status:'Ready to Score',request_type:'Bug',region:'',vendor:'Deckers',description:''})
@@ -340,6 +364,28 @@ function ProjectDetail({project,items,setItems,projects,milestones,setMilestones
           })}
         </div>
 
+        {/* My tasks — personal reminders for this project */}
+        <div style={{padding:'14px 16px',borderBottom:'1px solid #243447'}}>
+          <div style={{fontSize:12,fontWeight:700,color:'#C8973A',letterSpacing:1,marginBottom:10}}>☑ MY TASKS ({(tasks||[]).filter((t:any)=>t.project_id===project.id&&!t.done).length})</div>
+          {(tasks||[]).filter((t:any)=>t.project_id===project.id&&!t.done).sort((a:any,b:any)=>(a.due_date||'9999')<(b.due_date||'9999')?-1:1).map((t:any)=>{
+            const overdue=t.due_date&&+new Date(t.due_date+'T12:00:00')<Date.now()
+            return(
+              <div key={t.id} style={{display:'flex',alignItems:'center',gap:7,fontSize:12,marginBottom:4}}>
+                <input type="checkbox" checked={false} onChange={()=>toggleProjectTask(setTasks,t)} style={{cursor:'pointer'}}/>
+                <span style={{color:'#F4F6F8',flex:1}}>{t.title}</span>
+                {t.due_date&&<span style={{color:overdue?'#E74C3C':'#C8973A',fontWeight:700,fontSize:10}}>{overdue?'⚠ ':''}{t.due_date}</span>}
+                <button onClick={()=>deleteProjectTask(setTasks,t)} style={{background:'none',border:'none',color:'#3A4A5E',fontSize:11,cursor:'pointer',padding:0}}>✕</button>
+              </div>
+            )
+          })}
+          <div style={{display:'flex',gap:6,marginTop:6}}>
+            <input placeholder="New reminder..." value={pdTitle} onChange={e=>setPdTitle(e.target.value)} onKeyDown={e=>{if(e.key==='Enter')submitPdTask()}}
+              style={{flex:1,background:'#0F1C2B',border:'1px solid #243447',borderRadius:6,color:'#F4F6F8',fontSize:11,padding:'5px 8px'}}/>
+            <input type="date" value={pdDate} onChange={e=>setPdDate(e.target.value)} style={{background:'#0F1C2B',border:'1px solid #243447',borderRadius:6,color:'#F4F6F8',fontSize:11,padding:'5px 8px'}}/>
+            <button onClick={submitPdTask} disabled={!pdTitle.trim()} style={{background:'#C8973A',border:'none',borderRadius:6,color:'#0D1B2A',fontSize:11,fontWeight:700,padding:'5px 12px',cursor:'pointer',opacity:!pdTitle.trim()?0.5:1}}>+ Add</button>
+          </div>
+        </div>
+
         {/* Committed items */}
         <div style={{padding:'14px 16px',borderBottom:'1px solid #243447'}}>
           <div style={{fontSize:12,fontWeight:700,color:'#2E86AB',letterSpacing:1,marginBottom:10}}>📅 COMMITTED ({withDates.length})</div>
@@ -494,7 +540,7 @@ function ProjectDetail({project,items,setItems,projects,milestones,setMilestones
     </div>
   )
 }
-function Projects({items,setItems,projects,setProjects,milestones,setMilestones}:{items:any[],setItems:any,projects:any[],setProjects:any,milestones:any[],setMilestones:any}) {
+function Projects({items,setItems,projects,setProjects,milestones,setMilestones,tasks,setTasks}:{items:any[],setItems:any,projects:any[],setProjects:any,milestones:any[],setMilestones:any,tasks:any[],setTasks:any}) {
   const [adding,setAdding]=useState(false)
   const [editing,setEditing]=useState(null)
   const [saving,setSaving]=useState(false)
@@ -813,6 +859,8 @@ function Projects({items,setItems,projects,setProjects,milestones,setMilestones}
     projects={projects}
     milestones={milestones}
     setMilestones={setMilestones}
+    tasks={tasks}
+    setTasks={setTasks}
     onClose={()=>setSelectedProject(null)}
     d={d}
     fmt={fmt}
@@ -2836,7 +2884,7 @@ function crumbAge(dateStr:string){
   return Math.floor((Date.now()-+d)/86400000)
 }
 
-function Desk({items,setItems,projects,milestones,setMilestones}:{items:any[],setItems:any,projects:any[],milestones:any[],setMilestones:any}) {
+function Desk({items,setItems,projects,milestones,setMilestones,tasks,setTasks}:{items:any[],setItems:any,projects:any[],milestones:any[],setMilestones:any,tasks:any[],setTasks:any}) {
   async function unflagDev(item:any){
     // dev-only flag clears; a 'both' flag downgrades to stakeholder-only
     const next=(item.flag_audience==='both')?{flagged:true,flag_audience:'stakeholder'}:{flagged:false,flag_audience:null}
@@ -2863,6 +2911,25 @@ function Desk({items,setItems,projects,milestones,setMilestones}:{items:any[],se
   const [projView,setProjView]=useState<any>(null)
   const [msName,setMsName]=useState('')
   const [msDate,setMsDate]=useState('')
+  const [tasksOpen,setTasksOpen]=useState(true)
+  const [showDoneTasks,setShowDoneTasks]=useState(false)
+  const [ntProj,setNtProj]=useState('')
+  const [ntTitle,setNtTitle]=useState('')
+  const [ntDate,setNtDate]=useState('')
+  const [mvTitle,setMvTitle]=useState('')
+  const [mvDate,setMvDate]=useState('')
+  async function submitModalTask(){
+    if(!mvTitle.trim()||!projView)return
+    const ok=await addProjectTask(setTasks,projView.id,mvTitle,mvDate||null)
+    if(ok){setMvTitle('');setMvDate('')}
+  }
+  async function submitTask(){
+    if(!ntTitle.trim()||!ntProj)return
+    const ok=await addProjectTask(setTasks,ntProj,ntTitle,ntDate||null)
+    if(ok){setNtTitle('');setNtDate('')}
+  }
+  const openTasks=[...tasks].filter(t=>!t.done).sort((a,b)=>(a.due_date||'9999')<(b.due_date||'9999')?-1:1)
+  const doneTasks=tasks.filter(t=>t.done)
   async function toggleMs(m:any){
     const v=!m.completed
     setMilestones((prev:any[])=>prev.map(x=>x.id===m.id?{...x,completed:v}:x))
@@ -3048,6 +3115,55 @@ function Desk({items,setItems,projects,milestones,setMilestones}:{items:any[],se
           <button onClick={pullCarry} title="Re-pull unchecked tasks and ↻ sections from the most recent earlier note (skips anything already on this page)" style={{background:'#1E3048',border:'1px solid #243447',borderRadius:6,color:'#C8973A',padding:'4px 12px',fontSize:11,fontWeight:700,cursor:'pointer'}}>↻ Pull carry-over</button>
           <button onClick={()=>setRaw(r=>!r)} style={{background:raw?'#C8973A':'#1E3048',border:'1px solid #243447',borderRadius:6,color:raw?'#0D1B2A':'#7A8FA6',padding:'4px 14px',fontSize:11,fontWeight:700,cursor:'pointer'}}>{raw?'Done':'Raw'}</button>
         </div>
+        {/* Project tasks — dated reminders attached to projects */}
+        <div style={{background:'#12202F',border:'1px solid #243447',borderRadius:10,padding:'10px 14px',marginBottom:12,maxHeight:'38%',display:'flex',flexDirection:'column' as const}}>
+          <button onClick={()=>setTasksOpen(o=>!o)} style={{background:'none',border:'none',padding:0,cursor:'pointer',display:'flex',alignItems:'center',gap:6,fontSize:11,fontWeight:700,letterSpacing:1,color:'#C8973A',marginBottom:tasksOpen?8:0}}>
+            <span style={{fontSize:9}}>{tasksOpen?'▾':'▸'}</span>☑ PROJECT TASKS ({openTasks.length}{doneTasks.length?` · ${doneTasks.length} done`:''})
+          </button>
+          {tasksOpen&&(
+            <>
+            <div style={{overflowY:'auto',flex:1,minHeight:0}}>
+              {openTasks.length===0&&<div style={{fontSize:11,color:'#7A8FA6',fontStyle:'italic',marginBottom:6}}>No open tasks — add a reminder below</div>}
+              {openTasks.map(t=>{
+                const pr=projects.find(p=>p.id===t.project_id)
+                const overdue=t.due_date&&+new Date(t.due_date+'T12:00:00')<+now
+                const soon=t.due_date&&!overdue&&+new Date(t.due_date+'T12:00:00')<=+now+3*86400000
+                return(
+                  <div key={t.id} style={{display:'flex',alignItems:'center',gap:8,padding:'3px 0'}}>
+                    <input type="checkbox" checked={false} onChange={()=>toggleProjectTask(setTasks,t)} style={{cursor:'pointer',flexShrink:0}}/>
+                    <span style={{fontSize:13,color:'#F4F6F8',flex:1,minWidth:0,overflow:'hidden',whiteSpace:'nowrap' as const,textOverflow:'ellipsis'}}>{t.title}</span>
+                    {pr&&<span style={{fontSize:10,color:'#7A8FA6',background:'#1E3048',borderLeft:`3px solid ${pr.color||'#3A4A5E'}`,borderRadius:3,padding:'1px 7px',flexShrink:0,maxWidth:180,overflow:'hidden',whiteSpace:'nowrap' as const,textOverflow:'ellipsis'}}>{pr.name}</span>}
+                    {t.due_date&&<span style={{fontSize:11,fontWeight:700,color:overdue?'#E74C3C':soon?'#E8B95A':'#7A8FA6',flexShrink:0}}>{overdue?'⚠ ':''}{fmtDt(t.due_date)}</span>}
+                    <button onClick={()=>deleteProjectTask(setTasks,t)} title="Delete task" style={{background:'none',border:'none',color:'#3A4A5E',fontSize:12,cursor:'pointer',padding:0,flexShrink:0}}>✕</button>
+                  </div>
+                )
+              })}
+              {showDoneTasks&&doneTasks.map(t=>{
+                const pr=projects.find(p=>p.id===t.project_id)
+                return(
+                  <div key={t.id} style={{display:'flex',alignItems:'center',gap:8,padding:'3px 0',opacity:0.55}}>
+                    <input type="checkbox" checked onChange={()=>toggleProjectTask(setTasks,t)} style={{cursor:'pointer',flexShrink:0}}/>
+                    <span style={{fontSize:13,color:'#7A8FA6',flex:1,textDecoration:'line-through',overflow:'hidden',whiteSpace:'nowrap' as const,textOverflow:'ellipsis'}}>{t.title}</span>
+                    {pr&&<span style={{fontSize:10,color:'#7A8FA6',flexShrink:0}}>{pr.name}</span>}
+                    <button onClick={()=>deleteProjectTask(setTasks,t)} style={{background:'none',border:'none',color:'#3A4A5E',fontSize:12,cursor:'pointer',padding:0,flexShrink:0}}>✕</button>
+                  </div>
+                )
+              })}
+              {doneTasks.length>0&&<button onClick={()=>setShowDoneTasks(o=>!o)} style={{background:'none',border:'none',color:'#7A8FA6',fontSize:10,cursor:'pointer',padding:'2px 0'}}>{showDoneTasks?'Hide':'Show'} {doneTasks.length} completed</button>}
+            </div>
+            <div style={{display:'flex',gap:6,marginTop:8,flexShrink:0}}>
+              <select value={ntProj} onChange={e=>setNtProj(e.target.value)} style={{background:'#0D1B2A',border:'1px solid #243447',borderRadius:6,color:'#F4F6F8',fontSize:11,padding:'5px 8px',maxWidth:180}}>
+                <option value="">Project...</option>
+                {activeProjects.map(p=><option key={p.id} value={p.id}>{p.name}</option>)}
+              </select>
+              <input placeholder="New reminder... (e.g., CCR required for deployment)" value={ntTitle} onChange={e=>setNtTitle(e.target.value)} onKeyDown={e=>{if(e.key==='Enter')submitTask()}}
+                style={{flex:1,background:'#0D1B2A',border:'1px solid #243447',borderRadius:6,color:'#F4F6F8',fontSize:12,padding:'5px 8px'}}/>
+              <input type="date" value={ntDate} onChange={e=>setNtDate(e.target.value)} style={{background:'#0D1B2A',border:'1px solid #243447',borderRadius:6,color:'#F4F6F8',fontSize:11,padding:'5px 8px'}}/>
+              <button onClick={submitTask} disabled={!ntTitle.trim()||!ntProj} style={{background:'#C8973A',border:'none',borderRadius:6,color:'#0D1B2A',fontSize:11,fontWeight:700,padding:'5px 14px',cursor:'pointer',opacity:!ntTitle.trim()||!ntProj?0.5:1}}>+ Task</button>
+            </div>
+            </>
+          )}
+        </div>
         {raw?(
           <textarea value={content} onChange={e=>persist(e.target.value)} autoFocus
             style={{flex:1,background:'#0F1C2B',border:'1px solid #243447',borderRadius:10,color:'#F4F6F8',fontSize:14,lineHeight:1.7,padding:16,resize:'none' as const,fontFamily:'inherit',outline:'none'}}/>
@@ -3214,6 +3330,32 @@ function Desk({items,setItems,projects,milestones,setMilestones}:{items:any[],se
                 <button onClick={addMs} disabled={!msName.trim()||!msDate} style={{background:'#C8973A',border:'none',borderRadius:6,color:'#0D1B2A',fontSize:11,fontWeight:700,padding:'5px 12px',cursor:'pointer',opacity:!msName.trim()||!msDate?0.5:1}}>+ Add</button>
               </div>
             </div>
+            {(()=>{
+              const pTasks=tasks.filter(t=>t.project_id===projView.id&&!t.done).sort((a,b)=>(a.due_date||'9999')<(b.due_date||'9999')?-1:1)
+              return(
+                <div style={{marginBottom:12}}>
+                  <div style={{fontSize:10,fontWeight:700,letterSpacing:1,color:'#C8973A',marginBottom:5}}>☑ MY TASKS</div>
+                  {pTasks.length===0&&<div style={{fontSize:11,color:'#7A8FA6',fontStyle:'italic',marginBottom:4}}>No open tasks</div>}
+                  {pTasks.map(t=>{
+                    const overdue=t.due_date&&+new Date(t.due_date+'T12:00:00')<Date.now()
+                    return(
+                      <div key={t.id} style={{display:'flex',alignItems:'center',gap:7,fontSize:11,marginBottom:3}}>
+                        <input type="checkbox" checked={false} onChange={()=>toggleProjectTask(setTasks,t)} style={{cursor:'pointer'}}/>
+                        <span style={{color:'#F4F6F8',flex:1}}>{t.title}</span>
+                        {t.due_date&&<span style={{color:overdue?'#E74C3C':'#C8973A',fontWeight:700,fontSize:10}}>{overdue?'⚠ ':''}{t.due_date}</span>}
+                        <button onClick={()=>deleteProjectTask(setTasks,t)} style={{background:'none',border:'none',color:'#3A4A5E',fontSize:11,cursor:'pointer',padding:0}}>✕</button>
+                      </div>
+                    )
+                  })}
+                  <div style={{display:'flex',gap:6,marginTop:5}}>
+                    <input placeholder="New task..." value={mvTitle} onChange={e=>setMvTitle(e.target.value)} onKeyDown={e=>{if(e.key==='Enter')submitModalTask()}}
+                      style={{flex:1,background:'#0D1B2A',border:'1px solid #243447',borderRadius:6,color:'#F4F6F8',fontSize:11,padding:'5px 8px'}}/>
+                    <input type="date" value={mvDate} onChange={e=>setMvDate(e.target.value)} style={{background:'#0D1B2A',border:'1px solid #243447',borderRadius:6,color:'#F4F6F8',fontSize:11,padding:'5px 8px'}}/>
+                    <button onClick={submitModalTask} disabled={!mvTitle.trim()} style={{background:'#C8973A',border:'none',borderRadius:6,color:'#0D1B2A',fontSize:11,fontWeight:700,padding:'5px 12px',cursor:'pointer',opacity:!mvTitle.trim()?0.5:1}}>+ Add</button>
+                  </div>
+                </div>
+              )
+            })()}
             {(()=>{
               const uncommittedP=pis.filter(i=>i.status!=='Done'&&!(i.start_date&&i.end_date))
               const row=(i:any)=>(
@@ -3392,18 +3534,21 @@ export default function DeckTech() {
   const [items,setItems]=useState([])
   const [projects,setProjects]=useState([])
   const [milestones,setMilestones]=useState([])
+  const [tasks,setTasks]=useState<any[]>([])
   const [loading,setLoading]=useState(true)
   const [activeTab,setActiveTab]=useState('projects')
 
 useEffect(()=>{
     async function load(){
-      const[{data:itemData},{data:projectData},{data:milestoneData}]=await Promise.all([
+      const[{data:itemData},{data:projectData},{data:milestoneData},{data:taskData}]=await Promise.all([
       supabase.from('items').select('*').order('sort_order',{ascending:true}),
       supabase.from('projects').select('*').order('sort_order',{ascending:true}),
       supabase.from('milestones').select('*').order('date',{ascending:true}),
+      supabase.from('tasks').select('*').order('due_date',{ascending:true}),
     ])
     if(itemData) setItems(itemData)
     if(milestoneData) setMilestones(milestoneData)
+    if(taskData) setTasks(taskData)
 
     // Auto-create any missing projects from parent_project values
     if(itemData&&projectData){
@@ -3487,10 +3632,10 @@ useEffect(()=>{
       </div>
       <div style={{flex:1,overflow:'hidden'}}>
         {activeTab==='backlog'&&<Backlog items={items} setItems={setItems} projects={projects} setProjects={setProjects}/>}
-        {activeTab==='projects'&&<Projects items={items} setItems={setItems} projects={projects} setProjects={setProjects} milestones={milestones} setMilestones={setMilestones}/>}
+        {activeTab==='projects'&&<Projects items={items} setItems={setItems} projects={projects} setProjects={setProjects} milestones={milestones} setMilestones={setMilestones} tasks={tasks} setTasks={setTasks}/>}
 {activeTab==='roadmap'&&<Roadmap items={items} setItems={setItems} projects={projects} setProjects={setProjects} milestones={milestones}/>}
         {activeTab==='teams'&&<Teams items={items} projects={projects} milestones={milestones}/>}
-        {activeTab==='desk'&&<Desk items={items} setItems={setItems} projects={projects} milestones={milestones} setMilestones={setMilestones}/>}
+        {activeTab==='desk'&&<Desk items={items} setItems={setItems} projects={projects} milestones={milestones} setMilestones={setMilestones} tasks={tasks} setTasks={setTasks}/>}
         {activeTab==='stakeholder'&&<Stakeholder items={items} projects={projects} milestones={milestones}/>}
         {activeTab==='done'&&<DoneTab items={items} setItems={setItems} projects={projects} setProjects={setProjects}/>}
       </div>
