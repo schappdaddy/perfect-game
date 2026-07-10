@@ -3372,6 +3372,17 @@ function Desk({items,setItems,projects,milestones,setMilestones,tasks,setTasks}:
             })()}
             {(()=>{
               const uncommittedP=pis.filter(i=>i.status!=='Done'&&!(i.start_date&&i.end_date))
+              const committedI=(i:any)=>!!(i.start_date&&i.end_date)
+              async function commitItem(i:any){
+                if(!projView.start_date||!projView.end_date){alert('Set project dates first — committing uses the project timeline.');return}
+                const upd={start_date:projView.start_date,end_date:projView.end_date}
+                setItems((prev:any[])=>prev.map(x=>x.id===i.id?{...x,...upd}:x))
+                await supabase.from('items').update(upd).eq('id',i.id)
+              }
+              async function uncommitItem(i:any){
+                setItems((prev:any[])=>prev.map(x=>x.id===i.id?{...x,start_date:null,end_date:null}:x))
+                await supabase.from('items').update({start_date:null,end_date:null}).eq('id',i.id)
+              }
               const row=(i:any)=>(
                 <div key={i.id} style={{display:'flex',alignItems:'center',gap:8,fontSize:11,marginBottom:3}}>
                   <span style={{color:'#7A8FA6',fontFamily:'monospace',fontSize:10,flexShrink:0}}>{i.item_id}</span>
@@ -3381,6 +3392,9 @@ function Desk({items,setItems,projects,milestones,setMilestones,tasks,setTasks}:
                     {STATUSES.map(st=><option key={st} value={st}>{st}</option>)}
                   </select>
                   {i.end_date&&<span style={{color:'#7A8FA6',fontSize:10,flexShrink:0}}>{i.end_date}</span>}
+                  {committedI(i)
+                    ?<button onClick={()=>uncommitItem(i)} title="Uncommit — clear dates, return to backlog" style={{background:'none',border:'1px solid rgba(231,76,60,0.4)',borderRadius:4,color:'#E74C3C',fontSize:9,fontWeight:700,padding:'1px 7px',cursor:'pointer',flexShrink:0}}>✕ Uncommit</button>
+                    :<button onClick={()=>commitItem(i)} title="Commit — set dates to the project timeline" style={{background:'none',border:'1px solid rgba(39,174,96,0.4)',borderRadius:4,color:'#27AE60',fontSize:9,fontWeight:700,padding:'1px 7px',cursor:'pointer',flexShrink:0}}>✓ Commit</button>}
                 </div>
               )
               return(<>
