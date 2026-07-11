@@ -82,10 +82,23 @@ function flagStk(i:any){return i.flagged&&(i.flag_audience==='stakeholder'||i.fl
 function flagLabel(i:any){return !i.flagged?'':i.flag_audience==='dev'?'D':i.flag_audience==='stakeholder'?'S':'DS'}
 // Project tasks — personal operational reminders attached to projects (never shown to teams/stakeholders)
 async function addProjectTask(setTasks:any,projectId:any,title:string,dueDate:string|null){
-  const{data,error}=await supabase.from('tasks').insert({project_id:projectId,title:title.trim(),due_date:dueDate||null,done:false}).select().single()
-  if(error){alert('Failed to add task: '+error.message);return null}
-  if(data)setTasks((prev:any[])=>[...prev,data])
-  return data
+  // Optimistic: show the task immediately, reconcile with the server row after
+  const temp={id:'tmp-'+Date.now()+'-'+Math.random().toString(36).slice(2,7),project_id:projectId,title:title.trim(),due_date:dueDate||null,done:false,created_at:new Date().toISOString()}
+  setTasks((prev:any[])=>[...prev,temp])
+  const{data,error}=await supabase.from('tasks').insert({project_id:projectId,title:temp.title,due_date:temp.due_date,done:false}).select().single()
+  if(error){
+    setTasks((prev:any[])=>prev.filter(x=>x.id!==temp.id))
+    alert('Failed to add task: '+error.message)
+    return null
+  }
+  if(data){
+    setTasks((prev:any[])=>prev.map(x=>x.id===temp.id?data:x))
+    return data
+  }
+  // Insert succeeded but no row returned — refetch to swap the temp row for the real one
+  const{data:all}=await supabase.from('tasks').select('*').order('due_date',{ascending:true})
+  if(all)setTasks(all)
+  return temp
 }
 async function toggleProjectTask(setTasks:any,t:any){
   const v=!t.done
@@ -3736,7 +3749,7 @@ export default function DeckTech() {
   const [milestones,setMilestones]=useState([])
   const [tasks,setTasks]=useState<any[]>([])
   const [loading,setLoading]=useState(true)
-  const [activeTab,setActiveTab]=useState('projects')
+  const [activeTab,setActiveTab]=useState('desk')
 
 useEffect(()=>{
     async function load(){
