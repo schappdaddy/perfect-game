@@ -3208,26 +3208,6 @@ function Desk({items,setItems,projects,milestones,setMilestones,tasks,setTasks}:
     ls[idx]=l.trimStart().startsWith('[ ]')?l.replace('[ ]','[x]'):l.replace('[x]','[ ]')
     persist(ls.join('\n'))
   }
-  async function pullCarry(){
-    const{data}=await supabase.from('daily_notes').select('*').order('note_date',{ascending:false})
-    const rows=data||[]
-    const prior=rows.find((r:any)=>r.note_date<date)
-    if(!prior){alert('No earlier note to carry from.');return}
-    const carry=buildCarry(prior.content||'',prior.note_date)
-    if(!carry){alert(`Nothing to carry from ${prior.note_date} — no ↻ sections or unchecked tasks.`);return}
-    const stripMeta=(l:string)=>{const i=l.indexOf(' ⌁ ');return (i>=0?l.slice(0,i):l).trim()}
-    const existing=new Set(content.split('\n').map(stripMeta).filter(t=>t!==''))
-    const fresh=carry.split('\n').filter(l=>{const t=stripMeta(l);return t===''||!existing.has(t)})
-    // drop a leading 'Carried over:' header if today already has one and nothing new under it
-    const meaningful=fresh.filter(l=>{const t=stripMeta(l);return t!==''&&t!=='Carried over:'})
-    if(!meaningful.length){alert('Everything from the last note is already on this page.');return}
-    persist((fresh.join('\n').trimEnd()+'\n\n'+content).replace(/\n{3,}/g,'\n\n'))
-  }
-  function toggleCarry(idx:number){
-    const ls=content.split('\n');const l=ls[idx]
-    ls[idx]=isCarriedHeader(l)?l.replace(/\s*↻$/,''):l.trimEnd()+' ↻'
-    persist(ls.join('\n'))
-  }
   function onKey(e:any,idx:number){
     const ls=content.split('\n')
     if(e.key==='Enter'){
@@ -3314,8 +3294,7 @@ function Desk({items,setItems,projects,milestones,setMilestones,tasks,setTasks}:
           <button onClick={()=>shiftDate(1)} style={{background:'#1E3048',border:'1px solid #243447',borderRadius:6,color:'#7A8FA6',padding:'4px 10px',cursor:'pointer'}}>›</button>
           {!isToday&&<button onClick={()=>setDate(localISO(new Date()))} style={{background:'none',border:'1px solid #243447',borderRadius:6,color:'#C8973A',padding:'4px 10px',fontSize:11,cursor:'pointer'}}>Today</button>}
           <span style={{marginLeft:'auto',fontSize:10,color:'#7A8FA6'}}>{savedAt?`Saved ${savedAt.toLocaleTimeString()}`:''}</span>
-          <button onClick={pullCarry} title="Re-pull unchecked tasks and ↻ sections from the most recent earlier note (skips anything already on this page)" style={{background:'#1E3048',border:'1px solid #243447',borderRadius:6,color:'#C8973A',padding:'4px 12px',fontSize:11,fontWeight:700,cursor:'pointer'}}>↻ Pull carry-over</button>
-          <button onClick={()=>setRaw(r=>!r)} style={{background:raw?'#C8973A':'#1E3048',border:'1px solid #243447',borderRadius:6,color:raw?'#0D1B2A':'#7A8FA6',padding:'4px 14px',fontSize:11,fontWeight:700,cursor:'pointer'}}>{raw?'Done':'Raw'}</button>
+<button onClick={()=>setRaw(r=>!r)} style={{background:raw?'#C8973A':'#1E3048',border:'1px solid #243447',borderRadius:6,color:raw?'#0D1B2A':'#7A8FA6',padding:'4px 14px',fontSize:11,fontWeight:700,cursor:'pointer'}}>{raw?'Done':'Raw'}</button>
         </div>
         {/* Project tasks — dated reminders attached to projects */}
         <div style={{background:'#12202F',border:'1px solid #243447',borderRadius:10,padding:'10px 14px',marginBottom:12,maxHeight:'38%',display:'flex',flexDirection:'column' as const}}>
@@ -3390,7 +3369,7 @@ function Desk({items,setItems,projects,milestones,setMilestones,tasks,setTasks}:
                 return(
                   <div key={idx} style={{display:'flex',alignItems:'center',gap:8,padding:'2px 0',marginTop:idx===0?0:(sub?6:14),borderBottom:sub?'1px dashed #243447':'2px solid #2E4258',paddingLeft:sub?14:0}}>
                     <input ref={el=>{if(el)inputRefs.current[idx]=el}} value={shown}
-                      onChange={e=>setLine(idx,carried?e.target.value.trimEnd()+' ↻':e.target.value)}
+                      onChange={e=>setLine(idx,e.target.value)}
                       onKeyDown={e=>{
                         if(e.key==='Tab'){
                           e.preventDefault()
@@ -3402,8 +3381,7 @@ function Desk({items,setItems,projects,milestones,setMilestones,tasks,setTasks}:
                         onKey(e,idx)
                       }}
                       style={{...lineInput as any,color:sub?'#E8B95A':'#C8973A',fontWeight:800,fontSize:sub?13:16,letterSpacing:sub?0.2:0.5,textTransform:sub?'none' as const:'none' as const}}/>
-                    <button onClick={()=>toggleCarry(idx)} title={carried?'Carries this whole section to tomorrow — click to unmark':'Click to carry this whole section to tomorrow'}
-                      style={{background:carried?'#C8973A':'transparent',color:carried?'#0D1B2A':'#7A8FA6',border:`1px solid ${carried?'#C8973A':'#243447'}`,borderRadius:4,fontSize:11,fontWeight:700,padding:'1px 8px',cursor:'pointer',flexShrink:0,lineHeight:1.4}}>↻{carried?' carries':''}</button>
+
                   </div>
                 )
               }
@@ -3432,7 +3410,7 @@ function Desk({items,setItems,projects,milestones,setMilestones,tasks,setTasks}:
             })}
           </div>
         )}
-        <div style={{fontSize:10,color:'#7A8FA6',marginTop:6}}>Autosaves · [ ] = task · line ending with : = section · start it with 1) or press Tab = sub-section (Shift+Tab promotes) · ↻ carries a section to tomorrow · unchecked tasks always carry under their headers</div>
+        <div style={{fontSize:10,color:'#7A8FA6',marginTop:6}}>Autosaves · [ ] = task · end a line with : for a section · start with 1) or Tab for a sub-section · open sections auto-carry · check everything off to close a section</div>
       </div>
       <div style={{width:300,flexShrink:0,borderLeft:'1px solid #243447',padding:'18px 16px',overflowY:'auto'}}>
         <div style={railCard as any}>
@@ -3658,8 +3636,66 @@ function Desk({items,setItems,projects,milestones,setMilestones,tasks,setTasks}:
             </div>
           </div>
         </div>
+      )
+    })()}
+    {/* Past Notes — collapsible history */}
+    <PastNotes date={date} localISO={localISO}/>
+  </div>
+  )
+}
+
+// Past notes loaded lazily so they don't slow the main editor
+function PastNotes({date,localISO}:{date:string,localISO:(d:Date)=>string}){
+  const [open,setOpen]=useState(false)
+  const [notes,setNotes]=useState<any[]>([])
+  const [expanded,setExpanded]=useState<any>({})
+  useEffect(()=>{
+    if(!open)return
+    supabase.from('daily_notes').select('id,note_date,content').order('note_date',{ascending:false})
+      .then(({data})=>{if(data)setNotes(data.filter((r:any)=>r.note_date<date))})
+  },[open,date])
+  if(!open)return(
+    <button onClick={()=>setOpen(true)} style={{width:'100%',background:'#0F1C2B',border:'1px dashed #243447',borderRadius:8,color:'#7A8FA6',fontSize:11,padding:'8px',cursor:'pointer',marginTop:2}}>
+      📋 Past Notes
+    </button>
+  )
+  return(
+    <div style={{background:'#0F1C2B',border:'1px solid #243447',borderRadius:8,padding:'10px 14px',marginTop:2}}>
+      <div style={{display:'flex',alignItems:'center',marginBottom:8}}>
+        <span style={{fontSize:11,fontWeight:700,color:'#7A8FA6',letterSpacing:1}}>📋 PAST NOTES</span>
+        <button onClick={()=>setOpen(false)} style={{marginLeft:'auto',background:'none',border:'none',color:'#7A8FA6',fontSize:11,cursor:'pointer'}}>Hide</button>
+      </div>
+      {notes.length===0&&<div style={{fontSize:11,color:'#7A8FA6',fontStyle:'italic'}}>No earlier notes</div>}
+      {notes.map(n=>{
+        const isExp=expanded[n.id]
+        const lines=(n.content||'').split('\n')
+        const preview=lines.slice(0,2).join(' · ').slice(0,80)
+        return(
+          <div key={n.id} style={{borderTop:'1px solid #1A2838',paddingTop:6,marginTop:6}}>
+            <button onClick={()=>setExpanded((e:any)=>({...e,[n.id]:!e[n.id]}))}
+              style={{background:'none',border:'none',padding:0,cursor:'pointer',display:'flex',alignItems:'center',gap:8,width:'100%',textAlign:'left' as const}}>
+              <span style={{fontSize:9,color:'#7A8FA6'}}>{isExp?'▾':'▸'}</span>
+              <span style={{fontSize:11,fontWeight:700,color:'#C8973A'}}>{n.note_date}</span>
+              {!isExp&&<span style={{fontSize:10,color:'#5C6E80',overflow:'hidden',whiteSpace:'nowrap' as const,textOverflow:'ellipsis',flex:1}}>{preview}</span>}
+            </button>
+            {isExp&&(
+              <div style={{marginTop:6,paddingLeft:14,borderLeft:'2px solid #243447'}}>
+                {lines.map((l:string,i:number)=>{
+                  const t=l.trim()
+                  const task=t.startsWith('[ ]')||t.startsWith('[x]')
+                  const done=t.startsWith('[x]')
+                  const header=!task&&t.length>1&&/:\s*$/.test(t)
+                  return(
+                    <div key={i} style={{fontSize:12,lineHeight:1.6,color:done?'#5C6E80':header?'#C8973A':'#B8C4D0',fontWeight:header?700:400,textDecoration:done?'line-through':'none',paddingLeft:task?16:0,paddingBottom:header?2:0,borderBottom:header?'1px dashed #243447':'none',marginTop:header?6:0}}>
+                      {task&&<span style={{marginRight:8}}>{done?'☑':'☐'}</span>}{task?t.slice(3).trim():l}
+                    </div>
+                  )
+                })}
+              </div>
+            )}
+          </div>
         )
-      })()}
+      })}
     </div>
   )
 }
