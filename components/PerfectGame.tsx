@@ -12,7 +12,7 @@ const T = {
 }
 
 const PRIORITIES=['P1','P2','P3','P4','Backlog']
-const STATUSES=['Accepted','Testing','Awaiting Vendor Deliverable','Need Requirements','Under Review','In Progress','Will Not Implement','Ready to Score','Triage','Done']
+const STATUSES=['New','Need Requirements','Under Review','Accepted','Ready','In Progress','Testing','Blocked','Done','Awaiting Vendor Deliverable','Will Not Implement']
 const PROJECT_STATUSES=['Queued','Planning','In Progress','Testing','On Hold','Complete','Cancelled']
 const TEAMS=['Consumer Experience','Operational Efficiency']
 const EFFORTS=['S','M','L','XL']
@@ -113,7 +113,7 @@ async function deleteProjectTask(setTasks:any,t:any){
 // Request-type glyphs — instant visual ID on item lines
 function rt(t:any){const m:any={'Bug':'🐞','Tech Debt':'🔧','Enhancement':'✨','Strategic Initiative':'🎯','Business Request':'💼','Testing':'🧪'};return m[t]||''}
 function sc(s) {
-  const m={'In Progress':'#27AE60','Testing':'#C8973A','Need Requirements':'#E74C3C','Under Review':'#E8B95A','Will Not Implement':'#7A8FA6','Ready to Score':'#8E44AD','Accepted':'#2E86AB','Done':'#16A085'}
+  const m={'New':'#5DADE2','Need Requirements':'#E67E22','Under Review':'#E8B95A','Accepted':'#2E86AB','Ready':'#8E44AD','In Progress':'#27AE60','Testing':'#C8973A','Blocked':'#E74C3C','Done':'#16A085','Awaiting Vendor Deliverable':'#7F8FA6','Will Not Implement':'#5C6E80'}
   return m[s]||'#7A8FA6'
 }
 // Sequential item IDs — max existing RTL number + 1. Random IDs collided with real data.
@@ -209,7 +209,7 @@ function ProjectDetail({project,items,setItems,projects,milestones,setMilestones
   }
   const [addingItem,setAddingItem]=useState(false)
   const [savingItem,setSavingItem]=useState(false)
-  const [newItem,setNewItem]=useState({name:'',priority:'P3',swimlane:'POS',effort:'M',status:'Ready to Score',request_type:'Bug',region:'',vendor:'Deckers',description:''})
+  const [newItem,setNewItem]=useState({name:'',priority:'P3',swimlane:'POS',effort:'M',status:'New',request_type:'Bug',region:'',vendor:'Deckers',description:''})
   const [addingMilestone,setAddingMilestone]=useState(false)
   const [savingMilestone,setSavingMilestone]=useState(false)
   const [milestoneForm,setMilestoneForm]=useState({name:'',date:'',type:'Milestone',color:'#C8973A',notes:'',completed:false})
@@ -245,7 +245,7 @@ function ProjectDetail({project,items,setItems,projects,milestones,setMilestones
     if(error){alert('Failed to add item: '+error.message);setSavingItem(false);return}
     if(data) setItems([...items,data])
     setSavingItem(false);setAddingItem(false)
-    setNewItem({name:'',priority:'P3',swimlane:'POS',effort:'M',status:'Ready to Score',request_type:'Bug',region:'',vendor:'Deckers',description:''})
+    setNewItem({name:'',priority:'P3',swimlane:'POS',effort:'M',status:'New',request_type:'Bug',region:'',vendor:'Deckers',description:''})
   }
   async function saveMilestone(){
     if(!milestoneForm.name.trim()||!milestoneForm.date) return
@@ -1030,7 +1030,7 @@ function Backlog({items,setItems,projects,setProjects}:{items:any[],setItems:any
   const [ai,setAi]=useState(false)
   const [sav,setSav]=useState(false)
   const [selected,setSelected]=useState(null)
-  const [ni,setNi]=useState({name:'',priority:'P3',swimlane:'POS',team:'Consumer Experience',effort:'M',status:'Ready to Score',request_type:'Bug',region:'',vendor:'Deckers',description:''})
+  const [ni,setNi]=useState({name:'',priority:'P3',swimlane:'POS',team:'Consumer Experience',effort:'M',status:'New',request_type:'Bug',region:'',vendor:'Deckers',description:''})
   const [vendors,setVendors]=useState(['Deckers','Salesforce','GreyOrange','Legion','SafeSize','ID.me','Adyen','Agilence','Boomi'])
   const [swimlaneOpts,setSwimOpts]=useState([...SWIMLANES])
   const [statusOpts,setStatusOpts]=useState([...STATUSES])
@@ -1214,7 +1214,7 @@ const sorted=items.filter(i=>!isItemDone(i)).sort((a,b)=>{
     if(error){alert('Failed to add item: '+error.message);setSav(false);return}
     if(data) setItems([...items,data])
     setSav(false);setAi(false)
-    setNi({name:'',priority:'P3',swimlane:'POS',team:'Consumer Experience',effort:'M',status:'Ready to Score',request_type:'Bug',region:'',vendor:'Deckers',description:''})
+    setNi({name:'',priority:'P3',swimlane:'POS',team:'Consumer Experience',effort:'M',status:'New',request_type:'Bug',region:'',vendor:'Deckers',description:''})
   }
   async function deleteItem(id) {
     if(!confirm('Delete this item?')) return
@@ -3074,7 +3074,7 @@ function Desk({items,setItems,projects,milestones,setMilestones,tasks,setTasks}:
     const iid=nextItemId(items)
     const{data,error}=await supabase.from('items').insert({
       item_id:iid,name:qiName.trim(),description:'',priority:qiPri,request_type:qiType,
-      swimlane:'POS',team:projView.team||'Consumer Experience',effort:'M',status:'Ready to Score',
+      swimlane:'POS',team:projView.team||'Consumer Experience',effort:'M',status:'New',
       region:'',vendor:'Deckers',parent_project:projView.name,flagged:false,sort_order:items.length,
     }).select().single()
     if(error){alert('Failed to add item: '+error.message);return}
@@ -3610,7 +3610,7 @@ function Desk({items,setItems,projects,milestones,setMilestones,tasks,setTasks}:
                 </select>
                 <button onClick={submitQuickItem} disabled={!qiName.trim()} style={{background:'#C8973A',border:'none',borderRadius:6,color:'#0D1B2A',fontSize:11,fontWeight:700,padding:'5px 12px',cursor:'pointer',opacity:!qiName.trim()?0.5:1}}>+ Add</button>
               </div>
-              <div style={{fontSize:9,color:'#5C6E80',marginTop:4}}>Lands uncommitted with defaults (Ready to Score · M · {'{'}team from project{'}'}) — refine in the Backlog anytime</div>
+              <div style={{fontSize:9,color:'#5C6E80',marginTop:4}}>Lands uncommitted with defaults (New · M · {'{'}team from project{'}'}) — refine in the Backlog anytime</div>
             </div>
           </div>
         </div>
