@@ -2994,59 +2994,6 @@ const isDeskHeader=(l:string)=>{const t=l.trim();return t.length>1&&!t.startsWit
 const isCarriedHeader=(l:string)=>/:\s*↻$/.test(l.trim())
 // Sub-section: header with a numbered/bulleted prefix (1) 2. -) or leading indentation
 const isSubHeader=(l:string)=>isDeskHeader(l)&&(/^\s+\S/.test(l)||/^(\d+[).]|[-•])\s*/.test(l.trim()))
-function buildCarry(prev:string,priorDate:string){
-  const fmt=new Date(priorDate+'T12:00:00').toLocaleDateString('default',{month:'short',day:'numeric'})
-  const lines=prev.split('\n')
-  const tops:any[]=[];const loose:string[]=[];let curTop:any=null;let curSub:any=null
-  for(const l of lines){
-    if(isDeskHeader(l)&&!isSubHeader(l)){curTop={header:l,lines:[],subs:[]};curSub=null;tops.push(curTop)}
-    else if(isDeskHeader(l)&&isSubHeader(l)){
-      if(!curTop){curTop={header:null,lines:[],subs:[]};tops.push(curTop)}
-      curSub={header:l,lines:[]};curTop.subs.push(curSub)
-    }
-    else if(curSub)curSub.lines.push(l)
-    else if(curTop)curTop.lines.push(l)
-    else loose.push(l)
-  }
-  const keepAll=(ls:string[])=>ls.filter(l=>{const t=l.trim();return t!==''&&!t.startsWith('[x]')})
-  const keepUn=(ls:string[])=>ls.filter(l=>l.trim().startsWith('[ ]'))
-  const clean=(h:any)=>{
-    if(!h)return ''
-    const t=String(h).trim().replace(/\s*↻$/,'').replace(/:$/,'')
-    // Legacy/system carry headers aren't real context — don't breadcrumb with them
-    return /^carried over/i.test(t)?'':t
-  }
-  // Residue tasks get a breadcrumb + origin date; already-annotated tasks keep their original date (aging)
-  const annotate=(l:string,crumb:string)=>l.includes(' ⌁ ')?l:l.trimEnd()+` ⌁ ${crumb?crumb+' · ':''}${fmt}`
-  const residue:string[]=[];const blocks:string[]=[]
-  keepUn(loose).forEach(l=>residue.push(annotate(l,'')))
-  for(const top of tops){
-    const topCarried=top.header?isCarriedHeader(top.header):false
-    if(topCarried){
-      // Deliberate continuation: carry the whole block, structure intact, ↻ preserved
-      blocks.push(top.header,...keepAll(top.lines))
-      for(const sub of top.subs)blocks.push(sub.header,...keepAll(sub.lines))
-      blocks.push('')
-      continue
-    }
-    keepUn(top.lines).forEach(l=>residue.push(annotate(l,clean(top.header))))
-    const carriedSubs=top.subs.filter((sub:any)=>isCarriedHeader(sub.header))
-    for(const sub of top.subs){
-      if(isCarriedHeader(sub.header))continue
-      const crumb=[clean(top.header),clean(sub.header)].filter(Boolean).join(' › ')
-      keepUn(sub.lines).forEach(l=>residue.push(annotate(l,crumb)))
-    }
-    if(carriedSubs.length){
-      if(top.header)blocks.push(top.header.replace(/\s*↻$/,''))
-      for(const sub of carriedSubs)blocks.push(sub.header,...keepAll(sub.lines))
-      blocks.push('')
-    }
-  }
-  const out:string[]=[]
-  if(residue.length)out.push('Carried over:',...residue,'')
-  out.push(...blocks)
-  return out.length?out.join('\n'):''
-}
 // Days since a breadcrumb date like 'Jul 8' (year-wrap tolerant)
 function crumbAge(dateStr:string){
   const d=new Date(`${dateStr} ${new Date().getFullYear()}`)
@@ -3126,8 +3073,8 @@ function Desk({items,setItems,projects,milestones,setMilestones,tasks,setTasks}:
     if(ok){setMvTitle('');setMvDate('')}
   }
   async function submitTask(){
-    if(!ntTitle.trim()||!ntProj)return
-    const ok=await addProjectTask(setTasks,ntProj,ntTitle,ntDate||null)
+    if(!ntTitle.trim())return
+    const ok=await addProjectTask(setTasks,ntProj||null,ntTitle,ntDate||null)
     if(ok){setNtTitle('');setNtDate('')}
   }
   const openTasks=[...tasks].filter(t=>!t.done).sort((a,b)=>(a.due_date||'9999')<(b.due_date||'9999')?-1:1)
@@ -3169,10 +3116,7 @@ function Desk({items,setItems,projects,milestones,setMilestones,tasks,setTasks}:
     if(exact){setNoteId(exact.id);setContent(exact.content||'')}
     else{
       setNoteId(null)
-      const prior=rows.find((r:any)=>r.note_date<date)
-      if(prior&&date===localISO(new Date())){
-        setContent(buildCarry(prior.content||'',prior.note_date))
-      } else setContent('')
+      setContent('')
     }
     setSavedAt(null)
   })()},[date])
@@ -3304,7 +3248,7 @@ function Desk({items,setItems,projects,milestones,setMilestones,tasks,setTasks}:
         {/* Project tasks — dated reminders attached to projects */}
         <div style={{background:'#12202F',border:'1px solid #243447',borderRadius:10,padding:'10px 14px',marginBottom:12,maxHeight:'38%',display:'flex',flexDirection:'column' as const}}>
           <button onClick={()=>setTasksOpen(o=>!o)} style={{background:'none',border:'none',padding:0,cursor:'pointer',display:'flex',alignItems:'center',gap:6,fontSize:11,fontWeight:700,letterSpacing:1,color:'#C8973A',marginBottom:tasksOpen?8:0}}>
-            <span style={{fontSize:9}}>{tasksOpen?'▾':'▸'}</span>☑ PROJECT TASKS ({openTasks.length}{doneTasks.length?` · ${doneTasks.length} done`:''})
+            <span style={{fontSize:9}}>{tasksOpen?'▾':'▸'}</span>☑ TASKS ({openTasks.length}{doneTasks.length?` · ${doneTasks.length} done`:''})
           </button>
           {tasksOpen&&(
             <>
@@ -3318,7 +3262,9 @@ function Desk({items,setItems,projects,milestones,setMilestones,tasks,setTasks}:
                   <div key={t.id} style={{display:'flex',alignItems:'center',gap:8,padding:'3px 0'}}>
                     <input type="checkbox" checked={false} onChange={()=>toggleProjectTask(setTasks,t)} style={{cursor:'pointer',flexShrink:0}}/>
                     <span style={{fontSize:13,color:'#F4F6F8',flex:1,minWidth:0,overflow:'hidden',whiteSpace:'nowrap' as const,textOverflow:'ellipsis'}}>{t.title}</span>
-                    {pr&&<span style={{fontSize:10,color:'#7A8FA6',background:'#1E3048',borderLeft:`3px solid ${pr.color||'#3A4A5E'}`,borderRadius:3,padding:'1px 7px',flexShrink:0,maxWidth:180,overflow:'hidden',whiteSpace:'nowrap' as const,textOverflow:'ellipsis'}}>{pr.name}</span>}
+                    {pr
+                      ?<span style={{fontSize:10,color:'#7A8FA6',background:'#1E3048',borderLeft:`3px solid ${pr.color||'#3A4A5E'}`,borderRadius:3,padding:'1px 7px',flexShrink:0,maxWidth:180,overflow:'hidden',whiteSpace:'nowrap' as const,textOverflow:'ellipsis'}}>{pr.name}</span>
+                      :<span style={{fontSize:10,color:'#5C6E80',background:'#0F1C2B',border:'1px solid #243447',borderRadius:3,padding:'1px 7px',flexShrink:0}}>General</span>}
                     {editTaskId===t.id
                       ?<input type="date" defaultValue={t.due_date||''} autoFocus onBlur={e=>saveTaskDate(t,e.target.value)} onKeyDown={e=>{if(e.key==='Enter')saveTaskDate(t,(e.target as HTMLInputElement).value);if(e.key==='Escape')setEditTaskId(null)}}
                           style={{background:'#0D1B2A',border:'1px solid #C8973A',borderRadius:4,color:'#F4F6F8',fontSize:11,padding:'2px 5px',flexShrink:0}}/>
@@ -3345,13 +3291,13 @@ function Desk({items,setItems,projects,milestones,setMilestones,tasks,setTasks}:
             </div>
             <div style={{display:'flex',gap:6,marginTop:8,flexShrink:0}}>
               <select value={ntProj} onChange={e=>setNtProj(e.target.value)} style={{background:'#0D1B2A',border:'1px solid #243447',borderRadius:6,color:'#F4F6F8',fontSize:11,padding:'5px 8px',maxWidth:180}}>
-                <option value="">Project...</option>
+                <option value="">General</option>
                 {activeProjects.map(p=><option key={p.id} value={p.id}>{p.name}</option>)}
               </select>
               <input placeholder="New reminder... (e.g., CCR required for deployment)" value={ntTitle} onChange={e=>setNtTitle(e.target.value)} onKeyDown={e=>{if(e.key==='Enter')submitTask()}}
                 style={{flex:1,background:'#0D1B2A',border:'1px solid #243447',borderRadius:6,color:'#F4F6F8',fontSize:12,padding:'5px 8px'}}/>
               <input type="date" value={ntDate} onChange={e=>setNtDate(e.target.value)} style={{background:'#0D1B2A',border:'1px solid #243447',borderRadius:6,color:'#F4F6F8',fontSize:11,padding:'5px 8px'}}/>
-              <button onClick={submitTask} disabled={!ntTitle.trim()||!ntProj} style={{background:'#C8973A',border:'none',borderRadius:6,color:'#0D1B2A',fontSize:11,fontWeight:700,padding:'5px 14px',cursor:'pointer',opacity:!ntTitle.trim()||!ntProj?0.5:1}}>+ Task</button>
+              <button onClick={submitTask} disabled={!ntTitle.trim()} style={{background:'#C8973A',border:'none',borderRadius:6,color:'#0D1B2A',fontSize:11,fontWeight:700,padding:'5px 14px',cursor:'pointer',opacity:!ntTitle.trim()?0.5:1}}>+ Task</button>
             </div>
             </>
           )}
@@ -3415,7 +3361,7 @@ function Desk({items,setItems,projects,milestones,setMilestones,tasks,setTasks}:
             })}
           </div>
         )}
-        <div style={{fontSize:10,color:'#7A8FA6',marginTop:6}}>Autosaves · [ ] = task · end a line with : for a section · start with 1) or Tab for a sub-section · open sections auto-carry · check everything off to close a section</div>
+        <div style={{fontSize:10,color:'#7A8FA6',marginTop:6}}>Autosaves · daily scratch pad — durable to-dos go in Tasks above · [ ] = checkbox · end a line with : for a section · 1) or Tab for a sub-section</div>
         {pastDates.filter(d2=>d2<localISO(new Date())).length>0&&(
           <div style={{display:'flex',alignItems:'center',gap:6,marginTop:8,flexWrap:'wrap' as const}}>
             <span style={{fontSize:10,color:'#5C6E80'}}>📋 Past:</span>
