@@ -3149,6 +3149,11 @@ function Desk({items,setItems,projects,milestones,setMilestones,tasks,setTasks}:
     await supabase.from('items').update({notes:noteDraft}).eq('id',item.id)
   }
   const [date,setDate]=useState(localISO(new Date()))
+  const [pastDates,setPastDates]=useState<string[]>([])
+  useEffect(()=>{
+    supabase.from('daily_notes').select('note_date').order('note_date',{ascending:false}).limit(15)
+      .then(({data}:any)=>{if(data)setPastDates(data.map((r:any)=>r.note_date))})
+  },[date])
   const [noteId,setNoteId]=useState<any>(null)
   const [content,setContent]=useState('')
   const [raw,setRaw]=useState(false)
@@ -3411,6 +3416,20 @@ function Desk({items,setItems,projects,milestones,setMilestones,tasks,setTasks}:
           </div>
         )}
         <div style={{fontSize:10,color:'#7A8FA6',marginTop:6}}>Autosaves · [ ] = task · end a line with : for a section · start with 1) or Tab for a sub-section · open sections auto-carry · check everything off to close a section</div>
+        {pastDates.filter(d2=>d2<localISO(new Date())).length>0&&(
+          <div style={{display:'flex',alignItems:'center',gap:6,marginTop:8,flexWrap:'wrap' as const}}>
+            <span style={{fontSize:10,color:'#5C6E80'}}>📋 Past:</span>
+            {pastDates.filter(d2=>d2<localISO(new Date())).slice(0,7).map(d2=>{
+              const dd=new Date(d2+'T12:00:00')
+              return(
+                <button key={d2} onClick={()=>setDate(d2)}
+                  style={{background:date===d2?'#C8973A':'#0F1C2B',border:'1px solid #243447',borderRadius:10,color:date===d2?'#0D1B2A':'#7A8FA6',fontSize:10,fontWeight:date===d2?700:400,padding:'2px 9px',cursor:'pointer'}}>
+                  {dd.toLocaleDateString('default',{month:'short',day:'numeric'})}
+                </button>
+              )
+            })}
+          </div>
+        )}
       </div>
       <div style={{width:300,flexShrink:0,borderLeft:'1px solid #243447',padding:'18px 16px',overflowY:'auto'}}>
         <div style={railCard as any}>
@@ -3638,67 +3657,10 @@ function Desk({items,setItems,projects,milestones,setMilestones,tasks,setTasks}:
         </div>
       )
     })()}
-    {/* Past Notes — collapsible history */}
-    <PastNotes date={date} localISO={localISO}/>
   </div>
   )
 }
 
-// Past notes loaded lazily so they don't slow the main editor
-function PastNotes({date,localISO}:{date:string,localISO:(d:Date)=>string}){
-  const [open,setOpen]=useState(false)
-  const [notes,setNotes]=useState<any[]>([])
-  const [expanded,setExpanded]=useState<any>({})
-  useEffect(()=>{
-    if(!open)return
-    supabase.from('daily_notes').select('id,note_date,content').order('note_date',{ascending:false})
-      .then(({data})=>{if(data)setNotes(data.filter((r:any)=>r.note_date<date))})
-  },[open,date])
-  if(!open)return(
-    <button onClick={()=>setOpen(true)} style={{width:'100%',background:'#0F1C2B',border:'1px dashed #243447',borderRadius:8,color:'#7A8FA6',fontSize:11,padding:'8px',cursor:'pointer',marginTop:2}}>
-      📋 Past Notes
-    </button>
-  )
-  return(
-    <div style={{background:'#0F1C2B',border:'1px solid #243447',borderRadius:8,padding:'10px 14px',marginTop:2}}>
-      <div style={{display:'flex',alignItems:'center',marginBottom:8}}>
-        <span style={{fontSize:11,fontWeight:700,color:'#7A8FA6',letterSpacing:1}}>📋 PAST NOTES</span>
-        <button onClick={()=>setOpen(false)} style={{marginLeft:'auto',background:'none',border:'none',color:'#7A8FA6',fontSize:11,cursor:'pointer'}}>Hide</button>
-      </div>
-      {notes.length===0&&<div style={{fontSize:11,color:'#7A8FA6',fontStyle:'italic'}}>No earlier notes</div>}
-      {notes.map(n=>{
-        const isExp=expanded[n.id]
-        const lines=(n.content||'').split('\n')
-        const preview=lines.slice(0,2).join(' · ').slice(0,80)
-        return(
-          <div key={n.id} style={{borderTop:'1px solid #1A2838',paddingTop:6,marginTop:6}}>
-            <button onClick={()=>setExpanded((e:any)=>({...e,[n.id]:!e[n.id]}))}
-              style={{background:'none',border:'none',padding:0,cursor:'pointer',display:'flex',alignItems:'center',gap:8,width:'100%',textAlign:'left' as const}}>
-              <span style={{fontSize:9,color:'#7A8FA6'}}>{isExp?'▾':'▸'}</span>
-              <span style={{fontSize:11,fontWeight:700,color:'#C8973A'}}>{n.note_date}</span>
-              {!isExp&&<span style={{fontSize:10,color:'#5C6E80',overflow:'hidden',whiteSpace:'nowrap' as const,textOverflow:'ellipsis',flex:1}}>{preview}</span>}
-            </button>
-            {isExp&&(
-              <div style={{marginTop:6,paddingLeft:14,borderLeft:'2px solid #243447'}}>
-                {lines.map((l:string,i:number)=>{
-                  const t=l.trim()
-                  const task=t.startsWith('[ ]')||t.startsWith('[x]')
-                  const done=t.startsWith('[x]')
-                  const header=!task&&t.length>1&&/:\s*$/.test(t)
-                  return(
-                    <div key={i} style={{fontSize:12,lineHeight:1.6,color:done?'#5C6E80':header?'#C8973A':'#B8C4D0',fontWeight:header?700:400,textDecoration:done?'line-through':'none',paddingLeft:task?16:0,paddingBottom:header?2:0,borderBottom:header?'1px dashed #243447':'none',marginTop:header?6:0}}>
-                      {task&&<span style={{marginRight:8}}>{done?'☑':'☐'}</span>}{task?t.slice(3).trim():l}
-                    </div>
-                  )
-                })}
-              </div>
-            )}
-          </div>
-        )
-      })}
-    </div>
-  )
-}
 
 // ── DONE — history of completed projects and items ───────────────────────
 function DoneTab({items,setItems,projects,setProjects}:{items:any[],setItems:any,projects:any[],setProjects:any}) {
