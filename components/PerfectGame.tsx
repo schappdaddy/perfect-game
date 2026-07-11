@@ -2505,9 +2505,8 @@ function Teams({items,projects,milestones}:{items:any[],projects:any[],milestone
         <td style="${TD_}text-align:center;">${i.effort||''}</td>
         <td style="${TD_}overflow:hidden;">${hs(i.status)}</td>
       </tr>`).join('')}</table>`:''
-    const in4w=+new Date()+28*86400000
-    const upc=milestones.filter(m=>!m.completed&&teamProjects.some((p:any)=>p.id===m.project_id)&&+new Date(m.date+'T12:00:00')>=Date.now()-86400000&&+new Date(m.date+'T12:00:00')<=in4w).sort((a,b)=>a.date<b.date?-1:1)
-    const msHtml=upc.length?`<div style="${H2}">Milestones — Next 4 Weeks</div>
+    const upc=milestones.filter(m=>!m.completed&&teamProjects.some((p:any)=>p.id===m.project_id)).sort((a,b)=>a.date<b.date?-1:1)
+    const msHtml=upc.length?`<div style="${H2}">Milestones (${upc.length})</div>
       <table cellspacing="0" style="border-collapse:collapse;width:100%;">
       <tr><th style="${TH_}width:70px;">Date</th><th style="${TH_}width:220px;">Project</th><th style="${TH_}">Milestone</th></tr>
       ${upc.map(m=>{const pr=projects.find(p=>p.id===m.project_id);return `<tr><td style="${TD_}white-space:nowrap;">${hs(fmtD(m.date))}</td><td style="${TD_}">${pr?.name||''}</td><td style="${TD_}">${m.name}${m.type&&m.type!=='Milestone'?` <span style="color:#595959;font-size:11px;">(${m.type})</span>`:''}</td></tr>`}).join('')}</table>`:''
@@ -2698,9 +2697,8 @@ function ComposeUpdate({projects,milestones,items,onClose}:{projects:any[],miles
     // Build email HTML — deliberately plain "typed in Outlook + pasted Excel tables" styling
     const today=new Date().toLocaleDateString('default',{month:'long',day:'numeric',year:'numeric'})
     const g=selected.filter(p=>p.rag==='Green').length,a=selected.filter(p=>p.rag==='Amber').length,r=selected.filter(p=>p.rag==='Red').length
-    const in4w=+new Date()+28*86400000
     const upcoming=milestones
-      .filter(m=>!m.completed&&selected.some(p=>p.id===m.project_id)&&+new Date(m.date+'T12:00:00')>=+new Date()&&+new Date(m.date+'T12:00:00')<=in4w)
+      .filter(m=>!m.completed&&selected.some(p=>p.id===m.project_id))
       .sort((x,y)=>x.date<y.date?-1:1)
     const RAGT:any={Green:'#217346',Amber:'#B8860B',Red:'#C0392B'}
     const PCLRT:any={P1:'#C0392B',P2:'#C55A11',P3:'#2E5E8C',P4:'#595959'}
@@ -2822,7 +2820,7 @@ function ComposeUpdate({projects,milestones,items,onClose}:{projects:any[],miles
         return `${onRoadmap.length?`<div style="${H2}">Project Updates — On Roadmap</div>${onRoadmap.map(p=>projBlock(p)).join('')}`:''}
         ${backlogP.length?`<div style="${H2}">Project Updates — Backlog</div>${backlogP.map(p=>projBlock(p,'BACKLOG')).join('')}`:''}`
       })()}
-      ${upcoming.length?`<div style="${H2}">Upcoming Milestones — Next 4 Weeks</div>
+      ${upcoming.length?`<div style="${H2}">Milestones (${upcoming.length})</div>
       <table cellspacing="0" style="border-collapse:collapse;width:100%;">
       <tr><th style="${TH_}width:70px;">Date</th><th style="${TH_}width:220px;">Project</th><th style="${TH_}">Milestone</th></tr>
       ${upcoming.map(m=>{
