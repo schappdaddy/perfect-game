@@ -3096,6 +3096,13 @@ function Desk({items,setItems,projects,milestones,setMilestones,tasks,setTasks}:
   }
   const [tasksOpen,setTasksOpen]=useState(true)
   const [showDoneTasks,setShowDoneTasks]=useState(false)
+  const [editTaskId,setEditTaskId]=useState<any>(null)
+  async function saveTaskDate(t:any,newDate:string){
+    const upd={due_date:newDate||null}
+    setTasks((prev:any[])=>prev.map(x=>x.id===t.id?{...x,...upd}:x))
+    setEditTaskId(null)
+    await supabase.from('tasks').update(upd).eq('id',t.id)
+  }
   const [ntProj,setNtProj]=useState('')
   const [ntTitle,setNtTitle]=useState('')
   const [ntDate,setNtDate]=useState('')
@@ -3330,7 +3337,13 @@ function Desk({items,setItems,projects,milestones,setMilestones,tasks,setTasks}:
                     <input type="checkbox" checked={false} onChange={()=>toggleProjectTask(setTasks,t)} style={{cursor:'pointer',flexShrink:0}}/>
                     <span style={{fontSize:13,color:'#F4F6F8',flex:1,minWidth:0,overflow:'hidden',whiteSpace:'nowrap' as const,textOverflow:'ellipsis'}}>{t.title}</span>
                     {pr&&<span style={{fontSize:10,color:'#7A8FA6',background:'#1E3048',borderLeft:`3px solid ${pr.color||'#3A4A5E'}`,borderRadius:3,padding:'1px 7px',flexShrink:0,maxWidth:180,overflow:'hidden',whiteSpace:'nowrap' as const,textOverflow:'ellipsis'}}>{pr.name}</span>}
-                    {t.due_date&&<span style={{fontSize:11,fontWeight:700,color:overdue?'#E74C3C':soon?'#E8B95A':'#7A8FA6',flexShrink:0}}>{overdue?'⚠ ':''}{fmtDt(t.due_date)}</span>}
+                    {editTaskId===t.id
+                      ?<input type="date" defaultValue={t.due_date||''} autoFocus onBlur={e=>saveTaskDate(t,e.target.value)} onKeyDown={e=>{if(e.key==='Enter')saveTaskDate(t,(e.target as HTMLInputElement).value);if(e.key==='Escape')setEditTaskId(null)}}
+                          style={{background:'#0D1B2A',border:'1px solid #C8973A',borderRadius:4,color:'#F4F6F8',fontSize:11,padding:'2px 5px',flexShrink:0}}/>
+                      :<span onClick={()=>setEditTaskId(t.id)} title="Click to edit date"
+                          style={{fontSize:11,fontWeight:700,color:overdue?'#E74C3C':soon?'#E8B95A':t.due_date?'#7A8FA6':'#3A4A5E',flexShrink:0,cursor:'pointer',borderBottom:t.due_date?'1px dashed #3A4A5E':'1px dashed #3A4A5E'}}>
+                          {overdue?'⚠ ':''}{t.due_date?fmtDt(t.due_date):'+ date'}
+                        </span>}
                     <button onClick={()=>deleteProjectTask(setTasks,t)} title="Delete task" style={{background:'none',border:'none',color:'#3A4A5E',fontSize:12,cursor:'pointer',padding:0,flexShrink:0}}>✕</button>
                   </div>
                 )
