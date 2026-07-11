@@ -2498,12 +2498,12 @@ function Teams({items,projects,milestones}:{items:any[],projects:any[],milestone
       ${upNext.map((i,n)=>`<tr>
         <td style="${TD_}text-align:center;font-weight:bold;">${n+1}</td>
         <td style="${TD_}white-space:nowrap;">${hs(i.item_id)}</td>
-        <td style="${TD_}">${itemCell(i)}</td>
-        <td style="${TD_}white-space:nowrap;">${hs(i.request_type)}</td>
+        <td style="${TD_}overflow:hidden;word-wrap:break-word;"><b>${i.name}</b>${i.description?`<div style="font-size:11px;color:#595959;margin-top:1px;">${i.description}</div>`:''}</td>
+        <td style="${TD_}overflow:hidden;">${hs(i.request_type)}</td>
         <td style="${TD_}white-space:nowrap;">${priTxt(i.priority)}</td>
-        <td style="${TD_}white-space:nowrap;">${hs(i.swimlane)}</td>
+        <td style="${TD_}overflow:hidden;">${hs(i.swimlane)}</td>
         <td style="${TD_}text-align:center;">${i.effort||''}</td>
-        <td style="${TD_}white-space:nowrap;">${hs(i.status)}</td>
+        <td style="${TD_}overflow:hidden;">${hs(i.status)}</td>
       </tr>`).join('')}</table>`:''
     const in4w=+new Date()+28*86400000
     const upc=milestones.filter(m=>!m.completed&&teamProjects.some((p:any)=>p.id===m.project_id)&&+new Date(m.date+'T12:00:00')>=Date.now()-86400000&&+new Date(m.date+'T12:00:00')<=in4w).sort((a,b)=>a.date<b.date?-1:1)
