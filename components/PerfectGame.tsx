@@ -16,7 +16,7 @@ const STATUSES=['Accepted','Testing','Awaiting Vendor Deliverable','Need Require
 const PROJECT_STATUSES=['Queued','Planning','In Progress','Testing','On Hold','Complete','Cancelled']
 const TEAMS=['Consumer Experience','Operational Efficiency']
 const EFFORTS=['S','M','L','XL']
-const REQUEST_TYPES=['Bug','Tech Debt','Enhancement','Strategic Initiative','Business Request']
+const REQUEST_TYPES=['Bug','Tech Debt','Enhancement','Strategic Initiative','Business Request','Testing']
 const MILESTONE_TYPES_G=['Milestone','Go-Live','Deadline','Review','Release','Code Freeze','UAT','Kickoff']
 const SWIMLANES=['POS','Pricing','Tax','Loyalty','WFM','Inventory','Reporting','SafeSize','Product','Clienteling','Integrations']
 const PRIORITY_ORDER={P1:0,P2:1,P3:2,P4:3,Backlog:4}
@@ -111,7 +111,7 @@ async function deleteProjectTask(setTasks:any,t:any){
 }
 
 // Request-type glyphs — instant visual ID on item lines
-function rt(t:any){const m:any={'Bug':'🐞','Tech Debt':'🔧','Enhancement':'✨','Strategic Initiative':'🎯','Business Request':'💼'};return m[t]||''}
+function rt(t:any){const m:any={'Bug':'🐞','Tech Debt':'🔧','Enhancement':'✨','Strategic Initiative':'🎯','Business Request':'💼','Testing':'🧪'};return m[t]||''}
 function sc(s) {
   const m={'In Progress':'#27AE60','Testing':'#C8973A','Need Requirements':'#E74C3C','Under Review':'#E8B95A','Will Not Implement':'#7A8FA6','Ready to Score':'#8E44AD','Accepted':'#2E86AB','Done':'#16A085'}
   return m[s]||'#7A8FA6'
