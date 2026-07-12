@@ -110,6 +110,19 @@ async function deleteProjectTask(setTasks:any,t:any){
   await supabase.from('tasks').delete().eq('id',t.id)
 }
 
+// Mobile detection — single breakpoint drives layout switches
+function useIsMobile(){
+  const [m,setM]=useState(false)
+  useEffect(()=>{
+    const q=window.matchMedia('(max-width: 820px)')
+    const f=()=>setM(q.matches)
+    f()
+    q.addEventListener('change',f)
+    return()=>q.removeEventListener('change',f)
+  },[])
+  return m
+}
+
 // Request-type glyphs — instant visual ID on item lines
 function rt(t:any){const m:any={'Bug':'🐞','Tech Debt':'🔧','Enhancement':'✨','Strategic Initiative':'🎯','Business Request':'💼','Testing':'🧪'};return m[t]||''}
 function sc(s) {
@@ -3210,14 +3223,24 @@ function Desk({items,setItems,projects,milestones,setMilestones,tasks,setTasks}:
   const fmtDt=(str:string)=>new Date(str+'T12:00:00').toLocaleDateString('default',{month:'short',day:'numeric'})
   const isToday=date===localISO(new Date())
   const dispDate=new Date(date+'T12:00:00').toLocaleDateString('default',{weekday:'long',month:'long',day:'numeric'})
+  const mobile=useIsMobile()
+  const [deskView,setDeskView]=useState('plan') // mobile: plan | radar | flags
   const railCard={background:'#162436',border:'1px solid #243447',borderRadius:8,padding:'10px 12px',marginBottom:12}
   const railTitle={fontSize:10,fontWeight:700,letterSpacing:1,color:'#C8973A',marginBottom:8}
   const lineInput={flex:1,background:'transparent',border:'none',outline:'none',color:'#F4F6F8',fontSize:14,lineHeight:1.6,fontFamily:'inherit',padding:0}
 
   return(
-    <div style={{height:'100%',display:'flex',gap:0,overflow:'hidden'}}>
+    <div style={{height:'100%',display:'flex',flexDirection:(mobile?'column':'row') as any,gap:0,overflow:'hidden'}}>
+      {mobile&&(
+        <div style={{display:'flex',gap:6,padding:'10px 12px',borderBottom:'1px solid #243447',flexShrink:0}}>
+          {([['plan','✎ Plan'],['radar','🎯 Radar'],['flags','🚩 Flags']] as [string,string][]).map(([k,label])=>(
+            <button key={k} onClick={()=>setDeskView(k)}
+              style={{flex:1,background:deskView===k?'#C8973A':'#12202F',color:deskView===k?'#0D1B2A':'#7A8FA6',border:'1px solid '+(deskView===k?'#C8973A':'#243447'),borderRadius:8,padding:'8px 4px',fontSize:12,fontWeight:700,cursor:'pointer'}}>{label}</button>
+          ))}
+        </div>
+      )}
       {/* Left rail — flagged for discussion, split by audience */}
-      <div style={{width:270,flexShrink:0,borderRight:'1px solid #243447',padding:'18px 14px',overflowY:'auto'}}>
+      <div style={{width:mobile?'100%':270,flexShrink:0,borderRight:mobile?'none':'1px solid #243447',padding:mobile?'14px 12px':'18px 14px',overflowY:'auto',display:mobile&&deskView!=='flags'?'none':'block',boxSizing:'border-box' as const}}>
         {([['🚩 DEV FLAGGED',flaggedDevL,devOpen,setDevOpen,unflagDev],['◉ STAKEHOLDER FLAGGED',flaggedStkL,stkOpen,setStkOpen,unflagStk]] as any[]).map(([title,list,open,setOpen,unflag]:any)=>(
           <div key={title} style={railCard as any}>
             <button onClick={()=>setOpen((o:boolean)=>!o)} style={{background:'none',border:'none',padding:0,cursor:'pointer',width:'100%',display:'flex',alignItems:'center',gap:6,...railTitle as any,marginBottom:open?8:0}}>
@@ -3249,7 +3272,7 @@ function Desk({items,setItems,projects,milestones,setMilestones,tasks,setTasks}:
           </div>
         ))}
       </div>
-      <div style={{flex:1,display:'flex',flexDirection:'column' as const,padding:'18px 24px',overflow:'hidden'}}>
+      <div style={{flex:1,display:mobile&&deskView!=='plan'?'none':'flex',flexDirection:'column' as const,padding:mobile?'12px 12px':'18px 24px',overflow:'hidden',minWidth:0}}>
         <div style={{display:'flex',alignItems:'center',gap:10,marginBottom:12}}>
           <button onClick={()=>shiftDate(-1)} style={{background:'#1E3048',border:'1px solid #243447',borderRadius:6,color:'#7A8FA6',padding:'4px 10px',cursor:'pointer'}}>‹</button>
           <div style={{fontSize:17,fontWeight:800}}>{dispDate}{isToday&&<span style={{fontSize:11,color:'#C8973A',marginLeft:8}}>TODAY</span>}</div>
@@ -3390,7 +3413,7 @@ function Desk({items,setItems,projects,milestones,setMilestones,tasks,setTasks}:
           </div>
         )}
       </div>
-      <div style={{width:300,flexShrink:0,borderLeft:'1px solid #243447',padding:'18px 16px',overflowY:'auto'}}>
+      <div style={{width:mobile?'100%':300,flexShrink:0,borderLeft:mobile?'none':'1px solid #243447',padding:mobile?'14px 12px':'18px 16px',overflowY:'auto',display:mobile&&deskView!=='radar'?'none':'block',boxSizing:'border-box' as const}}>
         <div style={railCard as any}>
           <RailHead k="due">🎯 DUE — NEXT 5 DAYS ({dueSoon.length})</RailHead>
           {railOpen.due&&<>
@@ -3460,7 +3483,7 @@ function Desk({items,setItems,projects,milestones,setMilestones,tasks,setTasks}:
         const committed=pis.filter(i=>i.status!=='Done'&&i.start_date&&i.end_date)
         return(
         <div onClick={()=>setProjView(null)} style={{position:'fixed',inset:0,background:'rgba(0,0,0,0.6)',zIndex:250,display:'flex',alignItems:'center',justifyContent:'center'}}>
-          <div onClick={e=>e.stopPropagation()} style={{background:'#162436',border:'1px solid #243447',borderRadius:12,width:560,maxWidth:'92vw',maxHeight:'82vh',overflowY:'auto',padding:20}}>
+          <div onClick={e=>e.stopPropagation()} style={{background:'#162436',border:'1px solid #243447',borderRadius:12,width:560,maxWidth:'94vw',maxHeight:'86vh',overflowY:'auto',padding:16,boxSizing:'border-box' as const}}>
             <div style={{display:'flex',alignItems:'center',gap:10,marginBottom:6}}>
               <span style={{width:12,height:12,borderRadius:3,background:projView.color||'#3A4A5E'}}/>
               <span style={{fontSize:16,fontWeight:800}}>{projView.name}</span>
@@ -3750,6 +3773,7 @@ export default function DeckTech() {
   const [tasks,setTasks]=useState<any[]>([])
   const [loading,setLoading]=useState(true)
   const [activeTab,setActiveTab]=useState('desk')
+  const mobile=useIsMobile()
 
 useEffect(()=>{
     async function load(){
@@ -3830,18 +3854,18 @@ useEffect(()=>{
             <div style={{fontSize:9,color:'#C8973A',letterSpacing:3,lineHeight:1.4}}>TRUST THE PROCESS</div>
           </div>
         </div>
-        <div style={{display:'flex',height:'100%'}}>
+        <div style={{display:'flex',height:'100%',overflowX:'auto' as const,WebkitOverflowScrolling:'touch' as any}}>
           {TABS.map(tab=>(
-            <button key={tab.key} onClick={()=>setActiveTab(tab.key)} style={{background:activeTab===tab.key?'#0D1B2A':'transparent',color:activeTab===tab.key?'#F4F6F8':'#7A8FA6',border:'none',borderBottom:activeTab===tab.key?'2px solid #C8973A':'2px solid transparent',padding:'0 13px',cursor:'pointer',fontSize:12.5,fontWeight:activeTab===tab.key?700:400,display:'flex',alignItems:'center',gap:6,height:'100%',position:'relative',whiteSpace:'nowrap' as const}}>
-              <span style={{fontSize:15}}>{tab.icon}</span>
-              {tab.label}
+            <button key={tab.key} onClick={()=>setActiveTab(tab.key)} style={{background:activeTab===tab.key?'#0D1B2A':'transparent',color:activeTab===tab.key?'#F4F6F8':'#7A8FA6',border:'none',borderBottom:activeTab===tab.key?'2px solid #C8973A':'2px solid transparent',padding:mobile?'0 10px':'0 13px',cursor:'pointer',fontSize:12.5,fontWeight:activeTab===tab.key?700:400,display:'flex',alignItems:'center',gap:6,height:'100%',position:'relative',whiteSpace:'nowrap' as const,flexShrink:0}}>
+              <span style={{fontSize:mobile?17:15}}>{tab.icon}</span>
+              {!mobile&&tab.label}
               {tab.badge&&<span style={{background:'#E74C3C',color:'#fff',borderRadius:10,padding:'1px 6px',fontSize:10,fontWeight:700,marginLeft:2}}>{tab.badge}</span>}
             </button>
           ))}
         </div>
-        <div title="Deckers Brands · Retail Technology" style={{marginLeft:'auto',display:'flex',gap:8,padding:'0 16px',alignItems:'center',fontSize:11,color:'#7A8FA6',whiteSpace:'nowrap' as const}}>
+        {!mobile&&<div title="Deckers Brands · Retail Technology" style={{marginLeft:'auto',display:'flex',gap:8,padding:'0 16px',alignItems:'center',fontSize:11,color:'#7A8FA6',whiteSpace:'nowrap' as const}}>
           <span>{items.length} items · {projects.length} projects · {milestones.length} milestones</span>
-        </div>
+        </div>}
       </div>
       <div style={{flex:1,overflow:'hidden'}}>
         {activeTab==='backlog'&&<Backlog items={items} setItems={setItems} projects={projects} setProjects={setProjects}/>}
