@@ -3240,7 +3240,7 @@ function Desk({items,setItems,projects,milestones,setMilestones,tasks,setTasks}:
         </div>
       )}
       {/* Left rail — flagged for discussion, split by audience */}
-      <div style={{width:mobile?'100%':270,flexShrink:0,borderRight:mobile?'none':'1px solid #243447',padding:mobile?'14px 12px':'18px 14px',overflowY:'auto',display:mobile&&deskView!=='flags'?'none':'block',boxSizing:'border-box' as const}}>
+      <div style={{width:mobile?'100%':270,flexShrink:mobile?1:0,...(mobile?{flex:1,minHeight:0}:{}),borderRight:mobile?'none':'1px solid #243447',padding:mobile?'14px 12px':'18px 14px',overflowY:'auto',display:mobile&&deskView!=='flags'?'none':'block',boxSizing:'border-box' as const}}>
         {([['🚩 DEV FLAGGED',flaggedDevL,devOpen,setDevOpen,unflagDev],['◉ STAKEHOLDER FLAGGED',flaggedStkL,stkOpen,setStkOpen,unflagStk]] as any[]).map(([title,list,open,setOpen,unflag]:any)=>(
           <div key={title} style={railCard as any}>
             <button onClick={()=>setOpen((o:boolean)=>!o)} style={{background:'none',border:'none',padding:0,cursor:'pointer',width:'100%',display:'flex',alignItems:'center',gap:6,...railTitle as any,marginBottom:open?8:0}}>
@@ -3272,7 +3272,7 @@ function Desk({items,setItems,projects,milestones,setMilestones,tasks,setTasks}:
           </div>
         ))}
       </div>
-      <div style={{flex:1,display:mobile&&deskView!=='plan'?'none':'flex',flexDirection:'column' as const,padding:mobile?'12px 12px':'18px 24px',overflow:'hidden',minWidth:0}}>
+      <div style={{flex:1,minHeight:0,display:mobile&&deskView!=='plan'?'none':'flex',flexDirection:'column' as const,padding:mobile?'12px 12px':'18px 24px',overflow:'hidden',minWidth:0}}>
         <div style={{display:'flex',alignItems:'center',gap:10,marginBottom:12}}>
           <button onClick={()=>shiftDate(-1)} style={{background:'#1E3048',border:'1px solid #243447',borderRadius:6,color:'#7A8FA6',padding:'4px 10px',cursor:'pointer'}}>‹</button>
           <div style={{fontSize:17,fontWeight:800}}>{dispDate}{isToday&&<span style={{fontSize:11,color:'#C8973A',marginLeft:8}}>TODAY</span>}</div>
@@ -3413,7 +3413,7 @@ function Desk({items,setItems,projects,milestones,setMilestones,tasks,setTasks}:
           </div>
         )}
       </div>
-      <div style={{width:mobile?'100%':300,flexShrink:0,borderLeft:mobile?'none':'1px solid #243447',padding:mobile?'14px 12px':'18px 16px',overflowY:'auto',display:mobile&&deskView!=='radar'?'none':'block',boxSizing:'border-box' as const}}>
+      <div style={{width:mobile?'100%':300,flexShrink:mobile?1:0,...(mobile?{flex:1,minHeight:0}:{}),borderLeft:mobile?'none':'1px solid #243447',padding:mobile?'14px 12px':'18px 16px',overflowY:'auto',display:mobile&&deskView!=='radar'?'none':'block',boxSizing:'border-box' as const}}>
         <div style={railCard as any}>
           <RailHead k="due">🎯 DUE — NEXT 5 DAYS ({dueSoon.length})</RailHead>
           {railOpen.due&&<>
