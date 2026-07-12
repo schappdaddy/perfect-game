@@ -213,6 +213,7 @@ function ViolationRow({v,project,fmt,d}:{v:any,project:any,fmt:any,d:any}) {
   )
 }
 function ProjectDetail({project,items,setItems,projects,milestones,setMilestones,tasks,setTasks,onClose,d,fmt}:any) {
+  const mobileP=useIsMobile()
   const [pdTitle,setPdTitle]=useState('')
   const [pdDate,setPdDate]=useState('')
   async function submitPdTask(){
@@ -296,7 +297,7 @@ function ProjectDetail({project,items,setItems,projects,milestones,setMilestones
   }
 
   return(
-    <div style={{width:440,flexShrink:0,background:'#0D1B2A',display:'flex',flexDirection:'column',overflow:'hidden',borderLeft:'1px solid #243447'}}>
+    <div style={{width:mobileP?'100%':440,flexShrink:mobileP?1:0,...(mobileP?{flex:1,minWidth:0}:{}),background:'#0D1B2A',display:'flex',flexDirection:'column',overflow:'hidden',borderLeft:mobileP?'none':'1px solid #243447'}}>
 
       {/* Header */}
       <div style={{padding:'14px 16px',borderBottom:'1px solid #243447',background:'#162436',display:'flex',alignItems:'center',gap:10,flexShrink:0}}>
@@ -601,6 +602,7 @@ function ProjectDetail({project,items,setItems,projects,milestones,setMilestones
   )
 }
 function Projects({items,setItems,projects,setProjects,milestones,setMilestones,tasks,setTasks}:{items:any[],setItems:any,projects:any[],setProjects:any,milestones:any[],setMilestones:any,tasks:any[],setTasks:any}) {
+  const mobile=useIsMobile()
   const [adding,setAdding]=useState(false)
   const [editing,setEditing]=useState(null)
   const [saving,setSaving]=useState(false)
@@ -746,7 +748,7 @@ function Projects({items,setItems,projects,setProjects,milestones,setMilestones,
     <div style={{display:'flex',height:'100%',overflow:'hidden'}}>
 
       {/* Project list */}
-      <div style={{flex:1,display:'flex',flexDirection:'column',overflow:'hidden',borderRight:selectedProject?'1px solid #243447':'none'}}>
+      <div style={{flex:1,minWidth:0,display:(mobile&&selectedProject)?'none':'flex',flexDirection:'column',overflow:'hidden',borderRight:(selectedProject&&!mobile)?'1px solid #243447':'none'}}>
 
         {/* Controls */}
         <div style={{display:'flex',gap:8,padding:'10px 20px',borderBottom:'1px solid #243447',alignItems:'center',background:'#162436',flexWrap:'wrap' as const}}>
