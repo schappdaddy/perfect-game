@@ -1572,8 +1572,11 @@ function Roadmap({items,setItems,projects,setProjects,milestones}:{items:any[],p
   const [showSettings,setShowSettings]=useState(false)
   const [codeFreezeStart,setCodeFreezeStart]=useState('2026-10-01')
   const [codeFreezeEnd,setCodeFreezeEnd]=useState('2026-12-31')
+  const mobileR=useIsMobile()
   const [backlogOpen,setBacklogOpen]=useState(true)
   const [discussionOpen,setDiscussionOpen]=useState(true)
+  // On mobile, side panels start collapsed so the Gantt owns the screen
+  useEffect(()=>{if(mobileR){setBacklogOpen(false);setDiscussionOpen(false)}},[mobileR])
   const [discussNoteId,setDiscussNoteId]=useState(null)
   const [discussNoteDraft,setDiscussNoteDraft]=useState('')
   const [detailItem,setDetailItem]=useState(null)
@@ -1848,7 +1851,7 @@ function Roadmap({items,setItems,projects,setProjects,milestones}:{items:any[],p
       <div style={{display:'flex',gap:8,padding:'10px 20px',borderBottom:'1px solid #243447',alignItems:'center',background:'#162436',flexWrap:'wrap' as const}}>
         <select value={ft} onChange={e=>setFt(e.target.value)} style={sel}><option value="All">All Teams</option>{TEAMS.map(t=><option key={t}>{t}</option>)}</select>
         <div style={{display:'flex',gap:3}}>
-          {[['week','Week'],['month','Month'],['quarter','Quarter'],['year','Year']].map(([k,label])=>(
+          {(mobileR?[['month','Month'],['quarter','Quarter']]:[['week','Week'],['month','Month'],['quarter','Quarter'],['year','Year']]).map(([k,label])=>(
             <button key={k} onClick={()=>setView(k)} style={{background:view===k?'#C8973A':'#1E3048',color:view===k?'#0D1B2A':'#7A8FA6',border:`1px solid ${view===k?'#C8973A':'#243447'}`,borderRadius:6,padding:'4px 12px',fontSize:12,cursor:'pointer',fontWeight:view===k?700:400}}>{label}</button>
           ))}
         </div>
@@ -1860,7 +1863,7 @@ function Roadmap({items,setItems,projects,setProjects,milestones}:{items:any[],p
             ))}
           </div>
         </div>
-        <div style={{display:'flex',alignItems:'center',gap:6}}>
+        {!mobileR&&<div style={{display:'flex',alignItems:'center',gap:6}}>
           <span style={{fontSize:11,color:'#7A8FA6'}}>Sort</span>
           <select value={sortBy} onChange={e=>setSortBy(e.target.value)} style={{...sel,fontSize:11,padding:'4px 8px'}}>
             <option value="start_date">Start Date</option>
@@ -1869,19 +1872,19 @@ function Roadmap({items,setItems,projects,setProjects,milestones}:{items:any[],p
             <option value="rag">RAG Status</option>
           </select>
           <button onClick={()=>setSortDir(d=>d==='asc'?'desc':'asc')} style={{...sel,fontSize:13,padding:'3px 10px'}}>{sortDir==='asc'?'↑':'↓'}</button>
-        </div>
-        <div style={{display:'flex',alignItems:'center',gap:6}}>
+        </div>}
+        {!mobileR&&<div style={{display:'flex',alignItems:'center',gap:6}}>
           <span style={{fontSize:12,color:'#7A8FA6'}}>Zoom</span>
           <input type="range" min={0.5} max={3} step={0.1} value={zoom} onChange={e=>setZoom(parseFloat(e.target.value))} style={{width:90,accentColor:'#C8973A'}}/>
           <button onClick={()=>setZoom(1)} style={{...sel,fontSize:11,padding:'3px 8px'}}>Fit</button>
-        </div>
-        <div style={{display:'flex',gap:6}}>
+        </div>}
+        {!mobileR&&<div style={{display:'flex',gap:6}}>
           <button onClick={expandAll} style={{...sel,fontSize:11,padding:'3px 10px'}}>Expand All</button>
           <button onClick={collapseAll} style={{...sel,fontSize:11,padding:'3px 10px'}}>Collapse All</button>
-        </div>
-        <button onClick={()=>setShowSettings(true)} style={{...sel,fontSize:11,padding:'4px 10px',color:'#E74C3C',border:'1px solid #E74C3C'}}>🔒 Code Freeze</button>
+        </div>}
+        {!mobileR&&<button onClick={()=>setShowSettings(true)} style={{...sel,fontSize:11,padding:'4px 10px',color:'#E74C3C',border:'1px solid #E74C3C'}}>🔒 Code Freeze</button>}
         {totalViolations>0&&<div style={{background:'rgba(192,57,43,0.15)',border:'1px solid rgba(192,57,43,0.4)',borderRadius:6,padding:'4px 10px',fontSize:11,color:'#E74C3C'}}>⚠️ {totalViolations} violation{totalViolations!==1?'s':''}</div>}
-        <div style={{display:'flex',gap:10,fontSize:11,marginLeft:'auto',color:'#7A8FA6',alignItems:'center'}}>
+        {!mobileR&&<div style={{display:'flex',gap:10,fontSize:11,marginLeft:'auto',color:'#7A8FA6',alignItems:'center'}}>
           <span style={{whiteSpace:'nowrap' as const}}>{groups.length} projects · {withDates.length} committed · {uncommitted.length} backlog</span>
           <span style={{display:'flex',gap:8,flexWrap:'wrap' as const,alignItems:'center',justifyContent:'flex-end',opacity:0.85}}>
             {[...new Set(withDates.map(i=>i.status).filter(Boolean))].map((st:any)=>(
@@ -1889,7 +1892,7 @@ function Roadmap({items,setItems,projects,setProjects,milestones}:{items:any[],p
             ))}
           </span>
           <span style={{display:'flex',alignItems:'center',gap:3}}><span style={{width:2,height:10,background:'#E74C3C',display:'inline-block'}}/> Today</span>
-        </div>
+        </div>}
       </div>
 
       <div style={{display:'flex',flex:1,overflow:'hidden'}}>
