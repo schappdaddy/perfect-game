@@ -3807,7 +3807,7 @@ function DoneTab({items,setItems,projects,setProjects}:{items:any[],setItems:any
   )
 }
 
-export default function DeckTech() {
+export default function PerfectGame() {
   const [items,setItems]=useState([])
   const [projects,setProjects]=useState([])
   const [milestones,setMilestones]=useState([])
@@ -3892,7 +3892,7 @@ useEffect(()=>{
   if(loading) return(
     <div style={{height:'100vh',background:'#0D1B2A',display:'flex',alignItems:'center',justifyContent:'center',flexDirection:'column',gap:16}}>
       <div style={{width:40,height:40,borderRadius:'50%',border:'3px solid #243447',borderTopColor:'#C8973A',animation:'spin 0.8s linear infinite'}}/>
-      <div style={{color:'#7A8FA6',fontSize:13}}>Loading DeckTech...</div>
+      <div style={{color:'#7A8FA6',fontSize:13}}>Loading Perfect Game...</div>
       <style>{`@keyframes spin{to{transform:rotate(360deg)}}`}</style>
     </div>
   )
@@ -3905,7 +3905,7 @@ useEffect(()=>{
             <div style={{width:16,height:16,borderRadius:'50%',border:'1.5px solid #C8973A',borderTopColor:'transparent',transform:'rotate(45deg)'}}/>
           </div>
           <div>
-            <div style={{fontSize:13,fontWeight:800,letterSpacing:2,color:'#F4F6F8',lineHeight:1}}>DECKTECH</div>
+            <div style={{fontSize:13,fontWeight:800,letterSpacing:2,color:'#F4F6F8',lineHeight:1}}>PERFECT GAME</div>
             <div style={{fontSize:9,color:'#C8973A',letterSpacing:3,lineHeight:1.4}}>TRUST THE PROCESS</div>
           </div>
         </div>
