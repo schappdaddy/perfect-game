@@ -13,6 +13,11 @@ const T = {
 
 const PRIORITIES=['P1','P2','P3','P4','Backlog']
 const STATUSES=['New','Need Requirements','Under Review','Accepted','Ready','In Progress','Testing','Blocked','Done','Awaiting Vendor Deliverable','Will Not Implement']
+const HOME_STATUSES=['To Do','In Progress','Waiting','Done',"Won't Do"]
+const HOME_PROJECT_STATUSES=['Planning','In Progress','Waiting','Done','Cancelled']
+const spaceOf=(x:any)=>(x?.space||'work')
+const statusesFor=(space:string)=>space==='home'?HOME_STATUSES:STATUSES
+const projectStatusesFor=(space:string)=>space==='home'?HOME_PROJECT_STATUSES:PROJECT_STATUSES
 const PROJECT_STATUSES=['Queued','Planning','In Progress','Testing','On Hold','Complete','Cancelled']
 const TEAMS=['Consumer Experience','Operational Efficiency']
 const EFFORTS=['S','M','L','XL']
@@ -29,8 +34,8 @@ function pc(p) {
   return {bg:'#1E3048',text:'#7A8FA6'}
 }
 // Terminal statuses — these move records to the Done tab and out of working views
-const ITEM_TERMINAL=['Done','Will Not Implement']
-const PROJECT_TERMINAL=['Complete','Cancelled']
+const ITEM_TERMINAL=['Done','Will Not Implement',"Won't Do"]
+const PROJECT_TERMINAL=['Complete','Cancelled','Done'] // 'Done' is the home-space project terminal
 const isItemDone=(i:any)=>ITEM_TERMINAL.includes(i?.status)
 const isProjectDone=(p:any)=>PROJECT_TERMINAL.includes(p?.status)
 // Set an item's status; if terminal, retire its rank and compact remaining ranks
@@ -81,11 +86,11 @@ function flagDev(i:any){return i.flagged&&(i.flag_audience==='dev'||i.flag_audie
 function flagStk(i:any){return i.flagged&&(i.flag_audience==='stakeholder'||i.flag_audience==='both'||!i.flag_audience)}
 function flagLabel(i:any){return !i.flagged?'':i.flag_audience==='dev'?'D':i.flag_audience==='stakeholder'?'S':'DS'}
 // Project tasks — personal operational reminders attached to projects (never shown to teams/stakeholders)
-async function addProjectTask(setTasks:any,projectId:any,title:string,dueDate:string|null){
+async function addProjectTask(setTasks:any,projectId:any,title:string,dueDate:string|null,space:string='work'){
   // Optimistic: show the task immediately, reconcile with the server row after
-  const temp={id:'tmp-'+Date.now()+'-'+Math.random().toString(36).slice(2,7),project_id:projectId,title:title.trim(),due_date:dueDate||null,done:false,created_at:new Date().toISOString()}
+  const temp={id:'tmp-'+Date.now()+'-'+Math.random().toString(36).slice(2,7),project_id:projectId,title:title.trim(),due_date:dueDate||null,done:false,space,created_at:new Date().toISOString()}
   setTasks((prev:any[])=>[...prev,temp])
-  const{data,error}=await supabase.from('tasks').insert({project_id:projectId,title:temp.title,due_date:temp.due_date,done:false}).select().single()
+  const{data,error}=await supabase.from('tasks').insert({project_id:projectId,title:temp.title,due_date:temp.due_date,done:false,space}).select().single()
   if(error){
     setTasks((prev:any[])=>prev.filter(x=>x.id!==temp.id))
     alert('Failed to add task: '+error.message)
@@ -126,7 +131,7 @@ function useIsMobile(){
 // Request-type glyphs — instant visual ID on item lines
 function rt(t:any){const m:any={'Bug':'🐞','Tech Debt':'🔧','Enhancement':'✨','Strategic Initiative':'🎯','Business Request':'💼','Testing':'🧪'};return m[t]||''}
 function sc(s) {
-  const m={'New':'#5DADE2','Need Requirements':'#E67E22','Under Review':'#E8B95A','Accepted':'#2E86AB','Ready':'#8E44AD','In Progress':'#27AE60','Testing':'#C8973A','Blocked':'#E74C3C','Done':'#16A085','Awaiting Vendor Deliverable':'#7F8FA6','Will Not Implement':'#5C6E80'}
+  const m={'New':'#5DADE2','Need Requirements':'#E67E22','Under Review':'#E8B95A','Accepted':'#2E86AB','Ready':'#8E44AD','In Progress':'#27AE60','Testing':'#C8973A','Blocked':'#E74C3C','Done':'#16A085','Awaiting Vendor Deliverable':'#7F8FA6','Will Not Implement':'#5C6E80','To Do':'#5DADE2','Waiting':'#E8B95A',"Won't Do":'#5C6E80'}
   return m[s]||'#7A8FA6'
 }
 // Sequential item IDs — max existing RTL number + 1. Random IDs collided with real data.
@@ -218,7 +223,7 @@ function ProjectDetail({project,items,setItems,projects,milestones,setMilestones
   const [pdDate,setPdDate]=useState('')
   async function submitPdTask(){
     if(!pdTitle.trim())return
-    const ok=await addProjectTask(setTasks,project.id,pdTitle,pdDate||null)
+    const ok=await addProjectTask(setTasks,project.id,pdTitle,pdDate||null,spaceOf(project))
     if(ok){setPdTitle('');setPdDate('')}
   }
   const [addingItem,setAddingItem]=useState(false)
@@ -254,7 +259,7 @@ function ProjectDetail({project,items,setItems,projects,milestones,setMilestones
       priority:newItem.priority,swimlane:newItem.swimlane,team:project.team,
       effort:newItem.effort,status:newItem.status,request_type:newItem.request_type,
       region:newItem.region,vendor:newItem.vendor,parent_project:project.name,
-      flagged:false,sort_order:items.length,
+      flagged:false,sort_order:items.length,space:spaceOf(project),
     }).select().single()
     if(error){alert('Failed to add item: '+error.message);setSavingItem(false);return}
     if(data) setItems([...items,data])
@@ -266,7 +271,7 @@ function ProjectDetail({project,items,setItems,projects,milestones,setMilestones
     setSavingMilestone(true)
     const{data}=await supabase.from('milestones').insert({
       ...milestoneForm,project_id:project.id,
-      sort_order:projectMilestones.length,
+      sort_order:projectMilestones.length,space:spaceOf(project),
     }).select().single()
     if(data) setMilestones([...milestones,data])
     setSavingMilestone(false);setAddingMilestone(false)
@@ -468,7 +473,7 @@ function ProjectDetail({project,items,setItems,projects,milestones,setMilestones
                   <select value={item.status||''} onClick={e=>e.stopPropagation()}
                     onChange={e=>applyItemStatus(items,setItems,item.id,e.target.value)}
                     style={{background:'#0F1C2B',border:'1px solid #243447',borderRadius:4,color:sc(item.status),fontSize:10,padding:'1px 4px',cursor:'pointer',fontFamily:'inherit'}}>
-                    {STATUSES.map(st=><option key={st} value={st}>{st}</option>)}
+                    {statusesFor(spaceOf(project)).map(st=><option key={st} value={st}>{st}</option>)}
                   </select>
                   <button
                     onClick={async()=>{
@@ -557,7 +562,7 @@ function ProjectDetail({project,items,setItems,projects,milestones,setMilestones
                   <select value={item.status||''} onClick={e=>e.stopPropagation()}
                     onChange={e=>applyItemStatus(items,setItems,item.id,e.target.value)}
                     style={{background:'#0F1C2B',border:'1px solid #243447',borderRadius:4,color:sc(item.status),fontSize:10,padding:'1px 4px',cursor:'pointer',fontFamily:'inherit',flexShrink:0}}>
-                    {STATUSES.map(st=><option key={st} value={st}>{st}</option>)}
+                    {statusesFor(spaceOf(project)).map(st=><option key={st} value={st}>{st}</option>)}
                   </select>
                   <button
                     onClick={async()=>{
@@ -591,7 +596,7 @@ function ProjectDetail({project,items,setItems,projects,milestones,setMilestones
                 <select value={item.status||''} onClick={e=>e.stopPropagation()}
                   onChange={e=>applyItemStatus(items,setItems,item.id,e.target.value)}
                   style={{background:'#0F1C2B',border:'1px solid #243447',borderRadius:4,color:'#16A085',fontSize:10,padding:'1px 4px',cursor:'pointer',fontFamily:'inherit',flexShrink:0}}>
-                  {STATUSES.map(st=><option key={st} value={st}>{st}</option>)}
+                  {statusesFor(spaceOf(project)).map(st=><option key={st} value={st}>{st}</option>)}
                 </select>
               </div>
             ))}
@@ -601,7 +606,7 @@ function ProjectDetail({project,items,setItems,projects,milestones,setMilestones
     </div>
   )
 }
-function Projects({items,setItems,projects,setProjects,milestones,setMilestones,tasks,setTasks}:{items:any[],setItems:any,projects:any[],setProjects:any,milestones:any[],setMilestones:any,tasks:any[],setTasks:any}) {
+function Projects({items,setItems,projects,setProjects,milestones,setMilestones,tasks,setTasks,space}:{items:any[],setItems:any,projects:any[],setProjects:any,milestones:any[],setMilestones:any,tasks:any[],setTasks:any,space:string}) {
   const mobile=useIsMobile()
   const [adding,setAdding]=useState(false)
   const [editing,setEditing]=useState(null)
@@ -683,7 +688,7 @@ function Projects({items,setItems,projects,setProjects,milestones,setMilestones,
       await maybeCloseItems(editing,payload.status)
       setEditing(null)
     } else {
-      const{data,error}=await supabase.from('projects').insert({...payload,sort_order:projects.length}).select().single()
+      const{data,error}=await supabase.from('projects').insert({...payload,sort_order:projects.length,space}).select().single()
       if(error){alert('Failed to create project: '+error.message);setSaving(false);return}
       if(data) setProjects([...projects,data])
       setAdding(false)
@@ -703,7 +708,8 @@ function Projects({items,setItems,projects,setProjects,milestones,setMilestones,
     if(!PROJECT_TERMINAL.includes(newStatus)||PROJECT_TERMINAL.includes(project.status)) return
     const open=items.filter(i=>i.parent_project===project.name&&!ITEM_TERMINAL.includes(i.status))
     if(!open.length) return
-    const itemStatus=newStatus==='Cancelled'?'Will Not Implement':'Done'
+    const home=spaceOf(project)==='home'
+    const itemStatus=newStatus==='Cancelled'?(home?"Won't Do":'Will Not Implement'):'Done'
     const yes=confirm(`"${project.name}" is now ${newStatus}. Also mark its ${open.length} open item${open.length!==1?'s':''} as ${itemStatus}?\n\nOK — close the items (they move to the Done tab)\nCancel — leave them in the backlog`)
     if(yes) await closeItemsForProject(items,setItems,project.name,itemStatus)
   }
@@ -724,7 +730,7 @@ function Projects({items,setItems,projects,setProjects,milestones,setMilestones,
   async function saveMilestone(){
     if(!milestoneForm.name.trim()||!milestoneForm.date||!selectedProject) return
     setSavingMilestone(true)
-    const{data}=await supabase.from('milestones').insert({...milestoneForm,project_id:selectedProject.id,sort_order:milestones.filter(m=>m.project_id===selectedProject.id).length}).select().single()
+    const{data}=await supabase.from('milestones').insert({...milestoneForm,project_id:selectedProject.id,sort_order:milestones.filter(m=>m.project_id===selectedProject.id).length,space:spaceOf(selectedProject)}).select().single()
     if(data) setMilestones([...milestones,data])
     setSavingMilestone(false);setAddingMilestone(false)
     setMilestoneForm({name:'',date:'',type:'Milestone',color:'#C8973A',notes:'',completed:false})
@@ -879,7 +885,7 @@ function Projects({items,setItems,projects,setProjects,milestones,setMilestones,
                     ))}
                   </div>
                   <select value={project.status} onChange={e=>updateField(project.id,'status',e.target.value)} style={{...sel,fontSize:11,padding:'2px 5px'}}>
-                    {PROJECT_STATUSES.map(s=><option key={s}>{s}</option>)}
+                    {projectStatusesFor(space).map(s=><option key={s}>{s}</option>)}
                   </select>
                   <select value={project.priority} onChange={e=>updateField(project.id,'priority',e.target.value)} style={{...sel,fontSize:11,padding:'2px 5px'}}>
                     {PRIORITIES.map(p=><option key={p}>{p}</option>)}
@@ -946,7 +952,7 @@ function Projects({items,setItems,projects,setProjects,milestones,setMilestones,
                   style={{width:'100%',background:'#1E3048',color:'#F4F6F8',border:'1px solid #243447',borderRadius:6,padding:'8px 10px',fontSize:13,boxSizing:'border-box' as const,resize:'vertical' as const,fontFamily:'inherit'}}/>
               </div>
               <div style={{display:'grid',gridTemplateColumns:'1fr 1fr',gap:12}}>
-                {([['Priority','priority',PRIORITIES],['Status','status',PROJECT_STATUSES],['Team','team',TEAMS]] as [string,string,string[]][]).map(([label,field,opts])=>(
+                {([['Priority','priority',PRIORITIES],['Status','status',projectStatusesFor(space)],['Team','team',TEAMS]] as [string,string,string[]][]).map(([label,field,opts])=>(
                   <div key={field}>
                     <div style={{fontSize:11,color:'#7A8FA6',marginBottom:4}}>{label}</div>
                     <select value={form[field]} onChange={e=>setForm(p=>({...p,[field]:e.target.value}))}
@@ -1023,7 +1029,7 @@ function PanelField({label,field,type='text',selected,upd}:{label:string,field:s
   )
 }
 
-function Backlog({items,setItems,projects,setProjects}:{items:any[],setItems:any,projects:any[],setProjects:any}) {
+function Backlog({items,setItems,projects,setProjects,space}:{items:any[],setItems:any,projects:any[],setProjects:any,space:string}) {
  const [ft,setFt]=useState('All')
   const [fp,setFp]=useState('All')
   const [fs,setFs]=useState('All')
@@ -1048,7 +1054,8 @@ function Backlog({items,setItems,projects,setProjects}:{items:any[],setItems:any
   const [ni,setNi]=useState({name:'',priority:'P3',swimlane:'POS',team:'Consumer Experience',effort:'M',status:'New',request_type:'Bug',region:'',vendor:'Deckers',description:''})
   const [vendors,setVendors]=useState(['Deckers','Salesforce','GreyOrange','Legion','SafeSize','ID.me','Adyen','Agilence','Boomi'])
   const [swimlaneOpts,setSwimOpts]=useState([...SWIMLANES])
-  const [statusOpts,setStatusOpts]=useState([...STATUSES])
+  const [statusOpts,setStatusOpts]=useState([...statusesFor(space)])
+  useEffect(()=>{setStatusOpts([...statusesFor(space)])},[space])
   const [rtOpts,setRtOpts]=useState([...REQUEST_TYPES])
   const [regionOpts,setRegionOpts]=useState(['North America','EMEA','Japan','China','Global','NA/EMEA/JP'])
 
@@ -1225,7 +1232,7 @@ const sorted=items.filter(i=>!isItemDone(i)).sort((a,b)=>{
     if(!ni.name.trim()) return
     setSav(true)
     const iid=nextItemId(items)
-    const{data,error}=await supabase.from('items').insert({item_id:iid,name:ni.name,description:ni.description,priority:ni.priority,swimlane:ni.swimlane,team:ni.team,effort:ni.effort,status:ni.status,request_type:ni.request_type,region:ni.region,vendor:ni.vendor,flagged:false,sort_order:items.length}).select().single()
+    const{data,error}=await supabase.from('items').insert({item_id:iid,name:ni.name,description:ni.description,priority:ni.priority,swimlane:ni.swimlane,team:ni.team,effort:ni.effort,status:ni.status,request_type:ni.request_type,region:ni.region,vendor:ni.vendor,flagged:false,sort_order:items.length,space}).select().single()
     if(error){alert('Failed to add item: '+error.message);setSav(false);return}
     if(data) setItems([...items,data])
     setSav(false);setAi(false)
@@ -3033,7 +3040,11 @@ function crumbAge(dateStr:string){
   return Math.floor((Date.now()-+d)/86400000)
 }
 
-function Desk({items,setItems,projects,milestones,setMilestones,tasks,setTasks}:{items:any[],setItems:any,projects:any[],milestones:any[],setMilestones:any,tasks:any[],setTasks:any}) {
+function Desk({items,setItems,projects,milestones,setMilestones,tasks,setTasks,space}:{items:any[],setItems:any,projects:any[],milestones:any[],setMilestones:any,tasks:any[],setTasks:any,space:string}) {
+  const [deskSpace,setDeskSpace]=useState(space) // work | home | both — Desk is the one place worlds can meet
+  useEffect(()=>{setDeskSpace(space)},[space])
+  const inDeskSpace=(x:any)=>deskSpace==='both'?true:spaceOf(x)===deskSpace
+  const homeTag=(x:any)=>deskSpace==='both'&&spaceOf(x)==='home'
   async function unflagDev(item:any){
     // dev-only flag clears; a 'both' flag downgrades to stakeholder-only
     const next=(item.flag_audience==='both')?{flagged:true,flag_audience:'stakeholder'}:{flagged:false,flag_audience:null}
@@ -3080,6 +3091,7 @@ function Desk({items,setItems,projects,milestones,setMilestones,tasks,setTasks}:
     await supabase.from('tasks').update(upd).eq('id',t.id)
   }
   const [ntProj,setNtProj]=useState('')
+  const [ntSpace,setNtSpace]=useState('work')
   const [ntTitle,setNtTitle]=useState('')
   const [ntDate,setNtDate]=useState('')
   const [mvTitle,setMvTitle]=useState('')
@@ -3092,24 +3104,26 @@ function Desk({items,setItems,projects,milestones,setMilestones,tasks,setTasks}:
     const iid=nextItemId(items)
     const{data,error}=await supabase.from('items').insert({
       item_id:iid,name:qiName.trim(),description:'',priority:qiPri,request_type:qiType,
-      swimlane:'POS',team:projView.team||'Consumer Experience',effort:'M',status:'New',
-      region:'',vendor:'Deckers',parent_project:projView.name,flagged:false,sort_order:items.length,
+      swimlane:'POS',team:projView.team||'Consumer Experience',effort:'M',status:spaceOf(projView)==='home'?'To Do':'New',
+      region:'',vendor:'Deckers',parent_project:projView.name,flagged:false,sort_order:items.length,space:spaceOf(projView),
     }).select().single()
     if(error){alert('Failed to add item: '+error.message);return}
     if(data){setItems((prev:any[])=>[...prev,data]);setQiName('');setQiPri('P3');setQiType('Bug')}
   }
   async function submitModalTask(){
     if(!mvTitle.trim()||!projView)return
-    const ok=await addProjectTask(setTasks,projView.id,mvTitle,mvDate||null)
+    const ok=await addProjectTask(setTasks,projView.id,mvTitle,mvDate||null,spaceOf(projView))
     if(ok){setMvTitle('');setMvDate('')}
   }
   async function submitTask(){
     if(!ntTitle.trim())return
-    const ok=await addProjectTask(setTasks,ntProj||null,ntTitle,ntDate||null)
+    const proj=ntProj?projects.find(p=>p.id===ntProj):null
+    const tSpace=proj?spaceOf(proj):(deskSpace==='home'?'home':deskSpace==='work'?'work':ntSpace)
+    const ok=await addProjectTask(setTasks,ntProj||null,ntTitle,ntDate||null,tSpace)
     if(ok){setNtTitle('');setNtDate('')}
   }
-  const openTasks=[...tasks].filter(t=>!t.done).sort((a,b)=>(a.due_date||'9999')<(b.due_date||'9999')?-1:1)
-  const doneTasks=tasks.filter(t=>t.done)
+  const openTasks=[...tasks].filter(inDeskSpace).filter(t=>!t.done).sort((a,b)=>(a.due_date||'9999')<(b.due_date||'9999')?-1:1)
+  const doneTasks=tasks.filter(inDeskSpace).filter(t=>t.done)
   async function toggleMs(m:any){
     const v=!m.completed
     setMilestones((prev:any[])=>prev.map(x=>x.id===m.id?{...x,completed:v}:x))
@@ -3117,7 +3131,7 @@ function Desk({items,setItems,projects,milestones,setMilestones,tasks,setTasks}:
   }
   async function addMs(){
     if(!msName.trim()||!msDate||!projView) return
-    const{data,error}=await supabase.from('milestones').insert({project_id:projView.id,name:msName.trim(),date:msDate,type:'milestone',completed:false,sort_order:milestones.filter(m=>m.project_id===projView.id).length}).select().single()
+    const{data,error}=await supabase.from('milestones').insert({project_id:projView.id,name:msName.trim(),date:msDate,type:'milestone',completed:false,sort_order:milestones.filter(m=>m.project_id===projView.id).length,space:spaceOf(projView)}).select().single()
     if(error){alert('Failed to add milestone: '+error.message);return}
     if(data){setMilestones((prev:any[])=>[...prev,data]);setMsName('');setMsDate('')}
   }
@@ -3134,6 +3148,8 @@ function Desk({items,setItems,projects,milestones,setMilestones,tasks,setTasks}:
   },[date])
   const [noteId,setNoteId]=useState<any>(null)
   const [content,setContent]=useState('')
+  const [bothNoteSpace,setBothNoteSpace]=useState('work')
+  const noteSpace=deskSpace==='both'?bothNoteSpace:deskSpace
   const [raw,setRaw]=useState(false)
   const [savedAt,setSavedAt]=useState<any>(null)
   const saveTimer=useRef<any>(null)
@@ -3143,14 +3159,14 @@ function Desk({items,setItems,projects,milestones,setMilestones,tasks,setTasks}:
   useEffect(()=>{(async()=>{
     const{data}=await supabase.from('daily_notes').select('*').order('note_date',{ascending:false})
     const rows=data||[]
-    const exact=rows.find((r:any)=>r.note_date===date)
+    const exact=rows.find((r:any)=>r.note_date===date&&spaceOf(r)===noteSpace)
     if(exact){setNoteId(exact.id);setContent(exact.content||'')}
     else{
       setNoteId(null)
       setContent('')
     }
     setSavedAt(null)
-  })()},[date])
+  })()},[date,noteSpace])
 
   useEffect(()=>{
     if(pendingFocus.current!=null){
@@ -3169,7 +3185,7 @@ function Desk({items,setItems,projects,milestones,setMilestones,tasks,setTasks}:
         const{error}=await supabase.from('daily_notes').update({content:next,updated_at:new Date().toISOString()}).eq('id',noteId)
         if(!error)setSavedAt(new Date())
       }else{
-        const{data,error}=await supabase.from('daily_notes').insert({note_date:date,content:next}).select().single()
+        const{data,error}=await supabase.from('daily_notes').insert({note_date:date,content:next,space:noteSpace}).select().single()
         if(error){if(!String(error.message).includes('duplicate'))alert('Save failed: '+error.message);return}
         if(data){setNoteId(data.id);setSavedAt(new Date())}
       }
@@ -3213,16 +3229,16 @@ function Desk({items,setItems,projects,milestones,setMilestones,tasks,setTasks}:
 
   const now=new Date();now.setHours(0,0,0,0)
   const in14=+now+14*86400000, in7=+now+7*86400000
-  const upMs=milestones.filter(m=>!m.completed&&+new Date(m.date+'T12:00:00')>=+now&&+new Date(m.date+'T12:00:00')<=in14)
+  const upMs=milestones.filter(inDeskSpace).filter(m=>!m.completed&&+new Date(m.date+'T12:00:00')>=+now&&+new Date(m.date+'T12:00:00')<=in14)
     .sort((a,b)=>a.date<b.date?-1:1)
-  const flaggedDevL=items.filter(flagDev)
-  const flaggedStkL=items.filter(flagStk)
-  const vend=items.filter(i=>i.vendor_delivery_date&&+new Date(i.vendor_delivery_date+'T12:00:00')<=in7&&!/done|complete|closed|cancel/i.test(i.status||''))
+  const flaggedDevL=items.filter(inDeskSpace).filter(flagDev)
+  const flaggedStkL=items.filter(inDeskSpace).filter(flagStk)
+  const vend=items.filter(inDeskSpace).filter(i=>i.vendor_delivery_date&&+new Date(i.vendor_delivery_date+'T12:00:00')<=in7&&!/done|complete|closed|cancel/i.test(i.status||''))
     .sort((a,b)=>a.vendor_delivery_date<b.vendor_delivery_date?-1:1)
   const in5=+now+5*86400000
-  const dueSoon=items.filter(i=>i.end_date&&+new Date(i.end_date+'T12:00:00')<=in5&&!/done|complete|closed|cancel|will not/i.test(i.status||''))
+  const dueSoon=items.filter(inDeskSpace).filter(i=>i.end_date&&+new Date(i.end_date+'T12:00:00')<=in5&&!ITEM_TERMINAL.includes(i.status))
     .sort((a,b)=>a.end_date<b.end_date?-1:1)
-  const activeProjects=[...projects].filter(p=>p.status!=='Complete'&&p.status!=='Cancelled').sort((a,b)=>(a.sort_order??999)-(b.sort_order??999))
+  const activeProjects=[...projects].filter(inDeskSpace).filter(p=>!PROJECT_TERMINAL.includes(p.status)).sort((a,b)=>(a.sort_order??999)-(b.sort_order??999))
   const projItems=(p:any)=>items.filter(i=>i.parent_project===p.name&&!/done|complete|closed|cancel|will not/i.test(i.status||''))
     .sort((a:any,b:any)=>((PRIORITY_ORDER[a.priority]??4)-(PRIORITY_ORDER[b.priority]??4))||((a.committed_priority??999)-(b.committed_priority??999)))
   const fmtDt=(str:string)=>new Date(str+'T12:00:00').toLocaleDateString('default',{month:'short',day:'numeric'})
@@ -3283,8 +3299,22 @@ function Desk({items,setItems,projects,milestones,setMilestones,tasks,setTasks}:
           <div style={{fontSize:17,fontWeight:800}}>{dispDate}{isToday&&<span style={{fontSize:11,color:'#C8973A',marginLeft:8}}>TODAY</span>}</div>
           <button onClick={()=>shiftDate(1)} style={{background:'#1E3048',border:'1px solid #243447',borderRadius:6,color:'#7A8FA6',padding:'4px 10px',cursor:'pointer'}}>›</button>
           {!isToday&&<button onClick={()=>setDate(localISO(new Date()))} style={{background:'none',border:'1px solid #243447',borderRadius:6,color:'#C8973A',padding:'4px 10px',fontSize:11,cursor:'pointer'}}>Today</button>}
+          <div style={{display:'flex',gap:3,marginLeft:8}}>
+            {([['work','🏢'],['home','🏠'],['both','⊕']] as [string,string][]).map(([k,icon])=>(
+              <button key={k} onClick={()=>setDeskSpace(k)} title={k==='both'?'Combined view':k[0].toUpperCase()+k.slice(1)}
+                style={{background:deskSpace===k?'#C8973A':'transparent',color:deskSpace===k?'#0D1B2A':'#7A8FA6',border:'1px solid '+(deskSpace===k?'#C8973A':'#243447'),borderRadius:6,padding:'3px 9px',fontSize:12,fontWeight:700,cursor:'pointer'}}>{icon}</button>
+            ))}
+          </div>
           <span style={{marginLeft:'auto',fontSize:10,color:'#7A8FA6'}}>{savedAt?`Saved ${savedAt.toLocaleTimeString()}`:''}</span>
-<button onClick={()=>setRaw(r=>!r)} style={{background:raw?'#C8973A':'#1E3048',border:'1px solid #243447',borderRadius:6,color:raw?'#0D1B2A':'#7A8FA6',padding:'4px 14px',fontSize:11,fontWeight:700,cursor:'pointer'}}>{raw?'Done':'Raw'}</button>
+{deskSpace==='both'&&(
+            <div style={{display:'flex',gap:3,marginRight:8}}>
+              {([['work','🏢 Work note'],['home','🏠 Home note']] as [string,string][]).map(([k,label])=>(
+                <button key={k} onClick={()=>setBothNoteSpace(k)}
+                  style={{background:bothNoteSpace===k?'#1E3048':'transparent',color:bothNoteSpace===k?'#F4F6F8':'#7A8FA6',border:'1px solid '+(bothNoteSpace===k?'#3A4A5E':'#243447'),borderRadius:6,padding:'4px 10px',fontSize:11,fontWeight:700,cursor:'pointer'}}>{label}</button>
+              ))}
+            </div>
+          )}
+          <button onClick={()=>setRaw(r=>!r)} style={{background:raw?'#C8973A':'#1E3048',border:'1px solid #243447',borderRadius:6,color:raw?'#0D1B2A':'#7A8FA6',padding:'4px 14px',fontSize:11,fontWeight:700,cursor:'pointer'}}>{raw?'Done':'Raw'}</button>
         </div>
         {/* Project tasks — dated reminders attached to projects */}
         <div style={{background:'#12202F',border:'1px solid #243447',borderRadius:10,padding:'10px 14px',marginBottom:12,maxHeight:'38%',display:'flex',flexDirection:'column' as const}}>
@@ -3302,7 +3332,7 @@ function Desk({items,setItems,projects,milestones,setMilestones,tasks,setTasks}:
                 return(
                   <div key={t.id} style={{display:'flex',alignItems:'center',gap:8,padding:'3px 0'}}>
                     <input type="checkbox" checked={false} onChange={()=>toggleProjectTask(setTasks,t)} style={{cursor:'pointer',flexShrink:0}}/>
-                    <span style={{fontSize:13,color:'#F4F6F8',flex:1,minWidth:0,overflow:'hidden',whiteSpace:'nowrap' as const,textOverflow:'ellipsis'}}>{t.title}</span>
+                    <span style={{fontSize:13,color:'#F4F6F8',flex:1,minWidth:0,overflow:'hidden',whiteSpace:'nowrap' as const,textOverflow:'ellipsis'}}>{homeTag(t)?'🏠 ':''}{t.title}</span>
                     {pr
                       ?<span style={{fontSize:10,color:'#7A8FA6',background:'#1E3048',borderLeft:`3px solid ${pr.color||'#3A4A5E'}`,borderRadius:3,padding:'1px 7px',flexShrink:0,maxWidth:180,overflow:'hidden',whiteSpace:'nowrap' as const,textOverflow:'ellipsis'}}>{pr.name}</span>
                       :<span style={{fontSize:10,color:'#5C6E80',background:'#0F1C2B',border:'1px solid #243447',borderRadius:3,padding:'1px 7px',flexShrink:0}}>General</span>}
@@ -3333,8 +3363,14 @@ function Desk({items,setItems,projects,milestones,setMilestones,tasks,setTasks}:
             <div style={{display:'flex',gap:6,marginTop:8,flexShrink:0}}>
               <select value={ntProj} onChange={e=>setNtProj(e.target.value)} style={{background:'#0D1B2A',border:'1px solid #243447',borderRadius:6,color:'#F4F6F8',fontSize:11,padding:'5px 8px',maxWidth:180}}>
                 <option value="">General</option>
-                {activeProjects.map(p=><option key={p.id} value={p.id}>{p.name}</option>)}
+                {activeProjects.map(p=><option key={p.id} value={p.id}>{deskSpace==='both'?(spaceOf(p)==='home'?'🏠 ':'🏢 '):''}{p.name}</option>)}
               </select>
+              {deskSpace==='both'&&!ntProj&&(
+                <select value={ntSpace} onChange={e=>setNtSpace(e.target.value)} title="Space for this general task"
+                  style={{background:'#0D1B2A',border:'1px solid #243447',borderRadius:6,color:'#F4F6F8',fontSize:11,padding:'5px 6px'}}>
+                  <option value="work">🏢</option><option value="home">🏠</option>
+                </select>
+              )}
               <input placeholder="New reminder... (e.g., CCR required for deployment)" value={ntTitle} onChange={e=>setNtTitle(e.target.value)} onKeyDown={e=>{if(e.key==='Enter')submitTask()}}
                 style={{flex:1,background:'#0D1B2A',border:'1px solid #243447',borderRadius:6,color:'#F4F6F8',fontSize:12,padding:'5px 8px'}}/>
               <input type="date" value={ntDate} onChange={e=>setNtDate(e.target.value)} style={{background:'#0D1B2A',border:'1px solid #243447',borderRadius:6,color:'#F4F6F8',fontSize:11,padding:'5px 8px'}}/>
@@ -3586,7 +3622,7 @@ function Desk({items,setItems,projects,milestones,setMilestones,tasks,setTasks}:
                   <span style={{color:'#F4F6F8',flex:1}}>{rt(i.request_type)} {i.name}</span>
                   <select value={i.status||''} onChange={e=>applyItemStatus(items,setItems,i.id,e.target.value)}
                     style={{background:'#0D1B2A',border:'1px solid #243447',borderRadius:4,color:sc(i.status),fontSize:10,padding:'1px 4px',cursor:'pointer',fontFamily:'inherit',flexShrink:0}}>
-                    {STATUSES.map(st=><option key={st} value={st}>{st}</option>)}
+                    {statusesFor(spaceOf(i)).map(st=><option key={st} value={st}>{st}</option>)}
                   </select>
                   {i.end_date&&<span style={{color:'#7A8FA6',fontSize:10,flexShrink:0}}>{i.end_date}</span>}
                   {committedI(i)
@@ -3616,7 +3652,7 @@ function Desk({items,setItems,projects,milestones,setMilestones,tasks,setTasks}:
                         <span style={{color:'#9AABBC',flex:1,textDecoration:'line-through',textDecorationColor:'#3A4A5E'}}>{rt(i.request_type)} {i.name}</span>
                         <select value={i.status||''} onChange={e=>applyItemStatus(items,setItems,i.id,e.target.value)}
                           style={{background:'#0D1B2A',border:'1px solid #243447',borderRadius:4,color:'#16A085',fontSize:10,padding:'1px 4px',cursor:'pointer',fontFamily:'inherit',flexShrink:0}}>
-                          {STATUSES.map(st=><option key={st} value={st}>{st}</option>)}
+                          {statusesFor(spaceOf(i)).map(st=><option key={st} value={st}>{st}</option>)}
                         </select>
                         {i.end_date&&<span style={{color:'#7A8FA6',fontSize:10,flexShrink:0}}>{i.end_date}</span>}
                       </div>
@@ -3712,7 +3748,7 @@ function DoneTab({items,setItems,projects,setProjects}:{items:any[],setItems:any
                         const{error}=await supabase.from('projects').update({status:v}).eq('id',p.id)
                         if(error)alert('Failed to update: '+error.message)
                       }} style={{background:'#1E3048',border:'1px solid #243447',borderRadius:4,color:p.status==='Complete'?'#16A085':'#7A8FA6',fontSize:11,fontWeight:700,padding:'2px 6px',cursor:'pointer',fontFamily:'inherit'}}>
-                        {PROJECT_STATUSES.map(st=><option key={st} value={st}>{st}</option>)}
+                        {projectStatusesFor(spaceOf(p)).map(st=><option key={st} value={st}>{st}</option>)}
                       </select>
                     </td>
                     <td style={TDD}>{p.priority}</td>
@@ -3752,7 +3788,7 @@ function DoneTab({items,setItems,projects,setProjects}:{items:any[],setItems:any
                   <td style={TDD}>
                     <select value={i.status} onChange={e=>applyItemStatus(items,setItems,i.id,e.target.value)}
                       style={{background:'#1E3048',border:'1px solid #243447',borderRadius:4,color:i.status==='Done'?'#16A085':'#7A8FA6',fontSize:11,fontWeight:700,padding:'2px 6px',cursor:'pointer',fontFamily:'inherit'}}>
-                      {STATUSES.map(st=><option key={st} value={st}>{st}</option>)}
+                      {statusesFor(spaceOf(i)).map(st=><option key={st} value={st}>{st}</option>)}
                     </select>
                   </td>
                   <td style={TDD}>{i.priority}</td>
@@ -3778,7 +3814,21 @@ export default function DeckTech() {
   const [tasks,setTasks]=useState<any[]>([])
   const [loading,setLoading]=useState(true)
   const [activeTab,setActiveTab]=useState('desk')
+  const [space,setSpace]=useState('work')
   const mobile=useIsMobile()
+  // Space-scoped views: every tab except Desk sees only the current space.
+  // Scoped setters merge edits back into the full arrays so cross-space data is never dropped.
+  const inSpace=(x:any)=>spaceOf(x)===space
+  const scopedSetter=(setAll:any)=>(u:any)=>setAll((prev:any[])=>{
+    const others=prev.filter(x=>!inSpace(x))
+    const scoped=prev.filter(inSpace)
+    const next=typeof u==='function'?u(scoped):u
+    return[...others,...next]
+  })
+  const sItems=items.filter(inSpace),sProjects=projects.filter(inSpace),sMilestones=milestones.filter(inSpace)
+  const setSItems=scopedSetter(setItems),setSProjects=scopedSetter(setProjects),setSMilestones=scopedSetter(setMilestones)
+  // Teams & Stakeholder are work-only concepts
+  useEffect(()=>{if(space==='home'&&(activeTab==='teams'||activeTab==='stakeholder'))setActiveTab('desk')},[space])
 
 useEffect(()=>{
     async function load(){
@@ -3860,7 +3910,7 @@ useEffect(()=>{
           </div>
         </div>
         <div style={{display:'flex',height:'100%',overflowX:'auto' as const,WebkitOverflowScrolling:'touch' as any}}>
-          {TABS.map(tab=>(
+          {TABS.filter(tab=>space==='work'||!['teams','stakeholder'].includes(tab.key)).map(tab=>(
             <button key={tab.key} onClick={()=>setActiveTab(tab.key)} style={{background:activeTab===tab.key?'#0D1B2A':'transparent',color:activeTab===tab.key?'#F4F6F8':'#7A8FA6',border:'none',borderBottom:activeTab===tab.key?'2px solid #C8973A':'2px solid transparent',padding:mobile?'0 10px':'0 13px',cursor:'pointer',fontSize:12.5,fontWeight:activeTab===tab.key?700:400,display:'flex',alignItems:'center',gap:6,height:'100%',position:'relative',whiteSpace:'nowrap' as const,flexShrink:0}}>
               <span style={{fontSize:mobile?17:15}}>{tab.icon}</span>
               {!mobile&&tab.label}
@@ -3868,18 +3918,26 @@ useEffect(()=>{
             </button>
           ))}
         </div>
-        {!mobile&&<div title="Deckers Brands · Retail Technology" style={{marginLeft:'auto',display:'flex',gap:8,padding:'0 16px',alignItems:'center',fontSize:11,color:'#7A8FA6',whiteSpace:'nowrap' as const}}>
+        <div style={{marginLeft:'auto',display:'flex',gap:4,alignItems:'center',padding:'0 10px',flexShrink:0}}>
+          {([['work','🏢','Work'],['home','🏠','Home']] as [string,string,string][]).map(([k,icon,label])=>(
+            <button key={k} onClick={()=>setSpace(k)}
+              style={{background:space===k?'#C8973A':'transparent',color:space===k?'#0D1B2A':'#7A8FA6',border:'1px solid '+(space===k?'#C8973A':'#243447'),borderRadius:14,padding:mobile?'4px 9px':'4px 12px',fontSize:11,fontWeight:700,cursor:'pointer',whiteSpace:'nowrap' as const}}>
+              {icon}{!mobile&&' '+label}
+            </button>
+          ))}
+        </div>
+        {!mobile&&<div title="Deckers Brands · Retail Technology" style={{display:'flex',gap:8,padding:'0 16px',alignItems:'center',fontSize:11,color:'#7A8FA6',whiteSpace:'nowrap' as const}}>
           <span>{items.length} items · {projects.length} projects · {milestones.length} milestones</span>
         </div>}
       </div>
       <div style={{flex:1,overflow:'hidden'}}>
-        {activeTab==='backlog'&&<Backlog items={items} setItems={setItems} projects={projects} setProjects={setProjects}/>}
-        {activeTab==='projects'&&<Projects items={items} setItems={setItems} projects={projects} setProjects={setProjects} milestones={milestones} setMilestones={setMilestones} tasks={tasks} setTasks={setTasks}/>}
-{activeTab==='roadmap'&&<Roadmap items={items} setItems={setItems} projects={projects} setProjects={setProjects} milestones={milestones}/>}
-        {activeTab==='teams'&&<Teams items={items} projects={projects} milestones={milestones}/>}
-        {activeTab==='desk'&&<Desk items={items} setItems={setItems} projects={projects} milestones={milestones} setMilestones={setMilestones} tasks={tasks} setTasks={setTasks}/>}
-        {activeTab==='stakeholder'&&<Stakeholder items={items} projects={projects} milestones={milestones}/>}
-        {activeTab==='done'&&<DoneTab items={items} setItems={setItems} projects={projects} setProjects={setProjects}/>}
+        {activeTab==='backlog'&&<Backlog items={sItems} setItems={setSItems} projects={sProjects} setProjects={setSProjects} space={space}/>}
+        {activeTab==='projects'&&<Projects items={sItems} setItems={setSItems} projects={sProjects} setProjects={setSProjects} milestones={sMilestones} setMilestones={setSMilestones} tasks={tasks} setTasks={setTasks} space={space}/>}
+{activeTab==='roadmap'&&<Roadmap items={sItems} setItems={setSItems} projects={sProjects} setProjects={setSProjects} milestones={sMilestones}/>}
+        {activeTab==='teams'&&<Teams items={sItems} projects={sProjects} milestones={sMilestones}/>}
+        {activeTab==='desk'&&<Desk items={items} setItems={setItems} projects={projects} milestones={milestones} setMilestones={setMilestones} tasks={tasks} setTasks={setTasks} space={space}/>}
+        {activeTab==='stakeholder'&&<Stakeholder items={sItems} projects={sProjects} milestones={sMilestones}/>}
+        {activeTab==='done'&&<DoneTab items={sItems} setItems={setSItems} projects={sProjects} setProjects={setSProjects}/>}
       </div>
     </div>
   )
