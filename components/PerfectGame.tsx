@@ -3296,55 +3296,27 @@ function Desk({items,setItems,projects,milestones,setMilestones,tasks,setTasks,c
       )}
       {/* Left rail — flagged for discussion, split by audience */}
       <div style={{width:mobile?'100%':270,flexShrink:mobile?1:0,...(mobile?{flex:1,minHeight:0}:{}),borderRight:mobile?'none':'1px solid #243447',padding:mobile?'14px 12px':'18px 14px',overflowY:'auto',display:mobile&&deskView!=='flags'?'none':'block',boxSizing:'border-box' as const}}>
-        {([['🚩 DEV FLAGGED',flaggedDevL,devOpen,setDevOpen,unflagDev],['◉ STAKEHOLDER FLAGGED',flaggedStkL,stkOpen,setStkOpen,unflagStk]] as any[]).map(([title,list,open,setOpen,unflag]:any)=>(
-          <div key={title} style={railCard as any}>
-            <button onClick={()=>setOpen((o:boolean)=>!o)} style={{background:'none',border:'none',padding:0,cursor:'pointer',width:'100%',display:'flex',alignItems:'center',gap:6,...railTitle as any,marginBottom:open?8:0}}>
-              <span style={{fontSize:9}}>{open?'▾':'▸'}</span>{title} ({list.length})
-            </button>
-            {open&&list.length===0&&<div style={{fontSize:11,color:'#7A8FA6',fontStyle:'italic'}}>Nothing flagged</div>}
-            {open&&list.map((i:any)=>{
-              const editing=noteEditId===i.id
-              return(
-                <div key={i.id} onClick={()=>{if(!editing){setNoteEditId(i.id);setNoteDraft(i.notes||'')}}}
-                  style={{fontSize:11,marginBottom:10,lineHeight:1.4,position:'relative' as const,paddingRight:16,cursor:editing?'default':'pointer',borderLeft:editing?'2px solid #C8973A':'2px solid transparent',paddingLeft:6}}>
-                  <button onClick={e=>{e.stopPropagation();unflag(i)}} title="Remove from this list"
-                    style={{position:'absolute',right:0,top:0,background:'none',border:'none',color:'#7A8FA6',fontSize:12,cursor:'pointer',padding:0,lineHeight:1}}>✕</button>
-                  <span style={{color:'#F4F6F8',fontWeight:600}}>{rt(i.request_type)} {i.name}</span> <span style={{color:'#7A8FA6',fontSize:10}}>{i.item_id}</span>
-                  {!editing&&i.notes&&<div style={{color:'#7A8FA6',fontSize:10,marginTop:1,overflow:'hidden',display:'-webkit-box',WebkitLineClamp:3,WebkitBoxOrient:'vertical' as const}}>{i.notes}</div>}
-                  {editing&&(
-                    <div style={{marginTop:5}} onClick={e=>e.stopPropagation()}>
-                      <textarea value={noteDraft} onChange={e=>setNoteDraft(e.target.value)} rows={4} autoFocus placeholder="Discussion notes..."
-                        style={{width:'100%',boxSizing:'border-box' as const,background:'#0D1B2A',border:'1px solid #243447',borderRadius:4,color:'#F4F6F8',fontSize:11,padding:6,resize:'vertical' as const,fontFamily:'inherit',lineHeight:1.4}}/>
-                      <div style={{display:'flex',gap:6,marginTop:4,justifyContent:'flex-end'}}>
-                        <button onClick={()=>setNoteEditId(null)} style={{background:'none',border:'1px solid #243447',borderRadius:4,color:'#7A8FA6',fontSize:10,padding:'2px 8px',cursor:'pointer'}}>Cancel</button>
-                        <button onClick={()=>saveNote(i)} style={{background:'#C8973A',border:'none',borderRadius:4,color:'#0D1B2A',fontSize:10,fontWeight:700,padding:'2px 10px',cursor:'pointer'}}>Save</button>
-                      </div>
-                    </div>
-                  )}
-                </div>
-              )
-            })}
-          </div>
-        ))}
         {deskSpace!=='home'&&(()=>{
-          const active=ccrs.filter(c=>c.status!=='Closed')
           const closed=ccrs.filter(c=>c.status==='Closed')
-          const toCreate=active.filter(c=>c.status==='To Create')
-          const opened=active.filter(c=>c.status==='Opened')
+          const toCreate=ccrs.filter(c=>c.status==='To Create')
+          const opened=ccrs.filter(c=>c.status==='Opened')
+          const approved=ccrs.filter(c=>c.status==='Approved')
+          const rejected=ccrs.filter(c=>c.status==='Rejected')
           const linkFor=(cid:any)=>ccrItems.filter(l=>l.ccr_id===cid).map(l=>items.find(x=>x.id===l.item_id)).filter(Boolean)
           const ccrCard=(c:any)=>{
             const pr=projects.find(p=>p.id===c.project_id)
             const linked=linkFor(c.id)
             const exp=ccrExpand[c.id]
             const overdue=c.target_date&&+new Date(c.target_date+'T12:00:00')<Date.now()&&c.status!=='Closed'
-            const candidates=items.filter(x=>spaceOf(x)==='work'&&!ITEM_TERMINAL.includes(x.status)&&(!pr||x.parent_project===pr.name)&&!linked.some((l:any)=>l.id===x.id))
+            const inAnyCcr=new Set(ccrItems.map(l=>l.item_id))
+            const candidates=items.filter(x=>spaceOf(x)==='work'&&!ITEM_TERMINAL.includes(x.status)&&(!pr||x.parent_project===pr.name)&&!inAnyCcr.has(x.id))
             return(
               <div key={c.id} style={{background:'#12202F',border:'1px solid '+(c.status==='To Create'?'#5A4A2A':'#243447'),borderRadius:8,padding:'8px 10px',marginBottom:8}}>
                 <div style={{display:'flex',alignItems:'center',gap:6,cursor:'pointer'}} onClick={()=>setCcrExpand((e:any)=>({...e,[c.id]:!e[c.id]}))}>
                   <span style={{fontSize:9,color:'#7A8FA6'}}>{exp?'▾':'▸'}</span>
                   <span style={{fontSize:12,fontWeight:700,color:'#F4F6F8',flex:1,overflow:'hidden',whiteSpace:'nowrap' as const,textOverflow:'ellipsis'}}>{c.title}</span>
                   {c.status==='Opened'&&c.ccr_number&&<span style={{fontSize:9,fontFamily:'monospace',color:'#5DADE2',flexShrink:0}}>{c.ccr_number}</span>}
-                  <span style={{fontSize:9,fontWeight:700,color:c.status==='To Create'?'#E8B95A':c.status==='Opened'?'#27AE60':'#7A8FA6',flexShrink:0}}>{c.status.toUpperCase()}</span>
+                  <span style={{fontSize:9,fontWeight:700,color:c.status==='To Create'?'#E8B95A':c.status==='Opened'?'#5DADE2':c.status==='Approved'?'#27AE60':c.status==='Rejected'?'#E74C3C':'#7A8FA6',flexShrink:0}}>{c.status.toUpperCase()}</span>
                 </div>
                 <div style={{display:'flex',gap:6,marginTop:3,fontSize:9,color:'#7A8FA6',alignItems:'center',flexWrap:'wrap' as const}}>
                   {pr&&<span style={{borderLeft:`3px solid ${pr.color||'#3A4A5E'}`,paddingLeft:5}}>{pr.name}</span>}
@@ -3379,9 +3351,18 @@ function Desk({items,setItems,projects,milestones,setMilestones,tasks,setTasks,c
                       {c.status==='Opened'&&(
                         <>
                         <input value={c.ccr_number||''} placeholder="CCR #" onChange={e=>setCcrField(c,{ccr_number:e.target.value})}
-                          style={{width:110,background:'#0D1B2A',border:'1px solid #243447',borderRadius:5,color:'#5DADE2',fontSize:10,fontFamily:'monospace',padding:'4px 6px'}}/>
+                          style={{width:100,background:'#0D1B2A',border:'1px solid #243447',borderRadius:5,color:'#5DADE2',fontSize:10,fontFamily:'monospace',padding:'4px 6px'}}/>
+                        <button onClick={()=>setCcrField(c,{status:'Approved'})} style={{background:'#27AE60',border:'none',borderRadius:5,color:'#fff',fontSize:10,fontWeight:700,padding:'4px 9px',cursor:'pointer'}}>Approve</button>
+                        <button onClick={()=>setCcrField(c,{status:'Rejected'})} style={{background:'#E74C3C',border:'none',borderRadius:5,color:'#fff',fontSize:10,fontWeight:700,padding:'4px 9px',cursor:'pointer'}}>Reject</button>
+                        </>
+                      )}
+                      {c.status==='Approved'&&(
                         <button onClick={()=>setCcrField(c,{status:'Closed'})} style={{background:'#16A085',border:'none',borderRadius:5,color:'#fff',fontSize:10,fontWeight:700,padding:'4px 10px',cursor:'pointer'}}>Close</button>
-                        <button onClick={()=>setCcrField(c,{status:'To Create',ccr_number:null})} style={{background:'none',border:'1px solid #243447',borderRadius:5,color:'#7A8FA6',fontSize:10,padding:'4px 8px',cursor:'pointer'}}>Reopen as draft</button>
+                      )}
+                      {c.status==='Rejected'&&(
+                        <>
+                        <button onClick={()=>setCcrField(c,{status:'Opened'})} style={{background:'none',border:'1px solid #243447',borderRadius:5,color:'#7A8FA6',fontSize:10,padding:'4px 8px',cursor:'pointer'}}>Resubmit</button>
+                        <button onClick={()=>setCcrField(c,{status:'Closed'})} style={{background:'none',border:'1px solid #243447',borderRadius:5,color:'#7A8FA6',fontSize:10,padding:'4px 8px',cursor:'pointer'}}>Close out</button>
                         </>
                       )}
                       {c.status==='Closed'&&<button onClick={()=>setCcrField(c,{status:'Opened'})} style={{background:'none',border:'1px solid #243447',borderRadius:5,color:'#7A8FA6',fontSize:10,padding:'4px 8px',cursor:'pointer'}}>Reopen</button>}
@@ -3395,15 +3376,17 @@ function Desk({items,setItems,projects,milestones,setMilestones,tasks,setTasks,c
             )
           }
           return(
-            <div style={{marginTop:16}}>
+            <div style={{marginBottom:16}}>
               <button onClick={()=>setCcrOpen(o=>!o)} style={{background:'none',border:'none',padding:0,cursor:'pointer',display:'flex',alignItems:'center',gap:6,fontSize:11,fontWeight:700,letterSpacing:1,color:'#5DADE2',marginBottom:ccrOpen?8:0,width:'100%'}}>
-                <span style={{fontSize:9}}>{ccrOpen?'▾':'▸'}</span>📋 CCRs ({toCreate.length} to create · {opened.length} open)
+                <span style={{fontSize:9}}>{ccrOpen?'▾':'▸'}</span>📋 CCRs ({toCreate.length} to create · {opened.length} open{approved.length?` · ${approved.length} approved`:''}{rejected.length?` · ${rejected.length} rejected`:''})
               </button>
               {ccrOpen&&(
                 <>
-                {toCreate.length===0&&opened.length===0&&<div style={{fontSize:10,color:'#7A8FA6',fontStyle:'italic',marginBottom:6}}>No open change requests</div>}
+                {toCreate.length===0&&opened.length===0&&approved.length===0&&rejected.length===0&&<div style={{fontSize:10,color:'#7A8FA6',fontStyle:'italic',marginBottom:6}}>No open change requests</div>}
                 {toCreate.map(ccrCard)}
                 {opened.map(ccrCard)}
+                {approved.map(ccrCard)}
+                {rejected.map(ccrCard)}
                 {showClosedCcrs&&closed.map(ccrCard)}
                 {closed.length>0&&<button onClick={()=>setShowClosedCcrs(o=>!o)} style={{background:'none',border:'none',color:'#7A8FA6',fontSize:10,cursor:'pointer',padding:'2px 0',marginBottom:6}}>{showClosedCcrs?'Hide':'Show'} {closed.length} closed</button>}
                 <div style={{borderTop:'1px dashed #243447',paddingTop:8}}>
@@ -3423,6 +3406,36 @@ function Desk({items,setItems,projects,milestones,setMilestones,tasks,setTasks,c
             </div>
           )
         })()}
+        {([['🚩 DEV FLAGGED',flaggedDevL,devOpen,setDevOpen,unflagDev],['◉ STAKEHOLDER FLAGGED',flaggedStkL,stkOpen,setStkOpen,unflagStk]] as any[]).map(([title,list,open,setOpen,unflag]:any)=>(
+          <div key={title} style={railCard as any}>
+            <button onClick={()=>setOpen((o:boolean)=>!o)} style={{background:'none',border:'none',padding:0,cursor:'pointer',width:'100%',display:'flex',alignItems:'center',gap:6,...railTitle as any,marginBottom:open?8:0}}>
+              <span style={{fontSize:9}}>{open?'▾':'▸'}</span>{title} ({list.length})
+            </button>
+            {open&&list.length===0&&<div style={{fontSize:11,color:'#7A8FA6',fontStyle:'italic'}}>Nothing flagged</div>}
+            {open&&list.map((i:any)=>{
+              const editing=noteEditId===i.id
+              return(
+                <div key={i.id} onClick={()=>{if(!editing){setNoteEditId(i.id);setNoteDraft(i.notes||'')}}}
+                  style={{fontSize:11,marginBottom:10,lineHeight:1.4,position:'relative' as const,paddingRight:16,cursor:editing?'default':'pointer',borderLeft:editing?'2px solid #C8973A':'2px solid transparent',paddingLeft:6}}>
+                  <button onClick={e=>{e.stopPropagation();unflag(i)}} title="Remove from this list"
+                    style={{position:'absolute',right:0,top:0,background:'none',border:'none',color:'#7A8FA6',fontSize:12,cursor:'pointer',padding:0,lineHeight:1}}>✕</button>
+                  <span style={{color:'#F4F6F8',fontWeight:600}}>{rt(i.request_type)} {i.name}</span> <span style={{color:'#7A8FA6',fontSize:10}}>{i.item_id}</span>
+                  {!editing&&i.notes&&<div style={{color:'#7A8FA6',fontSize:10,marginTop:1,overflow:'hidden',display:'-webkit-box',WebkitLineClamp:3,WebkitBoxOrient:'vertical' as const}}>{i.notes}</div>}
+                  {editing&&(
+                    <div style={{marginTop:5}} onClick={e=>e.stopPropagation()}>
+                      <textarea value={noteDraft} onChange={e=>setNoteDraft(e.target.value)} rows={4} autoFocus placeholder="Discussion notes..."
+                        style={{width:'100%',boxSizing:'border-box' as const,background:'#0D1B2A',border:'1px solid #243447',borderRadius:4,color:'#F4F6F8',fontSize:11,padding:6,resize:'vertical' as const,fontFamily:'inherit',lineHeight:1.4}}/>
+                      <div style={{display:'flex',gap:6,marginTop:4,justifyContent:'flex-end'}}>
+                        <button onClick={()=>setNoteEditId(null)} style={{background:'none',border:'1px solid #243447',borderRadius:4,color:'#7A8FA6',fontSize:10,padding:'2px 8px',cursor:'pointer'}}>Cancel</button>
+                        <button onClick={()=>saveNote(i)} style={{background:'#C8973A',border:'none',borderRadius:4,color:'#0D1B2A',fontSize:10,fontWeight:700,padding:'2px 10px',cursor:'pointer'}}>Save</button>
+                      </div>
+                    </div>
+                  )}
+                </div>
+              )
+            })}
+          </div>
+        ))}
       </div>
       <div style={{flex:1,minHeight:0,display:mobile&&deskView!=='plan'?'none':'flex',flexDirection:'column' as const,padding:mobile?'12px 12px':'18px 24px',overflow:'hidden',minWidth:0}}>
         <div style={{display:'flex',alignItems:'center',gap:10,marginBottom:12}}>
