@@ -12,7 +12,7 @@ const T = {
 }
 
 const PRIORITIES=['P1','P2','P3','P4','Backlog']
-const STATUSES=['New','Need Requirements','Under Review','Accepted','Ready','In Progress','Testing','Blocked','Done','Awaiting Vendor Deliverable','Will Not Implement']
+const STATUSES=['New','Need Requirements','Under Review','Accepted','Ready','In Progress','Testing','Ready for Deployment','Blocked','Done','Awaiting Vendor Deliverable','Will Not Implement']
 const HOME_STATUSES=['To Do','In Progress','Waiting','Done',"Won't Do"]
 const HOME_PROJECT_STATUSES=['Planning','In Progress','Waiting','Done','Cancelled']
 const spaceOf=(x:any)=>(x?.space||'work')
@@ -131,7 +131,7 @@ function useIsMobile(){
 // Request-type glyphs — instant visual ID on item lines
 function rt(t:any){const m:any={'Bug':'🐞','Tech Debt':'🔧','Enhancement':'✨','Strategic Initiative':'🎯','Business Request':'💼','Testing':'🧪'};return m[t]||''}
 function sc(s) {
-  const m={'New':'#5DADE2','Need Requirements':'#E67E22','Under Review':'#E8B95A','Accepted':'#2E86AB','Ready':'#8E44AD','In Progress':'#27AE60','Testing':'#C8973A','Blocked':'#E74C3C','Done':'#16A085','Awaiting Vendor Deliverable':'#7F8FA6','Will Not Implement':'#5C6E80','To Do':'#5DADE2','Waiting':'#E8B95A',"Won't Do":'#5C6E80'}
+  const m={'New':'#5DADE2','Need Requirements':'#E67E22','Under Review':'#E8B95A','Accepted':'#2E86AB','Ready':'#8E44AD','In Progress':'#27AE60','Testing':'#C8973A','Ready for Deployment':'#2ECC71','Blocked':'#E74C3C','Done':'#16A085','Awaiting Vendor Deliverable':'#7F8FA6','Will Not Implement':'#5C6E80','To Do':'#5DADE2','Waiting':'#E8B95A',"Won't Do":'#5C6E80'}
   return m[s]||'#7A8FA6'
 }
 // Sequential item IDs — max existing RTL number + 1. Random IDs collided with real data.
