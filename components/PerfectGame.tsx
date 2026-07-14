@@ -3040,11 +3040,45 @@ function crumbAge(dateStr:string){
   return Math.floor((Date.now()-+d)/86400000)
 }
 
-function Desk({items,setItems,projects,milestones,setMilestones,tasks,setTasks,space}:{items:any[],setItems:any,projects:any[],milestones:any[],setMilestones:any,tasks:any[],setTasks:any,space:string}) {
+function Desk({items,setItems,projects,milestones,setMilestones,tasks,setTasks,ccrs,setCcrs,ccrItems,setCcrItems,space}:{items:any[],setItems:any,projects:any[],milestones:any[],setMilestones:any,tasks:any[],setTasks:any,ccrs:any[],setCcrs:any,ccrItems:any[],setCcrItems:any,space:string}) {
   const [deskSpace,setDeskSpace]=useState(space) // work | home | both — Desk is the one place worlds can meet
   useEffect(()=>{setDeskSpace(space)},[space])
   const inDeskSpace=(x:any)=>deskSpace==='both'?true:spaceOf(x)===deskSpace
   const homeTag=(x:any)=>deskSpace==='both'&&spaceOf(x)==='home'
+  // ── CCRs — change requests: To Create → Opened (gets corporate #) → Closed
+  const [ccrOpen,setCcrOpen]=useState(true)
+  const [showClosedCcrs,setShowClosedCcrs]=useState(false)
+  const [ccrExpand,setCcrExpand]=useState<any>({})
+  const [ncTitle,setNcTitle]=useState('');const [ncProj,setNcProj]=useState('');const [ncDate,setNcDate]=useState('')
+  const [ccrNumEdit,setCcrNumEdit]=useState<any>({})
+  async function addCcr(){
+    if(!ncTitle.trim())return
+    const{data,error}=await supabase.from('ccrs').insert({title:ncTitle.trim(),project_id:ncProj||null,target_date:ncDate||null,status:'To Create'}).select().single()
+    if(error){alert('Failed to add CCR: '+error.message);return}
+    if(data){setCcrs((prev:any[])=>[...prev,data]);setNcTitle('');setNcProj('');setNcDate('')}
+    else{const{data:all}=await supabase.from('ccrs').select('*').order('created_at',{ascending:true});if(all)setCcrs(all)}
+  }
+  async function setCcrField(c:any,fields:any){
+    setCcrs((prev:any[])=>prev.map(x=>x.id===c.id?{...x,...fields}:x))
+    const{error}=await supabase.from('ccrs').update(fields).eq('id',c.id)
+    if(error)alert('Failed to update CCR: '+error.message)
+  }
+  async function deleteCcr(c:any){
+    if(!confirm(`Delete CCR "${c.title}"?`))return
+    setCcrs((prev:any[])=>prev.filter(x=>x.id!==c.id))
+    await supabase.from('ccrs').delete().eq('id',c.id)
+  }
+  async function addItemToCcr(ccrId:any,itemId:any){
+    if(!itemId)return
+    if(ccrItems.some(l=>l.ccr_id===ccrId&&l.item_id===itemId))return
+    setCcrItems((prev:any[])=>[...prev,{ccr_id:ccrId,item_id:itemId}])
+    const{error}=await supabase.from('ccr_items').insert({ccr_id:ccrId,item_id:itemId})
+    if(error){setCcrItems((prev:any[])=>prev.filter(l=>!(l.ccr_id===ccrId&&l.item_id===itemId)));alert('Failed to link item: '+error.message)}
+  }
+  async function removeItemFromCcr(ccrId:any,itemId:any){
+    setCcrItems((prev:any[])=>prev.filter(l=>!(l.ccr_id===ccrId&&l.item_id===itemId)))
+    await supabase.from('ccr_items').delete().eq('ccr_id',ccrId).eq('item_id',itemId)
+  }
   async function unflagDev(item:any){
     // dev-only flag clears; a 'both' flag downgrades to stakeholder-only
     const next=(item.flag_audience==='both')?{flagged:true,flag_audience:'stakeholder'}:{flagged:false,flag_audience:null}
@@ -3292,6 +3326,103 @@ function Desk({items,setItems,projects,milestones,setMilestones,tasks,setTasks,s
             })}
           </div>
         ))}
+        {deskSpace!=='home'&&(()=>{
+          const active=ccrs.filter(c=>c.status!=='Closed')
+          const closed=ccrs.filter(c=>c.status==='Closed')
+          const toCreate=active.filter(c=>c.status==='To Create')
+          const opened=active.filter(c=>c.status==='Opened')
+          const linkFor=(cid:any)=>ccrItems.filter(l=>l.ccr_id===cid).map(l=>items.find(x=>x.id===l.item_id)).filter(Boolean)
+          const ccrCard=(c:any)=>{
+            const pr=projects.find(p=>p.id===c.project_id)
+            const linked=linkFor(c.id)
+            const exp=ccrExpand[c.id]
+            const overdue=c.target_date&&+new Date(c.target_date+'T12:00:00')<Date.now()&&c.status!=='Closed'
+            const candidates=items.filter(x=>spaceOf(x)==='work'&&!ITEM_TERMINAL.includes(x.status)&&(!pr||x.parent_project===pr.name)&&!linked.some((l:any)=>l.id===x.id))
+            return(
+              <div key={c.id} style={{background:'#12202F',border:'1px solid '+(c.status==='To Create'?'#5A4A2A':'#243447'),borderRadius:8,padding:'8px 10px',marginBottom:8}}>
+                <div style={{display:'flex',alignItems:'center',gap:6,cursor:'pointer'}} onClick={()=>setCcrExpand((e:any)=>({...e,[c.id]:!e[c.id]}))}>
+                  <span style={{fontSize:9,color:'#7A8FA6'}}>{exp?'▾':'▸'}</span>
+                  <span style={{fontSize:12,fontWeight:700,color:'#F4F6F8',flex:1,overflow:'hidden',whiteSpace:'nowrap' as const,textOverflow:'ellipsis'}}>{c.title}</span>
+                  {c.status==='Opened'&&c.ccr_number&&<span style={{fontSize:9,fontFamily:'monospace',color:'#5DADE2',flexShrink:0}}>{c.ccr_number}</span>}
+                  <span style={{fontSize:9,fontWeight:700,color:c.status==='To Create'?'#E8B95A':c.status==='Opened'?'#27AE60':'#7A8FA6',flexShrink:0}}>{c.status.toUpperCase()}</span>
+                </div>
+                <div style={{display:'flex',gap:6,marginTop:3,fontSize:9,color:'#7A8FA6',alignItems:'center',flexWrap:'wrap' as const}}>
+                  {pr&&<span style={{borderLeft:`3px solid ${pr.color||'#3A4A5E'}`,paddingLeft:5}}>{pr.name}</span>}
+                  {c.target_date&&<span style={{color:overdue?'#E74C3C':'#7A8FA6',fontWeight:overdue?700:400}}>{overdue?'⚠ ':''}{c.target_date}</span>}
+                  <span>{linked.length} item{linked.length!==1?'s':''}</span>
+                </div>
+                {exp&&(
+                  <div style={{marginTop:8,borderTop:'1px solid #1A2838',paddingTop:8}}>
+                    {linked.map((it:any)=>(
+                      <div key={it.id} style={{display:'flex',alignItems:'center',gap:6,fontSize:10,marginBottom:3}}>
+                        <span style={{fontFamily:'monospace',color:'#7A8FA6',flexShrink:0}}>{it.item_id}</span>
+                        <span style={{color:'#C8C8D4',flex:1,overflow:'hidden',whiteSpace:'nowrap' as const,textOverflow:'ellipsis'}}>{rt(it.request_type)} {it.name}</span>
+                        <button onClick={()=>removeItemFromCcr(c.id,it.id)} style={{background:'none',border:'none',color:'#3A4A5E',fontSize:11,cursor:'pointer',padding:0,flexShrink:0}}>✕</button>
+                      </div>
+                    ))}
+                    {candidates.length>0&&c.status!=='Closed'&&(
+                      <select value="" onChange={e=>addItemToCcr(c.id,e.target.value)}
+                        style={{width:'100%',boxSizing:'border-box' as const,background:'#0D1B2A',border:'1px dashed #243447',borderRadius:5,color:'#7A8FA6',fontSize:10,padding:'4px 6px',marginTop:3,cursor:'pointer'}}>
+                        <option value="">+ Add item{pr?` from ${pr.name}`:''}...</option>
+                        {candidates.map(x=><option key={x.id} value={x.id}>{x.item_id} — {x.name}</option>)}
+                      </select>
+                    )}
+                    <div style={{display:'flex',gap:5,marginTop:8,alignItems:'center',flexWrap:'wrap' as const}}>
+                      {c.status==='To Create'&&(
+                        <>
+                        <input placeholder="CCR # once opened" value={ccrNumEdit[c.id]??''} onChange={e=>setCcrNumEdit((p:any)=>({...p,[c.id]:e.target.value}))}
+                          style={{flex:1,minWidth:90,background:'#0D1B2A',border:'1px solid #243447',borderRadius:5,color:'#F4F6F8',fontSize:10,padding:'4px 6px'}}/>
+                        <button onClick={()=>{setCcrField(c,{status:'Opened',ccr_number:(ccrNumEdit[c.id]||'').trim()||null});setCcrNumEdit((p:any)=>({...p,[c.id]:''}))}}
+                          style={{background:'#27AE60',border:'none',borderRadius:5,color:'#fff',fontSize:10,fontWeight:700,padding:'4px 10px',cursor:'pointer'}}>Mark Opened</button>
+                        </>
+                      )}
+                      {c.status==='Opened'&&(
+                        <>
+                        <input value={c.ccr_number||''} placeholder="CCR #" onChange={e=>setCcrField(c,{ccr_number:e.target.value})}
+                          style={{width:110,background:'#0D1B2A',border:'1px solid #243447',borderRadius:5,color:'#5DADE2',fontSize:10,fontFamily:'monospace',padding:'4px 6px'}}/>
+                        <button onClick={()=>setCcrField(c,{status:'Closed'})} style={{background:'#16A085',border:'none',borderRadius:5,color:'#fff',fontSize:10,fontWeight:700,padding:'4px 10px',cursor:'pointer'}}>Close</button>
+                        <button onClick={()=>setCcrField(c,{status:'To Create',ccr_number:null})} style={{background:'none',border:'1px solid #243447',borderRadius:5,color:'#7A8FA6',fontSize:10,padding:'4px 8px',cursor:'pointer'}}>Reopen as draft</button>
+                        </>
+                      )}
+                      {c.status==='Closed'&&<button onClick={()=>setCcrField(c,{status:'Opened'})} style={{background:'none',border:'1px solid #243447',borderRadius:5,color:'#7A8FA6',fontSize:10,padding:'4px 8px',cursor:'pointer'}}>Reopen</button>}
+                      <input type="date" value={c.target_date||''} onChange={e=>setCcrField(c,{target_date:e.target.value||null})} title="Target date"
+                        style={{background:'#0D1B2A',border:'1px solid #243447',borderRadius:5,color:'#F4F6F8',fontSize:10,padding:'3px 5px'}}/>
+                      <button onClick={()=>deleteCcr(c)} style={{background:'none',border:'none',color:'#3A4A5E',fontSize:11,cursor:'pointer',padding:0,marginLeft:'auto'}}>🗑</button>
+                    </div>
+                  </div>
+                )}
+              </div>
+            )
+          }
+          return(
+            <div style={{marginTop:16}}>
+              <button onClick={()=>setCcrOpen(o=>!o)} style={{background:'none',border:'none',padding:0,cursor:'pointer',display:'flex',alignItems:'center',gap:6,fontSize:11,fontWeight:700,letterSpacing:1,color:'#5DADE2',marginBottom:ccrOpen?8:0,width:'100%'}}>
+                <span style={{fontSize:9}}>{ccrOpen?'▾':'▸'}</span>📋 CCRs ({toCreate.length} to create · {opened.length} open)
+              </button>
+              {ccrOpen&&(
+                <>
+                {toCreate.length===0&&opened.length===0&&<div style={{fontSize:10,color:'#7A8FA6',fontStyle:'italic',marginBottom:6}}>No open change requests</div>}
+                {toCreate.map(ccrCard)}
+                {opened.map(ccrCard)}
+                {showClosedCcrs&&closed.map(ccrCard)}
+                {closed.length>0&&<button onClick={()=>setShowClosedCcrs(o=>!o)} style={{background:'none',border:'none',color:'#7A8FA6',fontSize:10,cursor:'pointer',padding:'2px 0',marginBottom:6}}>{showClosedCcrs?'Hide':'Show'} {closed.length} closed</button>}
+                <div style={{borderTop:'1px dashed #243447',paddingTop:8}}>
+                  <input placeholder="New CCR... (e.g., Legion Japan deployment)" value={ncTitle} onChange={e=>setNcTitle(e.target.value)} onKeyDown={e=>{if(e.key==='Enter')addCcr()}}
+                    style={{width:'100%',boxSizing:'border-box' as const,background:'#0D1B2A',border:'1px solid #243447',borderRadius:6,color:'#F4F6F8',fontSize:11,padding:'5px 8px',marginBottom:5}}/>
+                  <div style={{display:'flex',gap:5}}>
+                    <select value={ncProj} onChange={e=>setNcProj(e.target.value)} style={{flex:1,minWidth:0,background:'#0D1B2A',border:'1px solid #243447',borderRadius:6,color:'#F4F6F8',fontSize:10,padding:'4px 6px'}}>
+                      <option value="">No project</option>
+                      {projects.filter(p=>spaceOf(p)==='work'&&!PROJECT_TERMINAL.includes(p.status)).map(p=><option key={p.id} value={p.id}>{p.name}</option>)}
+                    </select>
+                    <input type="date" value={ncDate} onChange={e=>setNcDate(e.target.value)} style={{background:'#0D1B2A',border:'1px solid #243447',borderRadius:6,color:'#F4F6F8',fontSize:10,padding:'4px 5px'}}/>
+                    <button onClick={addCcr} disabled={!ncTitle.trim()} style={{background:'#5DADE2',border:'none',borderRadius:6,color:'#0D1B2A',fontSize:10,fontWeight:700,padding:'4px 10px',cursor:'pointer',opacity:!ncTitle.trim()?0.5:1}}>+ CCR</button>
+                  </div>
+                </div>
+                </>
+              )}
+            </div>
+          )
+        })()}
       </div>
       <div style={{flex:1,minHeight:0,display:mobile&&deskView!=='plan'?'none':'flex',flexDirection:'column' as const,padding:mobile?'12px 12px':'18px 24px',overflow:'hidden',minWidth:0}}>
         <div style={{display:'flex',alignItems:'center',gap:10,marginBottom:12}}>
@@ -3812,6 +3943,8 @@ export default function PerfectGame() {
   const [projects,setProjects]=useState([])
   const [milestones,setMilestones]=useState([])
   const [tasks,setTasks]=useState<any[]>([])
+  const [ccrs,setCcrs]=useState<any[]>([])
+  const [ccrItems,setCcrItems]=useState<any[]>([])
   const [loading,setLoading]=useState(true)
   const [activeTab,setActiveTab]=useState('desk')
   const [space,setSpace]=useState('work')
@@ -3832,15 +3965,19 @@ export default function PerfectGame() {
 
 useEffect(()=>{
     async function load(){
-      const[{data:itemData},{data:projectData},{data:milestoneData},{data:taskData}]=await Promise.all([
+      const[{data:itemData},{data:projectData},{data:milestoneData},{data:taskData},{data:ccrData},{data:ccrItemData}]=await Promise.all([
       supabase.from('items').select('*').order('sort_order',{ascending:true}),
       supabase.from('projects').select('*').order('sort_order',{ascending:true}),
       supabase.from('milestones').select('*').order('date',{ascending:true}),
       supabase.from('tasks').select('*').order('due_date',{ascending:true}),
+      supabase.from('ccrs').select('*').order('created_at',{ascending:true}),
+      supabase.from('ccr_items').select('*'),
     ])
     if(itemData) setItems(itemData)
     if(milestoneData) setMilestones(milestoneData)
     if(taskData) setTasks(taskData)
+    if(ccrData) setCcrs(ccrData)
+    if(ccrItemData) setCcrItems(ccrItemData)
 
     // Auto-create any missing projects from parent_project values
     if(itemData&&projectData){
@@ -3935,7 +4072,7 @@ useEffect(()=>{
         {activeTab==='projects'&&<Projects items={sItems} setItems={setSItems} projects={sProjects} setProjects={setSProjects} milestones={sMilestones} setMilestones={setSMilestones} tasks={tasks} setTasks={setTasks} space={space}/>}
 {activeTab==='roadmap'&&<Roadmap items={sItems} setItems={setSItems} projects={sProjects} setProjects={setSProjects} milestones={sMilestones}/>}
         {activeTab==='teams'&&<Teams items={sItems} projects={sProjects} milestones={sMilestones}/>}
-        {activeTab==='desk'&&<Desk items={items} setItems={setItems} projects={projects} milestones={milestones} setMilestones={setMilestones} tasks={tasks} setTasks={setTasks} space={space}/>}
+        {activeTab==='desk'&&<Desk items={items} setItems={setItems} projects={projects} milestones={milestones} setMilestones={setMilestones} tasks={tasks} setTasks={setTasks} ccrs={ccrs} setCcrs={setCcrs} ccrItems={ccrItems} setCcrItems={setCcrItems} space={space}/>}
         {activeTab==='stakeholder'&&<Stakeholder items={sItems} projects={sProjects} milestones={sMilestones}/>}
         {activeTab==='done'&&<DoneTab items={sItems} setItems={setSItems} projects={sProjects} setProjects={setSProjects}/>}
       </div>
