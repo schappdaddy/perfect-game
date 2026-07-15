@@ -1948,11 +1948,11 @@ function Roadmap({items,setItems,projects,setProjects,milestones}:{items:any[],p
         <div style={{flex:1,display:'flex',overflow:'hidden',position:'relative',userSelect:draggingBar?'none':'auto' as const}}>
 
           {/* Frozen label column */}
-          <div ref={labelRef} style={{width:220,flexShrink:0,overflowY:'hidden',borderRight:'1px solid #243447',zIndex:6,background:'#0D1B2A',boxShadow:'4px 0 12px rgba(0,0,0,0.6)',display:'flex',flexDirection:'column'}}>
+          <div style={{width:220,flexShrink:0,overflowY:'hidden',borderRight:'1px solid #243447',zIndex:6,background:'#0D1B2A',boxShadow:'4px 0 12px rgba(0,0,0,0.6)',display:'flex',flexDirection:'column'}}>
             <div style={{height:36,flexShrink:0,background:'#162436',borderBottom:'1px solid #243447',padding:'0 12px',fontSize:11,fontWeight:700,color:'#7A8FA6',letterSpacing:1,display:'flex',alignItems:'center'}}>
               PROJECT / ITEM
             </div>
-            <div style={{flex:1,overflowY:'hidden'}}>
+            <div ref={labelRef} style={{flex:1,overflowY:'hidden'}}>
               {groups.map((group:any)=>{
                 const isCollapsed=getCollapsed()[group.id]
                 const childItems=[...group.items].sort((a,b)=>(!a.start_date?1:!b.start_date?-1:new Date(a.start_date+'T12:00:00').getTime()-new Date(b.start_date+'T12:00:00').getTime()))
