@@ -3051,6 +3051,7 @@ function Desk({items,setItems,projects,milestones,setMilestones,tasks,setTasks,c
   const [ccrExpand,setCcrExpand]=useState<any>({})
   const [ncTitle,setNcTitle]=useState('');const [ncProj,setNcProj]=useState('');const [ncDate,setNcDate]=useState('')
   const [ccrNumEdit,setCcrNumEdit]=useState<any>({})
+  const [copiedCcr,setCopiedCcr]=useState<any>(null)
   async function addCcr(){
     if(!ncTitle.trim())return
     const{data,error}=await supabase.from('ccrs').insert({title:ncTitle.trim(),project_id:ncProj||null,target_date:ncDate||null,status:'To Create'}).select().single()
@@ -3315,7 +3316,9 @@ function Desk({items,setItems,projects,milestones,setMilestones,tasks,setTasks,c
                 <div style={{display:'flex',alignItems:'center',gap:6,cursor:'pointer'}} onClick={()=>setCcrExpand((e:any)=>({...e,[c.id]:!e[c.id]}))}>
                   <span style={{fontSize:9,color:'#7A8FA6'}}>{exp?'▾':'▸'}</span>
                   <span style={{fontSize:12,fontWeight:700,color:'#F4F6F8',flex:1,overflow:'hidden',whiteSpace:'nowrap' as const,textOverflow:'ellipsis'}}>{c.title}</span>
-                  {c.status==='Opened'&&c.ccr_number&&<span style={{fontSize:9,fontFamily:'monospace',color:'#5DADE2',flexShrink:0}}>{c.ccr_number}</span>}
+                  {c.ccr_number&&<span onClick={e=>{e.stopPropagation();navigator.clipboard.writeText(c.ccr_number).then(()=>{setCopiedCcr(c.id);setTimeout(()=>setCopiedCcr(null),1500)})}}
+                    title="Click to copy CCR number"
+                    style={{fontSize:9,fontFamily:'monospace',color:copiedCcr===c.id?'#27AE60':'#5DADE2',flexShrink:0,cursor:'copy',border:'1px solid '+(copiedCcr===c.id?'#27AE60':'#24445E'),borderRadius:3,padding:'0 5px'}}>{copiedCcr===c.id?'✓ copied':c.ccr_number}</span>}
                   <span style={{fontSize:9,fontWeight:700,color:c.status==='To Create'?'#E8B95A':c.status==='Opened'?'#5DADE2':c.status==='Approved'?'#27AE60':c.status==='Rejected'?'#E74C3C':'#7A8FA6',flexShrink:0}}>{c.status.toUpperCase()}</span>
                 </div>
                 <div style={{display:'flex',gap:6,marginTop:3,fontSize:9,color:'#7A8FA6',alignItems:'center',flexWrap:'wrap' as const}}>
@@ -3357,10 +3360,16 @@ function Desk({items,setItems,projects,milestones,setMilestones,tasks,setTasks,c
                         </>
                       )}
                       {c.status==='Approved'&&(
+                        <>
+                        <input value={c.ccr_number||''} placeholder="CCR #" onChange={e=>setCcrField(c,{ccr_number:e.target.value})}
+                          style={{width:100,background:'#0D1B2A',border:'1px solid #243447',borderRadius:5,color:'#5DADE2',fontSize:10,fontFamily:'monospace',padding:'4px 6px'}}/>
                         <button onClick={()=>setCcrField(c,{status:'Closed'})} style={{background:'#16A085',border:'none',borderRadius:5,color:'#fff',fontSize:10,fontWeight:700,padding:'4px 10px',cursor:'pointer'}}>Close</button>
+                        </>
                       )}
                       {c.status==='Rejected'&&(
                         <>
+                        <input value={c.ccr_number||''} placeholder="CCR #" onChange={e=>setCcrField(c,{ccr_number:e.target.value})}
+                          style={{width:100,background:'#0D1B2A',border:'1px solid #243447',borderRadius:5,color:'#5DADE2',fontSize:10,fontFamily:'monospace',padding:'4px 6px'}}/>
                         <button onClick={()=>setCcrField(c,{status:'Opened'})} style={{background:'none',border:'1px solid #243447',borderRadius:5,color:'#7A8FA6',fontSize:10,padding:'4px 8px',cursor:'pointer'}}>Resubmit</button>
                         <button onClick={()=>setCcrField(c,{status:'Closed'})} style={{background:'none',border:'1px solid #243447',borderRadius:5,color:'#7A8FA6',fontSize:10,padding:'4px 8px',cursor:'pointer'}}>Close out</button>
                         </>
