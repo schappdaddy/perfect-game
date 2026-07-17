@@ -221,6 +221,25 @@ function ProjectDetail({project,items,setItems,projects,milestones,setMilestones
   const mobileP=useIsMobile()
   const [pdTitle,setPdTitle]=useState('')
   const [pdDate,setPdDate]=useState('')
+  // Commit-with-dates: for ∞/undated projects, ask for item dates inline instead of refusing
+  const [cmtId,setCmtId]=useState<any>(null)
+  const [cmtStart,setCmtStart]=useState('')
+  const [cmtEnd,setCmtEnd]=useState('')
+  function startCommit(item:any){
+    const today=new Date();const iso=(d:Date)=>`${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,'0')}-${String(d.getDate()).padStart(2,'0')}`
+    const plus30=new Date(+today+30*86400000)
+    setCmtStart(project.start_date&&project.start_date>iso(today)?project.start_date:iso(today))
+    setCmtEnd(iso(plus30))
+    setCmtId(item.id)
+  }
+  async function confirmCommit(){
+    if(!cmtId||!cmtStart||!cmtEnd)return
+    if(cmtEnd<cmtStart){alert('End date is before start date.');return}
+    const updates={start_date:cmtStart,end_date:cmtEnd}
+    setItems(items.map(i=>i.id===cmtId?{...i,...updates}:i))
+    setCmtId(null)
+    await supabase.from('items').update(updates).eq('id',cmtId)
+  }
   async function submitPdTask(){
     if(!pdTitle.trim())return
     const ok=await addProjectTask(setTasks,project.id,pdTitle,pdDate||null,spaceOf(project))
@@ -567,7 +586,7 @@ function ProjectDetail({project,items,setItems,projects,milestones,setMilestones
                   <button
                     onClick={async()=>{
                       if(!project.start_date||!project.end_date){
-                        alert('Set project dates first before committing items.')
+                        startCommit(item)
                         return
                       }
                       const updates={start_date:project.start_date,end_date:project.end_date}
@@ -578,6 +597,16 @@ function ProjectDetail({project,items,setItems,projects,milestones,setMilestones
                     ✓ Commit
                   </button>
                 </div>
+                {cmtId===item.id&&(
+                  <div onClick={e=>e.stopPropagation()} style={{display:'flex',gap:5,alignItems:'center',marginTop:6,padding:'5px 7px',border:'1px solid #27AE60',borderRadius:6,background:'rgba(39,174,96,0.06)'}}>
+                    <span style={{fontSize:9,color:'#27AE60',fontWeight:700}}>{project.ongoing?'∞ project — set item dates:':'Project undated — set item dates:'}</span>
+                    <input type="date" value={cmtStart} onChange={e=>setCmtStart(e.target.value)} style={{background:'#0F1C2B',border:'1px solid #243447',borderRadius:4,color:'#F4F6F8',fontSize:10,padding:'2px 5px'}}/>
+                    <span style={{color:'#7A8FA6',fontSize:10}}>→</span>
+                    <input type="date" value={cmtEnd} onChange={e=>setCmtEnd(e.target.value)} style={{background:'#0F1C2B',border:'1px solid #243447',borderRadius:4,color:'#F4F6F8',fontSize:10,padding:'2px 5px'}}/>
+                    <button onClick={confirmCommit} style={{background:'#27AE60',border:'none',borderRadius:4,color:'#fff',fontSize:9,fontWeight:700,padding:'3px 9px',cursor:'pointer'}}>✓ Commit</button>
+                    <button onClick={()=>setCmtId(null)} style={{background:'none',border:'1px solid #243447',borderRadius:4,color:'#7A8FA6',fontSize:9,padding:'3px 7px',cursor:'pointer'}}>Cancel</button>
+                  </div>
+                )}
                 {item.description&&<div style={{fontSize:10,color:'#7A8FA6',marginTop:3,overflow:'hidden',whiteSpace:'nowrap' as const,textOverflow:'ellipsis'}}>{item.description}</div>}
               </div>
             )
@@ -3150,6 +3179,9 @@ function Desk({items,setItems,projects,milestones,setMilestones,tasks,setTasks,c
   const [ntDate,setNtDate]=useState('')
   const [mvTitle,setMvTitle]=useState('')
   const [mvDate,setMvDate]=useState('')
+  const [mcId,setMcId]=useState<any>(null)
+  const [mcStart,setMcStart]=useState('')
+  const [mcEnd,setMcEnd]=useState('')
   const [qiName,setQiName]=useState('')
   const [qiPri,setQiPri]=useState('P3')
   const [qiType,setQiType]=useState('Bug')
@@ -3779,10 +3811,24 @@ function Desk({items,setItems,projects,milestones,setMilestones,tasks,setTasks,c
               const uncommittedP=pis.filter(i=>i.status!=='Done'&&!(i.start_date&&i.end_date))
               const committedI=(i:any)=>!!(i.start_date&&i.end_date)
               async function commitItem(i:any){
-                if(!projView.start_date||!projView.end_date){alert('Set project dates first — committing uses the project timeline.');return}
+                if(!projView.start_date||!projView.end_date){
+                  const today=new Date();const iso=(d:Date)=>`${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,'0')}-${String(d.getDate()).padStart(2,'0')}`
+                  setMcStart(projView.start_date&&projView.start_date>iso(today)?projView.start_date:iso(today))
+                  setMcEnd(iso(new Date(+today+30*86400000)))
+                  setMcId(i.id)
+                  return
+                }
                 const upd={start_date:projView.start_date,end_date:projView.end_date}
                 setItems((prev:any[])=>prev.map(x=>x.id===i.id?{...x,...upd}:x))
                 await supabase.from('items').update(upd).eq('id',i.id)
+              }
+              async function confirmModalCommit(){
+                if(!mcId||!mcStart||!mcEnd)return
+                if(mcEnd<mcStart){alert('End date is before start date.');return}
+                const upd={start_date:mcStart,end_date:mcEnd}
+                setItems((prev:any[])=>prev.map(x=>x.id===mcId?{...x,...upd}:x))
+                setMcId(null)
+                await supabase.from('items').update(upd).eq('id',mcId)
               }
               async function uncommitItem(i:any){
                 setItems((prev:any[])=>prev.map(x=>x.id===i.id?{...x,start_date:null,end_date:null}:x))
@@ -3802,6 +3848,21 @@ function Desk({items,setItems,projects,milestones,setMilestones,tasks,setTasks,c
                     :<button onClick={()=>commitItem(i)} title="Commit — set dates to the project timeline" style={{background:'none',border:'1px solid rgba(39,174,96,0.4)',borderRadius:4,color:'#27AE60',fontSize:9,fontWeight:700,padding:'1px 7px',cursor:'pointer',flexShrink:0}}>✓ Commit</button>}
                 </div>
               )
+              const rowWithCommit=(i:any)=>(
+                <div key={i.id}>
+                  {row(i)}
+                  {mcId===i.id&&(
+                    <div style={{display:'flex',gap:5,alignItems:'center',margin:'2px 0 6px',padding:'5px 7px',border:'1px solid #27AE60',borderRadius:6,background:'rgba(39,174,96,0.06)',flexWrap:'wrap' as const}}>
+                      <span style={{fontSize:9,color:'#27AE60',fontWeight:700}}>{projView.ongoing?'∞ project — set item dates:':'Project undated — set item dates:'}</span>
+                      <input type="date" value={mcStart} onChange={e=>setMcStart(e.target.value)} style={{background:'#0D1B2A',border:'1px solid #243447',borderRadius:4,color:'#F4F6F8',fontSize:10,padding:'2px 5px'}}/>
+                      <span style={{color:'#7A8FA6',fontSize:10}}>→</span>
+                      <input type="date" value={mcEnd} onChange={e=>setMcEnd(e.target.value)} style={{background:'#0D1B2A',border:'1px solid #243447',borderRadius:4,color:'#F4F6F8',fontSize:10,padding:'2px 5px'}}/>
+                      <button onClick={confirmModalCommit} style={{background:'#27AE60',border:'none',borderRadius:4,color:'#fff',fontSize:9,fontWeight:700,padding:'3px 9px',cursor:'pointer'}}>✓ Commit</button>
+                      <button onClick={()=>setMcId(null)} style={{background:'none',border:'1px solid #243447',borderRadius:4,color:'#7A8FA6',fontSize:9,padding:'3px 7px',cursor:'pointer'}}>Cancel</button>
+                    </div>
+                  )}
+                </div>
+              )
               return(<>
                 {committed.length>0&&(
                   <div style={{marginBottom:12}}>
@@ -3812,7 +3873,7 @@ function Desk({items,setItems,projects,milestones,setMilestones,tasks,setTasks,c
                 {uncommittedP.length>0&&(
                   <div style={{marginBottom:12}}>
                     <div style={{fontSize:10,fontWeight:700,letterSpacing:1,color:'#C8973A',marginBottom:5}}>◌ NOT COMMITTED ({uncommittedP.length})</div>
-                    {uncommittedP.map(row)}
+                    {uncommittedP.map(rowWithCommit)}
                   </div>
                 )}
                 {doneP.length>0&&(
