@@ -3088,7 +3088,7 @@ function crumbAge(dateStr:string){
   return Math.floor((Date.now()-+d)/86400000)
 }
 
-function Desk({items,setItems,projects,milestones,setMilestones,tasks,setTasks,ccrs,setCcrs,ccrItems,setCcrItems,space}:{items:any[],setItems:any,projects:any[],milestones:any[],setMilestones:any,tasks:any[],setTasks:any,ccrs:any[],setCcrs:any,ccrItems:any[],setCcrItems:any,space:string}) {
+function Desk({items,setItems,projects,setProjects,milestones,setMilestones,tasks,setTasks,ccrs,setCcrs,ccrItems,setCcrItems,space}:{items:any[],setItems:any,projects:any[],setProjects:any,milestones:any[],setMilestones:any,tasks:any[],setTasks:any,ccrs:any[],setCcrs:any,ccrItems:any[],setCcrItems:any,space:string}) {
   const [deskSpace,setDeskSpace]=useState(space) // work | home | both — Desk is the one place worlds can meet
   useEffect(()=>{setDeskSpace(space)},[space])
   const inDeskSpace=(x:any)=>deskSpace==='both'?true:spaceOf(x)===deskSpace
@@ -3179,6 +3179,24 @@ function Desk({items,setItems,projects,milestones,setMilestones,tasks,setTasks,c
   const [ntDate,setNtDate]=useState('')
   const [mvTitle,setMvTitle]=useState('')
   const [mvDate,setMvDate]=useState('')
+  async function updateProj(fields:any){
+    if(!projView)return
+    const wasTerminal=PROJECT_TERMINAL.includes(projView.status)
+    setProjects((prev:any[])=>prev.map(p=>p.id===projView.id?{...p,...fields}:p))
+    setProjView((p:any)=>({...p,...fields}))
+    const{error}=await supabase.from('projects').update(fields).eq('id',projView.id)
+    if(error){alert('Failed to update project: '+error.message);return}
+    // Terminal transition: offer to close the project's open items (same flow as the Projects tab)
+    if(fields.status&&PROJECT_TERMINAL.includes(fields.status)&&!wasTerminal){
+      const open=items.filter(i=>i.parent_project===projView.name&&!ITEM_TERMINAL.includes(i.status))
+      if(open.length){
+        const home=spaceOf(projView)==='home'
+        const itemStatus=fields.status==='Cancelled'?(home?"Won't Do":'Will Not Implement'):'Done'
+        const yes=confirm(`"${projView.name}" is now ${fields.status}. Also mark its ${open.length} open item${open.length!==1?'s':''} as ${itemStatus}?\n\nOK — close the items (they move to the Done tab)\nCancel — leave them in the backlog`)
+        if(yes)await closeItemsForProject(items,setItems,projView.name,itemStatus)
+      }
+    }
+  }
   const [mcId,setMcId]=useState<any>(null)
   const [mcStart,setMcStart]=useState('')
   const [mcEnd,setMcEnd]=useState('')
@@ -3280,6 +3298,7 @@ function Desk({items,setItems,projects,milestones,setMilestones,tasks,setTasks,c
 
   const lines=content.split('\n')
   const isTask=(l:string)=>l.trimStart().startsWith('[ ]')||l.trimStart().startsWith('[x]')
+  const isBullet=(l:string)=>l.trimStart().startsWith('- ')&&!isTask(l)
   function setLine(idx:number,val:string){
     // typing "[]" or "[ ]" at the start of a plain line turns it into a task
     const v=val.replace(/^\[\]\s?/,'[ ] ')
@@ -3298,15 +3317,16 @@ function Desk({items,setItems,projects,milestones,setMilestones,tasks,setTasks,c
       const caret=el.selectionStart??el.value.length
       const before=el.value.slice(0,caret),after=el.value.slice(caret)
       const task=isTask(ls[idx])
-      const prefix=task?(ls[idx].trimStart().slice(0,3)==='[x]'?'[ ] ':'[ ] '):''
-      ls[idx]=task?ls[idx].slice(0,ls[idx].length-el.value.length)+before:before
-      ls.splice(idx+1,0,task?prefix+after:after)
+      const bullet=isBullet(ls[idx])
+      const prefix=task?'[ ] ':bullet?'- ':''
+      ls[idx]=(task||bullet)?ls[idx].slice(0,ls[idx].length-el.value.length)+before:before
+      ls.splice(idx+1,0,prefix+after)
       persist(ls.join('\n'))
-      pendingFocus.current={idx:idx+1,caret:task?prefix.length:0}
+      pendingFocus.current={idx:idx+1,caret:prefix.length}
     }
     if(e.key==='Backspace'&&e.currentTarget.value===''){
       e.preventDefault()
-      if(isTask(ls[idx])){ls[idx]=''}          // first backspace: unwrap task to plain empty line
+      if(isTask(ls[idx])||isBullet(ls[idx])){ls[idx]=''}  // first backspace: unwrap task/bullet to plain empty line
       else if(ls.length>1){ls.splice(idx,1);pendingFocus.current={idx:Math.max(0,idx-1),caret:null}}
       persist(ls.join('\n'))
     }
@@ -3617,17 +3637,19 @@ function Desk({items,setItems,projects,milestones,setMilestones,tasks,setTasks,c
                   </div>
                 )
               }
-              const raw=task?t.slice(3).replace(/^\s/,''):l
+              const bullet=isBullet(l)
+              const raw=task?t.slice(3).replace(/^\s/,''):bullet?t.slice(2):l
               const mIdx=task?raw.indexOf(' ⌁ '):-1
               const main=mIdx>=0?raw.slice(0,mIdx):raw
               const meta=mIdx>=0?raw.slice(mIdx+3):null
               const metaDate=meta?meta.split(' · ').pop()||'':''
               const age=meta?crumbAge(metaDate):0
               return(
-                <div key={idx} style={{display:'flex',alignItems:'center',gap:8,padding:'2px 0',paddingLeft:task?24:14}}>
+                <div key={idx} style={{display:'flex',alignItems:'center',gap:8,padding:'2px 0',paddingLeft:(task||bullet)?24:14}}>
                   {task&&<input type="checkbox" checked={done} onChange={()=>toggle(idx)} style={{cursor:'pointer',flexShrink:0}}/>}
+                  {bullet&&<span style={{color:'#C8973A',fontSize:14,lineHeight:1,flexShrink:0,userSelect:'none' as const}}>•</span>}
                   <input ref={el=>{if(el)inputRefs.current[idx]=el}} value={main}
-                    onChange={e=>setLine(idx,task?((done?'[x] ':'[ ] ')+e.target.value+(meta?' ⌁ '+meta:'')):e.target.value)}
+                    onChange={e=>setLine(idx,task?((done?'[x] ':'[ ] ')+e.target.value+(meta?' ⌁ '+meta:'')):bullet?('- '+e.target.value):e.target.value)}
                     onKeyDown={e=>onKey(e,idx)}
                     placeholder={idx===0&&lines.length===1&&!l?'Plan your day...  (type [ ] for a task, end a line with : for a section)':''}
                     style={{...lineInput as any,color:done?'#7A8FA6':'#F4F6F8',textDecoration:done?'line-through':'none'}}/>
@@ -3642,7 +3664,7 @@ function Desk({items,setItems,projects,milestones,setMilestones,tasks,setTasks,c
             })}
           </div>
         )}
-        <div style={{fontSize:10,color:'#7A8FA6',marginTop:6}}>Autosaves · daily scratch pad — durable to-dos go in Tasks above · [ ] = checkbox · end a line with : for a section · 1) or Tab for a sub-section</div>
+        <div style={{fontSize:10,color:'#7A8FA6',marginTop:6}}>Autosaves · daily scratch pad — durable to-dos go in Tasks above · [ ] = checkbox · - = bullet · end a line with : for a section · 1) or Tab for a sub-section</div>
         {pastDates.filter(d2=>d2<localISO(new Date())).length>0&&(
           <div style={{display:'flex',alignItems:'center',gap:6,marginTop:8,flexWrap:'wrap' as const}}>
             <span style={{fontSize:10,color:'#5C6E80'}}>📋 Past:</span>
@@ -3729,16 +3751,47 @@ function Desk({items,setItems,projects,milestones,setMilestones,tasks,setTasks,c
         return(
         <div onClick={()=>setProjView(null)} style={{position:'fixed',inset:0,background:'rgba(0,0,0,0.6)',zIndex:250,display:'flex',alignItems:'center',justifyContent:'center'}}>
           <div onClick={e=>e.stopPropagation()} style={{background:'#162436',border:'1px solid #243447',borderRadius:12,width:560,maxWidth:'94vw',maxHeight:'86vh',overflowY:'auto',padding:16,boxSizing:'border-box' as const}}>
-            <div style={{display:'flex',alignItems:'center',gap:10,marginBottom:6}}>
+            <div style={{display:'flex',alignItems:'center',gap:10,marginBottom:8}}>
               <span style={{width:12,height:12,borderRadius:3,background:projView.color||'#3A4A5E'}}/>
               <span style={{fontSize:16,fontWeight:800}}>{projView.name}</span>
-              <span style={{fontSize:11,fontWeight:700,color:projView.rag==='Green'?'#27AE60':projView.rag==='Amber'?'#E8B95A':projView.rag==='Red'?'#E74C3C':'#7A8FA6'}}>{projView.rag}</span>
+              <div style={{display:'flex',gap:3}}>
+                {(['Green','Amber','Red','—'] as string[]).map(r=>{
+                  const active=projView.rag===r||(!projView.rag&&r==='—')
+                  const clr=r==='Green'?'#27AE60':r==='Amber'?'#E8B95A':r==='Red'?'#E74C3C':'#7A8FA6'
+                  return(
+                    <button key={r} onClick={()=>updateProj({rag:r==='—'?null:r})} title={r==='—'?'No RAG':r}
+                      style={{background:active?clr+'33':'transparent',border:'1px solid '+(active?clr:'#243447'),borderRadius:4,padding:'1px 6px',fontSize:10,cursor:'pointer',lineHeight:1.5}}>
+                      {r==='Green'?'🟢':r==='Amber'?'🟡':r==='Red'?'🔴':'⚪'}
+                    </button>
+                  )
+                })}
+              </div>
               <button onClick={()=>setProjView(null)} style={{marginLeft:'auto',background:'none',border:'none',color:'#7A8FA6',fontSize:18,cursor:'pointer',lineHeight:1}}>✕</button>
             </div>
-            <div style={{display:'flex',gap:8,flexWrap:'wrap' as const,marginBottom:10}}>
-              {[['Status',projView.status],['Priority',projView.priority],['Team',projView.team],['Timeline',projView.start_date&&projView.end_date?`${projView.start_date} → ${projView.end_date}`:null],['Items',`${committed.length} committed / ${pis.length} total`]].filter(([,v])=>v).map(([k,v]:any)=>(
-                <span key={k} style={{background:'#1E3048',border:'1px solid #243447',borderRadius:4,padding:'3px 8px',fontSize:10,color:'#7A8FA6'}}>{k}: <span style={{color:'#F4F6F8',fontWeight:600}}>{v}</span></span>
-              ))}
+            <div style={{display:'flex',gap:6,flexWrap:'wrap' as const,marginBottom:10,alignItems:'center'}}>
+              <select value={projView.status||''} onChange={e=>updateProj({status:e.target.value})} title="Status"
+                style={{background:'#1E3048',border:'1px solid #243447',borderRadius:4,color:'#F4F6F8',fontSize:10,fontWeight:600,padding:'3px 6px',cursor:'pointer'}}>
+                {projectStatusesFor(spaceOf(projView)).map(st=><option key={st} value={st}>{st}</option>)}
+              </select>
+              <select value={projView.priority||''} onChange={e=>updateProj({priority:e.target.value})} title="Priority"
+                style={{background:'#1E3048',border:'1px solid #243447',borderRadius:4,color:'#F4F6F8',fontSize:10,fontWeight:600,padding:'3px 6px',cursor:'pointer'}}>
+                {PRIORITIES.map(p=><option key={p} value={p}>{p}</option>)}
+              </select>
+              {spaceOf(projView)==='work'&&(
+                <select value={projView.team||''} onChange={e=>updateProj({team:e.target.value})} title="Team"
+                  style={{background:'#1E3048',border:'1px solid #243447',borderRadius:4,color:'#F4F6F8',fontSize:10,fontWeight:600,padding:'3px 6px',cursor:'pointer'}}>
+                  {TEAMS.map(t=><option key={t} value={t}>{t}</option>)}
+                </select>
+              )}
+              <input type="date" value={projView.start_date||''} onChange={e=>updateProj({start_date:e.target.value||null})} title="Start date"
+                style={{background:'#1E3048',border:'1px solid #243447',borderRadius:4,color:'#F4F6F8',fontSize:10,padding:'2px 5px'}}/>
+              <span style={{color:'#7A8FA6',fontSize:10}}>→</span>
+              <input type="date" value={projView.end_date||''} disabled={!!projView.ongoing} onChange={e=>updateProj({end_date:e.target.value||null})} title="End date"
+                style={{background:'#1E3048',border:'1px solid #243447',borderRadius:4,color:'#F4F6F8',fontSize:10,padding:'2px 5px',opacity:projView.ongoing?0.4:1}}/>
+              <label style={{display:'flex',alignItems:'center',gap:4,fontSize:10,color:'#7A8FA6',cursor:'pointer'}} title="Ongoing — no fixed end date">
+                <input type="checkbox" checked={!!projView.ongoing} onChange={e=>updateProj({ongoing:e.target.checked,...(e.target.checked?{end_date:null}:{})})}/>∞
+              </label>
+              <span style={{background:'#1E3048',border:'1px solid #243447',borderRadius:4,padding:'3px 8px',fontSize:10,color:'#7A8FA6'}}>Items: <span style={{color:'#F4F6F8',fontWeight:600}}>{committed.length} committed / {pis.length}</span></span>
             </div>
             {projView.description&&<div style={{fontSize:12,color:'#B8C4D0',lineHeight:1.5,marginBottom:12}}>{projView.description}</div>}
             <div style={{marginBottom:12}}>
@@ -4174,7 +4227,7 @@ useEffect(()=>{
         {activeTab==='projects'&&<Projects items={sItems} setItems={setSItems} projects={sProjects} setProjects={setSProjects} milestones={sMilestones} setMilestones={setSMilestones} tasks={tasks} setTasks={setTasks} space={space}/>}
 {activeTab==='roadmap'&&<Roadmap items={sItems} setItems={setSItems} projects={sProjects} setProjects={setSProjects} milestones={sMilestones}/>}
         {activeTab==='teams'&&<Teams items={sItems} projects={sProjects} milestones={sMilestones}/>}
-        {activeTab==='desk'&&<Desk items={items} setItems={setItems} projects={projects} milestones={milestones} setMilestones={setMilestones} tasks={tasks} setTasks={setTasks} ccrs={ccrs} setCcrs={setCcrs} ccrItems={ccrItems} setCcrItems={setCcrItems} space={space}/>}
+        {activeTab==='desk'&&<Desk items={items} setItems={setItems} projects={projects} setProjects={setProjects} milestones={milestones} setMilestones={setMilestones} tasks={tasks} setTasks={setTasks} ccrs={ccrs} setCcrs={setCcrs} ccrItems={ccrItems} setCcrItems={setCcrItems} space={space}/>}
         {activeTab==='stakeholder'&&<Stakeholder items={sItems} projects={sProjects} milestones={sMilestones}/>}
         {activeTab==='done'&&<DoneTab items={sItems} setItems={setSItems} projects={sProjects} setProjects={setSProjects}/>}
       </div>
