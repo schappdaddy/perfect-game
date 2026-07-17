@@ -2522,9 +2522,9 @@ function Teams({items,projects,milestones}:{items:any[],projects:any[],milestone
       const committed=rankedX.filter(i=>i.parent_project===p.name&&i.start_date&&i.end_date)
       const backlog=rankedX.filter(i=>i.parent_project===p.name&&!(i.start_date&&i.end_date))
       if(!committed.length&&!backlog.length)return ''
-      const tbl=(rows:any[],dated:boolean)=>`<table cellspacing="0" style="border-collapse:collapse;width:100%;table-layout:fixed;">
-        <colgroup><col style="width:28px;"/><col style="width:68px;"/><col style="width:300px;"/><col style="width:100px;"/><col style="width:36px;"/><col style="width:36px;"/><col style="width:140px;"/>${dated?'<col style="width:72px;"/>':''}</colgroup>
-        <tr><th style="${TH_}">#</th><th style="${TH_}">ID</th><th style="${TH_}">Item</th><th style="${TH_}">Type</th><th style="${TH_}">Pri</th><th style="${TH_}">Size</th><th style="${TH_}">Status</th>${dated?`<th style="${TH_}">Target</th>`:''}</tr>
+      const tbl=(rows:any[])=>`<table cellspacing="0" style="border-collapse:collapse;width:100%;table-layout:fixed;">
+        <colgroup><col style="width:28px;"/><col style="width:68px;"/><col style="width:300px;"/><col style="width:100px;"/><col style="width:36px;"/><col style="width:36px;"/><col style="width:140px;"/><col style="width:72px;"/></colgroup>
+        <tr><th style="${TH_}">#</th><th style="${TH_}">ID</th><th style="${TH_}">Item</th><th style="${TH_}">Type</th><th style="${TH_}">Pri</th><th style="${TH_}">Size</th><th style="${TH_}">Status</th><th style="${TH_}">Target</th></tr>
         ${rows.map((i,n)=>`<tr>
           <td style="${TD_}text-align:center;font-weight:bold;">${n+1}</td>
           <td style="${TD_}white-space:nowrap;overflow:hidden;">${hs(i.item_id)}</td>
@@ -2533,12 +2533,12 @@ function Teams({items,projects,milestones}:{items:any[],projects:any[],milestone
           <td style="${TD_}white-space:nowrap;">${priTxt(i.priority)}</td>
           <td style="${TD_}text-align:center;">${i.effort||''}</td>
           <td style="${TD_}overflow:hidden;">${hs(i.status)}</td>
-          ${dated?`<td style="${TD_}white-space:nowrap;font-weight:bold;">${hs(fmtD(i.end_date))}</td>`:''}
+          <td style="${TD_}white-space:nowrap;font-weight:bold;">${i.start_date&&i.end_date?hs(fmtD(i.end_date)):'<span style="color:#7F7F7F;font-weight:normal;">—</span>'}</td>
         </tr>`).join('')}</table>`
       return `<div style="margin:0 0 18px;">
         <div style="font-size:14px;font-weight:bold;color:#1F1F1F;border-bottom:1px solid #D9D9D9;padding-bottom:3px;margin-bottom:5px;">${p.name}</div>
-        ${committed.length?`<div style="font-size:12px;font-weight:bold;color:#595959;margin:6px 0 3px;">Committed (${committed.length})</div>${tbl(committed,true)}`:''}
-        ${backlog.length?`<div style="font-size:12px;font-weight:bold;color:#595959;margin:8px 0 3px;">Backlog — Ranked (${backlog.length})</div>${tbl(backlog,false)}`:''}
+        ${committed.length?`<div style="font-size:12px;font-weight:bold;color:#595959;margin:6px 0 3px;">Committed (${committed.length})</div>${tbl(committed)}`:''}
+        ${backlog.length?`<div style="font-size:12px;font-weight:bold;color:#595959;margin:8px 0 3px;">Not Committed (${backlog.length})</div>${tbl(backlog)}`:''}
       </div>`
     }).join('')
     const projectsHtml=projBlocks?`<div style="${H2}">Projects</div>${projBlocks}`:''
@@ -2846,22 +2846,20 @@ function ComposeUpdate({projects,milestones,items,onClose}:{projects:any[],miles
         <div style="font-size:14px;font-weight:bold;color:#1F1F1F;border-bottom:1px solid #D9D9D9;padding-bottom:3px;margin-bottom:5px;">${p.name}${tag?` <span style="font-size:11px;font-weight:bold;color:#7F7F7F;">[${tag}]</span>`:''} <span style="font-size:12px;font-weight:normal;color:#595959;">— ${ragTxt(p.rag)}${p.status?` | ${p.status}`:''}${timeline?` | ${timeline}`:''}</span></div>
         ${upd?`<div style="font-size:13px;color:#222222;line-height:1.55;">${upd}</div>`:`<div style="font-size:13px;color:#7F7F7F;font-style:italic;">No update provided this period.</div>`}
         ${blk?`<div style="font-size:13px;color:#222222;line-height:1.5;margin-top:4px;"><b style="color:#C0392B;">Risks / Blockers:</b> ${blk}</div>`:''}
-        ${pItems.length?`<table cellspacing="0" style="border-collapse:collapse;width:100%;margin-top:6px;">
-          <tr><th style="${TH_}width:64px;">ID</th><th style="${TH_}">Item</th><th style="${TH_}width:170px;">Status</th><th style="${TH_}width:80px;">Target</th></tr>
-          ${pItems.map((i:any)=>`<tr>
-            <td style="${TD_}white-space:nowrap;">${hs(i.item_id)}</td>
-            <td style="${TD_}">${i.name}${i.vendor_delivery_date?`<div style="font-size:11px;color:#8A6D1F;">Vendor deliverable: ${hs(fmtD(i.vendor_delivery_date))}</div>`:''}</td>
-            <td style="${TD_}white-space:nowrap;">${hs(i.status)}</td>
-            <td style="${TD_}white-space:nowrap;font-weight:bold;">${hs(fmtD(i.end_date))}</td>
-          </tr>`).join('')}</table>`:''}
-        ${pUncommitted.length?`<div style="font-size:12px;font-weight:bold;color:#595959;margin:8px 0 3px;">Not Committed (${pUncommitted.length})</div>
-        <table cellspacing="0" style="border-collapse:collapse;width:100%;">
-          ${pUncommitted.map((i:any)=>`<tr>
-            <td style="${TD_}white-space:nowrap;width:64px;">${hs(i.item_id)}</td>
-            <td style="${TD_}">${i.name}</td>
-            <td style="${TD_}white-space:nowrap;width:38px;">${priTxt(i.priority)}</td>
-            <td style="${TD_}white-space:nowrap;width:170px;">${hs(i.status)}</td>
-          </tr>`).join('')}</table>`:''}
+        ${(()=>{
+          const sTbl=(rows:any[])=>`<table cellspacing="0" style="border-collapse:collapse;width:100%;table-layout:fixed;margin-top:2px;">
+            <colgroup><col style="width:64px;"/><col/><col style="width:38px;"/><col style="width:165px;"/><col style="width:74px;"/></colgroup>
+            <tr><th style="${TH_}">ID</th><th style="${TH_}">Item</th><th style="${TH_}">Pri</th><th style="${TH_}">Status</th><th style="${TH_}">Target</th></tr>
+            ${rows.map((i:any)=>`<tr>
+              <td style="${TD_}white-space:nowrap;overflow:hidden;">${hs(i.item_id)}</td>
+              <td style="${TD_}overflow:hidden;word-wrap:break-word;">${i.name}${i.vendor_delivery_date?`<div style="font-size:11px;color:#8A6D1F;">Vendor deliverable: ${hs(fmtD(i.vendor_delivery_date))}</div>`:''}</td>
+              <td style="${TD_}white-space:nowrap;">${priTxt(i.priority)}</td>
+              <td style="${TD_}overflow:hidden;">${hs(i.status)}</td>
+              <td style="${TD_}white-space:nowrap;font-weight:bold;">${i.start_date&&i.end_date?hs(fmtD(i.end_date)):'<span style="color:#7F7F7F;font-weight:normal;">—</span>'}</td>
+            </tr>`).join('')}</table>`
+          return `${pItems.length?`<div style="font-size:12px;font-weight:bold;color:#595959;margin:8px 0 3px;">Committed (${pItems.length})</div>${sTbl(pItems)}`:''}
+          ${pUncommitted.length?`<div style="font-size:12px;font-weight:bold;color:#595959;margin:8px 0 3px;">Not Committed (${pUncommitted.length})</div>${sTbl(pUncommitted)}`:''}`
+        })()}
       </div>`
     }
     const milestonesHtml=upcoming.length?`<div style="${H2}">Milestones (${upcoming.length})</div>
