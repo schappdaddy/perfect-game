@@ -2544,8 +2544,8 @@ function Teams({items,projects,milestones}:{items:any[],projects:any[],milestone
     const projectsHtml=projBlocks?`<div style="${H2}">Projects</div>${projBlocks}`:''
     // Items with no project — by convention these are bugs: one prioritized queue
     const noProj=rankedX.filter(i=>!i.parent_project||!teamProjNames.has(i.parent_project))
-    const bugsHtml=noProj.length?`<div style="${H2}">Bugs — Prioritized (${noProj.length})</div>
-      <div style="font-size:12px;color:#595959;margin-bottom:6px;">No project attached — work top to bottom by rank.</div>
+    const bugsHtml=noProj.length?`<div style="${H2}">Backlog (${noProj.length})</div>
+      <div style="font-size:12px;color:#595959;margin-bottom:6px;">No project attached — prioritized, work top to bottom.</div>
       <table cellspacing="0" style="border-collapse:collapse;width:100%;table-layout:fixed;">
       <colgroup><col style="width:28px;"/><col style="width:68px;"/><col style="width:300px;"/><col style="width:100px;"/><col style="width:36px;"/><col style="width:36px;"/><col style="width:140px;"/><col style="width:72px;"/></colgroup>
       <tr><th style="${TH_}">#</th><th style="${TH_}">ID</th><th style="${TH_}">Item</th><th style="${TH_}">Type</th><th style="${TH_}">Pri</th><th style="${TH_}">Size</th><th style="${TH_}">Status</th><th style="${TH_}">Target</th></tr>
@@ -2572,7 +2572,7 @@ function Teams({items,projects,milestones}:{items:any[],projects:any[],milestone
     const html=`<div style="font-family:Calibri,'Segoe UI',Arial,sans-serif;max-width:900px;color:#222222;">
       <div style="font-size:22px;font-weight:bold;color:#1F1F1F;">${team} — Work Queue</div>
       <div style="font-size:13px;color:#595959;margin-bottom:12px;">${today}</div>
-      <div style="font-size:13px;color:#222222;margin-bottom:4px;"><b>${inFlight.length} committed</b> · <b>${upNext.length} in backlog</b>${noProj.length?` · ${noProj.length} unattached bugs`:''}${devFlags.length?` · ${devFlags.length} for discussion`:''}</div>
+      <div style="font-size:13px;color:#222222;margin-bottom:4px;"><b>${inFlight.length} committed</b> · <b>${upNext.length} in backlog</b>${noProj.length?` · ${noProj.length} backlog (no project)`:''}${devFlags.length?` · ${devFlags.length} for discussion`:''}</div>
       ${roadmapHtml}
       ${msHtml}
       ${projectsHtml}
@@ -2810,21 +2810,22 @@ function ComposeUpdate({projects,milestones,items,onClose}:{projects:any[],miles
     const flagged=items.filter(flagStk)
     const itemRow=(i:any,n?:number)=>`<tr>
       ${n!=null?`<td style="${TD_}text-align:center;font-weight:bold;">${n}</td>`:''}
-      <td style="${TD_}white-space:nowrap;">${hs(i.item_id)}</td>
-      <td style="${TD_}">${i.name}</td>
-      <td style="${TD_}">${i.parent_project||'<span style="color:#7F7F7F;">—</span>'}</td>
+      <td style="${TD_}white-space:nowrap;overflow:hidden;">${hs(i.item_id)}</td>
+      <td style="${TD_}overflow:hidden;word-wrap:break-word;"><b>${i.name}</b></td>
+      <td style="${TD_}overflow:hidden;">${i.parent_project||'<span style="color:#7F7F7F;">—</span>'}</td>
       <td style="${TD_}white-space:nowrap;">${priTxt(i.priority)}</td>
-      <td style="${TD_}white-space:nowrap;">${hs(i.status)}</td>
-      <td style="${TD_}white-space:nowrap;">${hs(i.team)}</td>
+      <td style="${TD_}overflow:hidden;">${hs(i.status)}</td>
+      <td style="${TD_}overflow:hidden;">${hs(i.team)}</td>
     </tr>`
-    const itemHead=(n?:boolean)=>`<tr>${n?`<th style="${TH_}width:26px;">#</th>`:''}<th style="${TH_}width:64px;">ID</th><th style="${TH_}">Item</th><th style="${TH_}width:170px;">Project</th><th style="${TH_}width:38px;">Pri</th><th style="${TH_}width:150px;">Status</th><th style="${TH_}width:150px;">Team</th></tr>`
+    const itemHead=(n?:boolean)=>`${n?'<colgroup><col style="width:26px;"/><col style="width:68px;"/><col style="width:300px;"/><col style="width:160px;"/><col style="width:36px;"/><col style="width:140px;"/><col style="width:140px;"/></colgroup>':'<colgroup><col style="width:68px;"/><col style="width:300px;"/><col style="width:160px;"/><col style="width:36px;"/><col style="width:140px;"/><col style="width:140px;"/></colgroup>'}<tr>${n?`<th style="${TH_}">#</th>`:''}<th style="${TH_}">ID</th><th style="${TH_}">Item</th><th style="${TH_}">Project</th><th style="${TH_}">Pri</th><th style="${TH_}">Status</th><th style="${TH_}">Team</th></tr>`
     const p12Html=p12.length?`<div style="${H2}">Critical Items (P1 / P2)</div>
-      <table cellspacing="0" style="border-collapse:collapse;width:100%;">${itemHead()}${p12.map((i:any)=>itemRow(i)).join('')}</table>`:''
+      <table cellspacing="0" style="border-collapse:collapse;width:100%;table-layout:fixed;">${itemHead()}${p12.map((i:any)=>itemRow(i)).join('')}</table>`:''
     const top10Html=top10.length?`<div style="${H2}">Top 10 Backlog — Not Yet Committed</div>
-      <table cellspacing="0" style="border-collapse:collapse;width:100%;">${itemHead(true)}${top10.map((i:any,n:number)=>itemRow(i,n+1)).join('')}</table>`:''
+      <table cellspacing="0" style="border-collapse:collapse;width:100%;table-layout:fixed;">${itemHead(true)}${top10.map((i:any,n:number)=>itemRow(i,n+1)).join('')}</table>`:''
     const flaggedHtml=flagged.length?`<div style="${H2}">Flagged for Discussion</div>
-      <table cellspacing="0" style="border-collapse:collapse;width:100%;">
-      <tr><th style="${TH_}width:64px;">ID</th><th style="${TH_}width:240px;">Item</th><th style="${TH_}width:150px;">Project</th><th style="${TH_}width:38px;">Pri</th><th style="${TH_}">Discussion Notes</th></tr>
+      <table cellspacing="0" style="border-collapse:collapse;width:100%;table-layout:fixed;">
+      <colgroup><col style="width:68px;"/><col style="width:240px;"/><col style="width:150px;"/><col style="width:36px;"/><col style="width:350px;"/></colgroup>
+      <tr><th style="${TH_}">ID</th><th style="${TH_}">Item</th><th style="${TH_}">Project</th><th style="${TH_}">Pri</th><th style="${TH_}">Discussion Notes</th></tr>
       ${flagged.map((i:any)=>`<tr>
         <td style="${TD_}white-space:nowrap;">${hs(i.item_id)}</td>
         <td style="${TD_}font-weight:bold;">${i.name}</td>
@@ -2848,11 +2849,11 @@ function ComposeUpdate({projects,milestones,items,onClose}:{projects:any[],miles
         ${blk?`<div style="font-size:13px;color:#222222;line-height:1.5;margin-top:4px;"><b style="color:#C0392B;">Risks / Blockers:</b> ${blk}</div>`:''}
         ${(()=>{
           const sTbl=(rows:any[])=>`<table cellspacing="0" style="border-collapse:collapse;width:100%;table-layout:fixed;margin-top:2px;">
-            <colgroup><col style="width:64px;"/><col/><col style="width:38px;"/><col style="width:165px;"/><col style="width:74px;"/></colgroup>
+            <colgroup><col style="width:68px;"/><col style="width:380px;"/><col style="width:36px;"/><col style="width:150px;"/><col style="width:72px;"/></colgroup>
             <tr><th style="${TH_}">ID</th><th style="${TH_}">Item</th><th style="${TH_}">Pri</th><th style="${TH_}">Status</th><th style="${TH_}">Target</th></tr>
             ${rows.map((i:any)=>`<tr>
               <td style="${TD_}white-space:nowrap;overflow:hidden;">${hs(i.item_id)}</td>
-              <td style="${TD_}overflow:hidden;word-wrap:break-word;">${i.name}${i.vendor_delivery_date?`<div style="font-size:11px;color:#8A6D1F;">Vendor deliverable: ${hs(fmtD(i.vendor_delivery_date))}</div>`:''}</td>
+              <td style="${TD_}overflow:hidden;word-wrap:break-word;"><b>${i.name}</b>${i.vendor_delivery_date?`<div style="font-size:11px;color:#8A6D1F;">Vendor deliverable: ${hs(fmtD(i.vendor_delivery_date))}</div>`:''}</td>
               <td style="${TD_}white-space:nowrap;">${priTxt(i.priority)}</td>
               <td style="${TD_}overflow:hidden;">${hs(i.status)}</td>
               <td style="${TD_}white-space:nowrap;font-weight:bold;">${i.start_date&&i.end_date?hs(fmtD(i.end_date)):'<span style="color:#7F7F7F;font-weight:normal;">—</span>'}</td>
@@ -2863,8 +2864,9 @@ function ComposeUpdate({projects,milestones,items,onClose}:{projects:any[],miles
       </div>`
     }
     const milestonesHtml=upcoming.length?`<div style="${H2}">Milestones (${upcoming.length})</div>
-      <table cellspacing="0" style="border-collapse:collapse;width:100%;">
-      <tr><th style="${TH_}width:70px;">Date</th><th style="${TH_}width:220px;">Project</th><th style="${TH_}">Milestone</th></tr>
+      <table cellspacing="0" style="border-collapse:collapse;width:100%;table-layout:fixed;">
+      <colgroup><col style="width:70px;"/><col style="width:220px;"/><col style="width:560px;"/></colgroup>
+      <tr><th style="${TH_}">Date</th><th style="${TH_}">Project</th><th style="${TH_}">Milestone</th></tr>
       ${upcoming.map(m=>{
         const pr=projects.find(p=>p.id===m.project_id)
         return `<tr><td style="${TD_}white-space:nowrap;">${hs(fmtD(m.date))}</td><td style="${TD_}">${pr?.name||''}</td><td style="${TD_}">${m.name}</td></tr>`
