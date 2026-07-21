@@ -3550,7 +3550,7 @@ function Desk({items,setItems,projects,setProjects,milestones,setMilestones,task
     const open=linked.filter((x:any)=>!ITEM_TERMINAL.includes(x.status))
     await setCcrField(c,{status:'Closed'})
     if(open.length){
-      const yes=confirm(`CCR "${c.title}" closed. Also mark its ${open.length} item${open.length!==1?'s':''} as Done?\n\nOK — items are deployed, mark them Done\nCancel — leave item statuses as they are`)
+      const yes=confirm(`CCR "${c.title}" closed. Mark its ${open.length} open item${open.length!==1?'s':''} as Done?\n\nOK — items deployed with this change: mark them Done\nCancel — items did NOT ship: remove them from this CCR (they stay open and can join a future CCR)`)
       if(yes){
         let cur=[...items]
         for(const it of open as any[]){
@@ -3560,6 +3560,12 @@ function Desk({items,setItems,projects,setProjects,milestones,setMilestones,task
           const rank=new Map(active.map((i,idx)=>[i.id,idx]))
           cur=cur.map(i=>i.id===it.id?{...i,status:'Done',committed_priority:null}:rank.has(i.id)?{...i,committed_priority:rank.get(i.id)!}:i)
         }
+      }else{
+        // Unshipped items don't belong in a closed change — detach so the record is honest and they're free for the next CCR
+        const openIds=new Set((open as any[]).map((x:any)=>x.id))
+        setCcrItems((prev:any[])=>prev.filter(l=>!(l.ccr_id===c.id&&openIds.has(l.item_id))))
+        const{error}=await supabase.from('ccr_items').delete().eq('ccr_id',c.id).in('item_id',[...openIds])
+        if(error)alert('CCR closed, but detaching the open items failed: '+error.message)
       }
     }
   }
