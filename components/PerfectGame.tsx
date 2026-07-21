@@ -217,7 +217,8 @@ function ViolationRow({v,project,fmt,d}:{v:any,project:any,fmt:any,d:any}) {
     </div>
   )
 }
-function ProjectDetail({project,items,setItems,projects,milestones,setMilestones,tasks,setTasks,onClose,d,fmt}:any) {
+function ProjectDetail({project,items,setItems,projects,milestones,setMilestones,tasks,setTasks,onClose,d,fmt,ccrs=[],ccrItems=[]}:any) {
+  const [pdCcrExp,setPdCcrExp]=useState<any>({})
   const mobileP=useIsMobile()
   const [pdTitle,setPdTitle]=useState('')
   const [pdDate,setPdDate]=useState('')
@@ -335,6 +336,44 @@ function ProjectDetail({project,items,setItems,projects,milestones,setMilestones
       </div>
 
       <div style={{flex:1,overflowY:'auto'}}>
+
+        {/* Change requests for this project */}
+        {spaceOf(project)==='work'&&(()=>{
+          const projCcrs=(ccrs as any[]).filter((c:any)=>c.project_id===project.id)
+          if(!projCcrs.length)return null
+          const stClr=(st:string)=>st==='To Create'?'#E8B95A':st==='Opened'?'#5DADE2':st==='Approved'?'#27AE60':st==='Rejected'?'#E74C3C':'#7A8FA6'
+          return(
+            <div style={{padding:'14px 16px',borderBottom:'1px solid #243447'}}>
+              <div style={{fontSize:12,fontWeight:700,color:'#5DADE2',letterSpacing:1,marginBottom:8}}>📋 CHANGE REQUESTS ({projCcrs.length})</div>
+              {projCcrs.map((c:any)=>{
+                const linked=(ccrItems as any[]).filter((l:any)=>l.ccr_id===c.id).map((l:any)=>items.find((x:any)=>x.id===l.item_id)).filter(Boolean)
+                const exp=pdCcrExp[c.id]
+                return(
+                  <div key={c.id} style={{marginBottom:6}}>
+                    <div onClick={()=>setPdCcrExp((e:any)=>({...e,[c.id]:!e[c.id]}))} style={{display:'flex',alignItems:'center',gap:7,cursor:'pointer'}}>
+                      <span style={{fontSize:9,color:'#7A8FA6'}}>{exp?'▾':'▸'}</span>
+                      <span style={{fontSize:11,fontWeight:700,color:'#F4F6F8',flex:1,overflow:'hidden',whiteSpace:'nowrap' as const,textOverflow:'ellipsis'}}>{c.title}</span>
+                      {c.ccr_number&&<span onClick={e=>{e.stopPropagation();navigator.clipboard.writeText(c.ccr_number)}} title="Click to copy" style={{fontSize:9,fontFamily:'monospace',color:'#5DADE2',border:'1px solid #24445E',borderRadius:3,padding:'0 4px',cursor:'copy',flexShrink:0}}>{c.ccr_number}</span>}
+                      <span style={{fontSize:9,fontWeight:700,color:stClr(c.status),flexShrink:0}}>{c.status.toUpperCase()}</span>
+                    </div>
+                    {exp&&(
+                      <div style={{margin:'4px 0 0 20px'}}>
+                        {linked.length===0&&<div style={{fontSize:10,color:'#7A8FA6',fontStyle:'italic'}}>No items attached</div>}
+                        {linked.map((it:any)=>(
+                          <div key={it.id} style={{display:'flex',alignItems:'center',gap:6,fontSize:10,padding:'1px 0'}}>
+                            <span style={{fontFamily:'monospace',color:'#7A8FA6'}}>{it.item_id}</span>
+                            <span style={{color:'#C8C8D4',flex:1,overflow:'hidden',whiteSpace:'nowrap' as const,textOverflow:'ellipsis'}}>{rt(it.request_type)} {it.name}</span>
+                            <span style={{fontSize:8,fontWeight:700,color:sc(it.status),flexShrink:0}}>{it.status}</span>
+                          </div>
+                        ))}
+                      </div>
+                    )}
+                  </div>
+                )
+              })}
+            </div>
+          )
+        })()}
 
         {/* Milestones */}
         <div style={{padding:'14px 16px',borderBottom:'1px solid #243447'}}>
@@ -635,7 +674,7 @@ function ProjectDetail({project,items,setItems,projects,milestones,setMilestones
     </div>
   )
 }
-function Projects({items,setItems,projects,setProjects,milestones,setMilestones,tasks,setTasks,space}:{items:any[],setItems:any,projects:any[],setProjects:any,milestones:any[],setMilestones:any,tasks:any[],setTasks:any,space:string}) {
+function Projects({items,setItems,projects,setProjects,milestones,setMilestones,tasks,setTasks,space,ccrs,ccrItems}:{items:any[],setItems:any,projects:any[],setProjects:any,milestones:any[],setMilestones:any,tasks:any[],setTasks:any,space:string,ccrs:any[],ccrItems:any[]}) {
   const mobile=useIsMobile()
   const [adding,setAdding]=useState(false)
   const [editing,setEditing]=useState(null)
@@ -969,6 +1008,8 @@ function Projects({items,setItems,projects,setProjects,milestones,setMilestones,
     onClose={()=>setSelectedProject(null)}
     d={d}
     fmt={fmt}
+    ccrs={ccrs}
+    ccrItems={ccrItems}
   />
 )}
 
@@ -3504,6 +3545,24 @@ function Desk({items,setItems,projects,setProjects,milestones,setMilestones,task
     const{error}=await supabase.from('ccr_items').insert({ccr_id:ccrId,item_id:itemId})
     if(error){setCcrItems((prev:any[])=>prev.filter(l=>!(l.ccr_id===ccrId&&l.item_id===itemId)));alert('Failed to link item: '+error.message)}
   }
+  async function closeCcrWithItems(c:any){
+    const linked=ccrItems.filter(l=>l.ccr_id===c.id).map(l=>items.find(x=>x.id===l.item_id)).filter(Boolean)
+    const open=linked.filter((x:any)=>!ITEM_TERMINAL.includes(x.status))
+    await setCcrField(c,{status:'Closed'})
+    if(open.length){
+      const yes=confirm(`CCR "${c.title}" closed. Also mark its ${open.length} item${open.length!==1?'s':''} as Done?\n\nOK — items are deployed, mark them Done\nCancel — leave item statuses as they are`)
+      if(yes){
+        let cur=[...items]
+        for(const it of open as any[]){
+          await applyItemStatus(cur,setItems,it.id,'Done')
+          const active=cur.filter(i=>i.id!==it.id&&!ITEM_TERMINAL.includes(i.status)&&i.priority!=='P1'&&i.priority!=='P2')
+            .sort((a,b)=>(a.committed_priority??a.sort_order??999)-(b.committed_priority??b.sort_order??999))
+          const rank=new Map(active.map((i,idx)=>[i.id,idx]))
+          cur=cur.map(i=>i.id===it.id?{...i,status:'Done',committed_priority:null}:rank.has(i.id)?{...i,committed_priority:rank.get(i.id)!}:i)
+        }
+      }
+    }
+  }
   async function removeItemFromCcr(ccrId:any,itemId:any){
     setCcrItems((prev:any[])=>prev.filter(l=>!(l.ccr_id===ccrId&&l.item_id===itemId)))
     await supabase.from('ccr_items').delete().eq('ccr_id',ccrId).eq('item_id',itemId)
@@ -3814,7 +3873,7 @@ function Desk({items,setItems,projects,setProjects,milestones,setMilestones,task
                         <>
                         <input value={c.ccr_number||''} placeholder="CCR #" onChange={e=>setCcrField(c,{ccr_number:e.target.value})}
                           style={{width:100,background:'#0D1B2A',border:'1px solid #243447',borderRadius:5,color:'#5DADE2',fontSize:10,fontFamily:'monospace',padding:'4px 6px'}}/>
-                        <button onClick={()=>setCcrField(c,{status:'Closed'})} style={{background:'#16A085',border:'none',borderRadius:5,color:'#fff',fontSize:10,fontWeight:700,padding:'4px 10px',cursor:'pointer'}}>Close</button>
+                        <button onClick={()=>closeCcrWithItems(c)} style={{background:'#16A085',border:'none',borderRadius:5,color:'#fff',fontSize:10,fontWeight:700,padding:'4px 10px',cursor:'pointer'}}>Close</button>
                         </>
                       )}
                       {c.status==='Rejected'&&(
@@ -4352,7 +4411,10 @@ function Desk({items,setItems,projects,setProjects,milestones,setMilestones,task
 
 
 // ── DONE — history of completed projects and items ───────────────────────
-function DoneTab({items,setItems,projects,setProjects}:{items:any[],setItems:any,projects:any[],setProjects:any}) {
+function DoneTab({items,setItems,projects,setProjects,ccrs,ccrItems,space}:{items:any[],setItems:any,projects:any[],setProjects:any,ccrs:any[],ccrItems:any[],space:string}) {
+  const [ccrSecOpen,setCcrSecOpen]=useState(true)
+  const [dnCcrExp,setDnCcrExp]=useState<any>({})
+  const ccrOf=(itemId:any)=>{const l=ccrItems.find((x:any)=>x.item_id===itemId);return l?ccrs.find((c:any)=>c.id===l.ccr_id):null}
   const [projOpen,setProjOpen]=useState(true)
   const [itemOpen,setItemOpen]=useState(true)
   const [pSrch,setPSrch]=useState('');const [pTeam,setPTeam]=useState('All');const [pStatus,setPStatus]=useState('All')
@@ -4388,6 +4450,45 @@ function DoneTab({items,setItems,projects,setProjects}:{items:any[],setItems:any
     <div style={{height:'100%',overflowY:'auto',padding:'20px 28px'}}>
       <div style={{fontSize:12,color:'#7A8FA6',marginBottom:18}}>History of completed work — records land here automatically when marked {ITEM_TERMINAL.join(' / ')} (items) or {PROJECT_TERMINAL.join(' / ')} (projects)</div>
 
+      {/* Closed change requests */}
+      {space==='work'&&(()=>{
+        const closedCcrs=ccrs.filter((c:any)=>c.status==='Closed')
+        if(!closedCcrs.length)return null
+        return(
+          <div style={{background:'#12202F',border:'1px solid #243447',borderRadius:10,padding:'14px 18px',marginBottom:20}}>
+            <button onClick={()=>setCcrSecOpen(o=>!o)} style={secBtn(ccrSecOpen) as any}><span style={{fontSize:11}}>{ccrSecOpen?'▾':'▸'}</span>📋 CLOSED CHANGE REQUESTS ({closedCcrs.length})</button>
+            {ccrSecOpen&&closedCcrs.map((c:any)=>{
+              const pr=projects.find((p:any)=>p.id===c.project_id)
+              const linked=ccrItems.filter((l:any)=>l.ccr_id===c.id).map((l:any)=>items.find(x=>x.id===l.item_id)).filter(Boolean)
+              const exp=dnCcrExp[c.id]
+              return(
+                <div key={c.id} style={{borderTop:'1px solid #1A2838',padding:'8px 0'}}>
+                  <div onClick={()=>setDnCcrExp((e:any)=>({...e,[c.id]:!e[c.id]}))} style={{display:'flex',alignItems:'center',gap:8,cursor:'pointer'}}>
+                    <span style={{fontSize:9,color:'#7A8FA6'}}>{exp?'▾':'▸'}</span>
+                    <span style={{fontSize:12,fontWeight:700,color:'#F4F6F8'}}>{c.title}</span>
+                    {c.ccr_number&&<span style={{fontSize:10,fontFamily:'monospace',color:'#5DADE2',border:'1px solid #24445E',borderRadius:3,padding:'0 5px'}}>{c.ccr_number}</span>}
+                    {pr&&<span style={{fontSize:10,color:'#7A8FA6',borderLeft:`3px solid ${pr.color||'#3A4A5E'}`,paddingLeft:5}}>{pr.name}</span>}
+                    {c.target_date&&<span style={{fontSize:10,color:'#7A8FA6'}}>{c.target_date}</span>}
+                    <span style={{fontSize:10,color:'#7A8FA6',marginLeft:'auto'}}>{linked.length} item{linked.length!==1?'s':''}</span>
+                  </div>
+                  {exp&&(
+                    <div style={{margin:'6px 0 0 22px'}}>
+                      {linked.length===0&&<div style={{fontSize:10,color:'#7A8FA6',fontStyle:'italic'}}>No items were attached</div>}
+                      {linked.map((it:any)=>(
+                        <div key={it.id} style={{display:'flex',alignItems:'center',gap:8,fontSize:11,padding:'2px 0'}}>
+                          <span style={{fontFamily:'monospace',fontSize:10,color:'#7A8FA6'}}>{it.item_id}</span>
+                          <span style={{color:'#C8C8D4'}}>{rt(it.request_type)} {it.name}</span>
+                          <span style={{fontSize:9,fontWeight:700,color:sc(it.status)}}>{it.status}</span>
+                        </div>
+                      ))}
+                    </div>
+                  )}
+                </div>
+              )
+            })}
+          </div>
+        )
+      })()}
       {/* Projects */}
       <div style={{background:'#12202F',border:'1px solid #243447',borderRadius:10,padding:'14px 18px',marginBottom:20}}>
         <button onClick={()=>setProjOpen(o=>!o)} style={secBtn(projOpen) as any}><span style={{fontSize:11}}>{projOpen?'▾':'▸'}</span>◈ PROJECTS ({doneProjects.length})</button>
@@ -4446,7 +4547,7 @@ function DoneTab({items,setItems,projects,setProjects}:{items:any[],setItems:any
           {doneItems.length===0&&<div style={{fontSize:12,color:'#7A8FA6',fontStyle:'italic'}}>No done items{iSrch||iTeam!=='All'||iPri!=='All'||iSwim!=='All'||iProj!=='All'||iStatus!=='All'?' matching filters':''}</div>}
           {doneItems.length>0&&(
             <table style={{borderCollapse:'collapse',width:'100%'}}>
-              <thead><tr><th style={THD}>ID</th><th style={THD}>Item</th><th style={THD}>Status</th><th style={THD}>Priority</th><th style={THD}>Swimlane</th><th style={THD}>Team</th><th style={THD}>Project</th><th style={THD}>End Date</th></tr></thead>
+              <thead><tr><th style={THD}>ID</th><th style={THD}>Item</th><th style={THD}>Status</th><th style={THD}>Priority</th><th style={THD}>Swimlane</th><th style={THD}>Team</th><th style={THD}>Project</th><th style={THD}>CCR</th><th style={THD}>End Date</th></tr></thead>
               <tbody>{doneItems.map(i=>(
                 <tr key={i.id}>
                   <td style={{...TDD,fontFamily:'monospace',fontSize:10,color:'#7A8FA6'}}>{i.item_id}</td>
@@ -4461,6 +4562,7 @@ function DoneTab({items,setItems,projects,setProjects}:{items:any[],setItems:any
                   <td style={TDD}>{i.swimlane}</td>
                   <td style={TDD}>{i.team}</td>
                   <td style={TDD}>{i.parent_project||'—'}</td>
+                  <td style={TDD}>{(()=>{const c=ccrOf(i.id);return c?<span title={c.title} style={{fontFamily:'monospace',fontSize:10,color:'#5DADE2'}}>{c.ccr_number||c.title}</span>:'—'})()}</td>
                   <td style={TDD}>{i.end_date||'—'}</td>
                 </tr>
               ))}</tbody>
@@ -4604,12 +4706,12 @@ useEffect(()=>{
       </div>
       <div style={{flex:1,overflow:'hidden'}}>
         {activeTab==='backlog'&&<Backlog items={sItems} setItems={setSItems} projects={sProjects} setProjects={setSProjects} space={space}/>}
-        {activeTab==='projects'&&<Projects items={sItems} setItems={setSItems} projects={sProjects} setProjects={setSProjects} milestones={sMilestones} setMilestones={setSMilestones} tasks={tasks} setTasks={setTasks} space={space}/>}
+        {activeTab==='projects'&&<Projects items={sItems} setItems={setSItems} projects={sProjects} setProjects={setSProjects} milestones={sMilestones} setMilestones={setSMilestones} tasks={tasks} setTasks={setTasks} space={space} ccrs={ccrs} ccrItems={ccrItems}/>}
 {activeTab==='roadmap'&&<Roadmap items={sItems} setItems={setSItems} projects={sProjects} setProjects={setSProjects} milestones={sMilestones}/>}
         {activeTab==='teams'&&<Teams items={sItems} projects={sProjects} milestones={sMilestones} ccrs={ccrs} ccrItems={ccrItems}/>}
         {activeTab==='desk'&&<Desk items={items} setItems={setItems} projects={projects} setProjects={setProjects} milestones={milestones} setMilestones={setMilestones} tasks={tasks} setTasks={setTasks} ccrs={ccrs} setCcrs={setCcrs} ccrItems={ccrItems} setCcrItems={setCcrItems} space={space}/>}
         {activeTab==='stakeholder'&&<Stakeholder items={sItems} projects={sProjects} milestones={sMilestones}/>}
-        {activeTab==='done'&&<DoneTab items={sItems} setItems={setSItems} projects={sProjects} setProjects={setSProjects}/>}
+        {activeTab==='done'&&<DoneTab items={sItems} setItems={setSItems} projects={sProjects} setProjects={setSProjects} ccrs={ccrs} ccrItems={ccrItems} space={space}/>}
       </div>
     </div>
   )
