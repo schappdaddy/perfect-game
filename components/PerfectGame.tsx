@@ -1107,7 +1107,22 @@ function PanelField({label,field,type='text',selected,upd}:{label:string,field:s
   )
 }
 
-function Backlog({items,setItems,projects,setProjects,space}:{items:any[],setItems:any,projects:any[],setProjects:any,space:string}) {
+function Backlog({items,setItems,projects,setProjects,space,ccrs=[],ccrItems=[],setCcrItems}:{items:any[],setItems:any,projects:any[],setProjects:any,space:string,ccrs?:any[],ccrItems?:any[],setCcrItems?:any}) {
+  // CCR membership helpers — the link is a junction row, edited from either side
+  const itemCcrLink=(itemId:any)=>{const l=(ccrItems as any[]).find((x:any)=>x.item_id===itemId);return l?{link:l,ccr:(ccrs as any[]).find((c:any)=>c.id===l.ccr_id)}:null}
+  async function detachItemCcr(itemId:any){
+    const found=itemCcrLink(itemId);if(!found)return
+    setCcrItems((prev:any[])=>prev.filter((l:any)=>l.item_id!==itemId))
+    const{error}=await supabase.from('ccr_items').delete().eq('item_id',itemId)
+    if(error){alert('Failed to remove CCR link: '+error.message)}
+  }
+  async function attachItemCcr(itemId:any,ccrId:any){
+    if(!ccrId)return
+    if((ccrItems as any[]).some((l:any)=>l.item_id===itemId))return
+    setCcrItems((prev:any[])=>[...prev,{ccr_id:ccrId,item_id:itemId}])
+    const{error}=await supabase.from('ccr_items').insert({ccr_id:ccrId,item_id:itemId})
+    if(error){setCcrItems((prev:any[])=>prev.filter((l:any)=>!(l.ccr_id===ccrId&&l.item_id===itemId)));alert('Failed to link CCR: '+error.message)}
+  }
  const [ft,setFt]=useState('All')
   const [fp,setFp]=useState('All')
   const [fs,setFs]=useState('All')
@@ -1802,6 +1817,34 @@ const sorted=items.filter(i=>!isItemDone(i)).sort((a,b)=>{
               <PanelField selected={selected} upd={upd} label="Owner" field="owner"/>
               <PanelField selected={selected} upd={upd} label="Dependency" field="dependency"/>
               <PanelField selected={selected} upd={upd} label="Vendor Delivery Date" field="vendor_delivery_date" type="date"/>
+              {space==='work'&&(()=>{
+                const found=itemCcrLink(selected.id)
+                const stClr=(st:string)=>st==='To Create'?'#E8B95A':st==='Opened'?'#5DADE2':st==='Approved'?'#27AE60':st==='Rejected'?'#E74C3C':'#7A8FA6'
+                return(
+                  <div>
+                    <div style={{fontSize:11,color:'#7A8FA6',marginBottom:4,letterSpacing:0.5}}>CCR</div>
+                    {found?(
+                      <div style={{display:'flex',alignItems:'center',gap:7,background:'#1E3048',border:'1px solid #243447',borderRadius:6,padding:'7px 10px'}}>
+                        <span onClick={()=>found.ccr?.ccr_number&&navigator.clipboard.writeText(found.ccr.ccr_number)} title={found.ccr?.ccr_number?'Click to copy':undefined}
+                          style={{fontFamily:'monospace',fontSize:12,color:'#5DADE2',cursor:found.ccr?.ccr_number?'copy':'default'}}>
+                          {found.ccr?.ccr_number||found.ccr?.title||'(deleted CCR)'}
+                        </span>
+                        {found.ccr&&<span style={{fontSize:9,fontWeight:700,color:stClr(found.ccr.status)}}>{found.ccr.status.toUpperCase()}</span>}
+                        {found.ccr&&!found.ccr.ccr_number&&<span style={{fontSize:10,color:'#7A8FA6',overflow:'hidden',whiteSpace:'nowrap' as const,textOverflow:'ellipsis'}}></span>}
+                        <button onClick={()=>detachItemCcr(selected.id)} title="Remove this item from the CCR — everywhere in the app"
+                          style={{marginLeft:'auto',background:'none',border:'1px solid rgba(231,76,60,0.4)',borderRadius:4,color:'#E74C3C',fontSize:10,fontWeight:700,padding:'2px 8px',cursor:'pointer'}}>✕ Remove</button>
+                      </div>
+                    ):(
+                      <select value="" onChange={e=>attachItemCcr(selected.id,e.target.value)}
+                        style={{width:'100%',boxSizing:'border-box' as const,background:'#1E3048',border:'1px dashed #243447',borderRadius:6,color:'#7A8FA6',fontSize:12,padding:'7px 10px',cursor:'pointer'}}>
+                        <option value="">— Not in a CCR — attach to…</option>
+                        {(ccrs as any[]).filter((c:any)=>c.status!=='Closed').map((c:any)=><option key={c.id} value={c.id}>{c.ccr_number?c.ccr_number+' — ':''}{c.title} ({c.status})</option>)}
+                        {(ccrs as any[]).filter((c:any)=>c.status==='Closed').map((c:any)=><option key={c.id} value={c.id}>{c.ccr_number?c.ccr_number+' — ':''}{c.title} (Closed)</option>)}
+                      </select>
+                    )}
+                  </div>
+                )
+              })()}
               <PanelField selected={selected} upd={upd} label="Notes" field="notes" type="textarea"/>
               <div style={{borderTop:'1px solid #243447',paddingTop:14}}>
                 <div style={{fontSize:11,fontWeight:700,color:'#7A8FA6',letterSpacing:1,marginBottom:12}}>RICE SCORING</div>
@@ -4711,7 +4754,7 @@ useEffect(()=>{
         </div>}
       </div>
       <div style={{flex:1,overflow:'hidden'}}>
-        {activeTab==='backlog'&&<Backlog items={sItems} setItems={setSItems} projects={sProjects} setProjects={setSProjects} space={space}/>}
+        {activeTab==='backlog'&&<Backlog items={sItems} setItems={setSItems} projects={sProjects} setProjects={setSProjects} space={space} ccrs={ccrs} ccrItems={ccrItems} setCcrItems={setCcrItems}/>}
         {activeTab==='projects'&&<Projects items={sItems} setItems={setSItems} projects={sProjects} setProjects={setSProjects} milestones={sMilestones} setMilestones={setSMilestones} tasks={tasks} setTasks={setTasks} space={space} ccrs={ccrs} ccrItems={ccrItems}/>}
 {activeTab==='roadmap'&&<Roadmap items={sItems} setItems={setSItems} projects={sProjects} setProjects={setSProjects} milestones={sMilestones}/>}
         {activeTab==='teams'&&<Teams items={sItems} projects={sProjects} milestones={sMilestones} ccrs={ccrs} ccrItems={ccrItems}/>}
