@@ -1092,6 +1092,183 @@ function Backlog({items,setItems,projects,setProjects,space}:{items:any[],setIte
   const [vendors,setVendors]=useState(['Deckers','Salesforce','GreyOrange','Legion','SafeSize','ID.me','Adyen','Agilence','Boomi'])
   const [swimlaneOpts,setSwimOpts]=useState([...SWIMLANES])
   const [statusOpts,setStatusOpts]=useState([...statusesFor(space)])
+  // ── Universal CSV import: upsert by RTL id or Jira key; any provided column updates; blank cells never touch
+  const [jrOpen,setJrOpen]=useState(false)
+  const [jrRows,setJrRows]=useState<any[]>([])
+  const [jrProj,setJrProj]=useState('')
+  const [jrErr,setJrErr]=useState('')
+  const [jrBusy,setJrBusy]=useState(false)
+  const [jrDone,setJrDone]=useState('')
+  function parseCsv(text:string):string[][]{
+    // RFC-4180-ish: quoted fields may contain commas, newlines, and "" escapes
+    const rows:string[][]=[];let row:string[]=[];let cur='';let q=false
+    for(let i=0;i<text.length;i++){
+      const ch=text[i]
+      if(q){
+        if(ch==='"'){if(text[i+1]==='"'){cur+='"';i++}else q=false}
+        else cur+=ch
+      }else{
+        if(ch==='"')q=true
+        else if(ch===','){row.push(cur);cur=''}
+        else if(ch==='\n'||ch==='\r'){
+          if(ch==='\r'&&text[i+1]==='\n')i++
+          row.push(cur);cur=''
+          if(row.some(c=>c.trim()!==''))rows.push(row)
+          row=[]
+        }
+        else cur+=ch
+      }
+    }
+    row.push(cur);if(row.some(c=>c.trim()!==''))rows.push(row)
+    return rows
+  }
+  const normPri=(p:string)=>{
+    if(/^p[1-4]$/i.test(p.trim()))return p.trim().toUpperCase()
+    return /highest|blocker/i.test(p)?'P1':/high|critical|major/i.test(p)?'P2':/low/i.test(p)?'P4':/medium/i.test(p)?'P3':null
+  }
+  const normType=(t:string)=>{
+    const exact=REQUEST_TYPES.find(x=>x.toLowerCase()===t.trim().toLowerCase())
+    if(exact)return exact
+    return /bug|defect/i.test(t)?'Bug':/debt/i.test(t)?'Tech Debt':/epic|initiative/i.test(t)?'Strategic Initiative':/story|task|improvement|enhancement/i.test(t)?'Enhancement':null
+  }
+  const normStatus=(st:string):string|null=>{
+    const exact=statusesFor(space).find(x=>x.toLowerCase()===st.trim().toLowerCase())
+    if(exact)return exact
+    const x=(st||'').toLowerCase()
+    if(/done|closed|resolved|complete/.test(x))return 'Done'
+    if(/deploy/.test(x))return 'Ready for Deployment'
+    if(/test|qa|verification/.test(x))return 'Testing'
+    if(/progress|development|doing/.test(x))return 'In Progress'
+    if(/block|impedi/.test(x))return 'Blocked'
+    if(/review/.test(x))return 'Under Review'
+    if(/to do|todo|open|backlog|new|selected/.test(x))return 'New'
+    return null
+  }
+  const normEffort=(e:string)=>{const u=e.trim().toUpperCase();return ['XS',...EFFORTS].includes(u)?u:null}
+  const normDate=(d:string)=>{
+    if(/^\d{4}-\d{2}-\d{2}$/.test(d.trim()))return d.trim()
+    const t=Date.parse(d);if(isNaN(t))return null
+    const dd=new Date(t);return `${dd.getFullYear()}-${String(dd.getMonth()+1).padStart(2,'0')}-${String(dd.getDate()).padStart(2,'0')}`
+  }
+  function analyzeCsv(text:string){
+    setJrErr('');setJrDone('')
+    const rows=parseCsv(text)
+    if(rows.length<2){setJrErr('Could not read the file — no data rows found.');return}
+    const head=rows[0].map(h=>h.trim().toLowerCase())
+    const col=(re:RegExp)=>head.findIndex(h=>re.test(h))
+    const cKey=col(/^(issue ?key|jira ?key|key)$/)
+    const cRtl=col(/^(id|item ?id|rtl( ?id)?)$/)
+    const cName=col(/^(summary|name|item|title)$/)
+    const cType=col(/^(issue ?type|type|request ?type)$/)
+    const cPri=col(/^(priority|pri)$/)
+    const cSt=col(/^status$/)
+    const cDesc=col(/^description$/)
+    const cProj=col(/^project$/)
+    const cEff=col(/^(size|effort)$/)
+    const cVen=col(/^vendor$/)
+    const cVDate=col(/^vendor ?(delivery ?)?date$/)
+    if(cKey<0&&cRtl<0&&cName<0){setJrErr('Need at least one of: "Issue key" / "Jira Key", "ID" / "RTL ID", or "Summary" / "Name". Found: '+rows[0].join(', '));return}
+    const byJira=new Map(items.filter(i=>i.jira_key).map(i=>[String(i.jira_key).toUpperCase(),i]))
+    const byRtl=new Map(items.map(i=>[String(i.item_id).toUpperCase(),i]))
+    const projByName=new Map(projects.map((p:any)=>[p.name.toLowerCase(),p]))
+    const defaultProj=jrProj?projects.find(p=>p.id===jrProj):null
+    const out=rows.slice(1).map(r=>{
+      const v=(c:number)=>c>=0?(r[c]||'').trim():''
+      const jira=v(cKey).toUpperCase()
+      const rtl=v(cRtl).toUpperCase()
+      const name=v(cName)
+      const notes:string[]=[]
+      // ---- match: RTL id first (authoritative), then jira key
+      const byR=rtl?byRtl.get(rtl):null
+      const byJ=jira?byJira.get(jira):null
+      if(rtl&&!byR)return{mode:'skip',key:rtl||jira,name,reason:`RTL id ${rtl} not found — ids are system-assigned, remove the column to insert as new`}
+      if(byR&&byJ&&byR.id!==byJ.id)return{mode:'skip',key:rtl,name,reason:`${rtl} and ${jira} are different items — fix the row`}
+      const existing=byR||byJ
+      // ---- parse provided fields (blank = not provided = untouched)
+      const fields:any={}
+      if(name)fields.name=name
+      if(v(cType)){const t=normType(v(cType));if(t)fields.request_type=t;else notes.push(`type "${v(cType)}" not recognized`)}
+      if(v(cPri)){const p=normPri(v(cPri));if(p)fields.priority=p;else notes.push(`priority "${v(cPri)}" not recognized`)}
+      if(v(cSt)){const st=normStatus(v(cSt));if(st)fields.status=st;else notes.push(`status "${v(cSt)}" not recognized — keeping current`)}
+      if(v(cDesc))fields.description=v(cDesc).slice(0,500)
+      if(v(cEff)){const e=normEffort(v(cEff));if(e)fields.effort=e;else notes.push(`size "${v(cEff)}" not recognized`)}
+      if(v(cVen))fields.vendor=v(cVen)
+      if(v(cVDate)){const d=normDate(v(cVDate));if(d)fields.vendor_delivery_date=d;else notes.push(`vendor date "${v(cVDate)}" not parseable`)}
+      if(v(cProj)){
+        const pr:any=projByName.get(v(cProj).toLowerCase())
+        if(pr){fields.parent_project=pr.name;if(pr.team)fields.team=pr.team}
+        else notes.push(`project "${v(cProj)}" not found — ignored`)
+      }
+      if(jira)fields.jira_key=jira
+      if(existing){
+        // ---- update: keep only real changes
+        const changes:any={}
+        Object.keys(fields).forEach(k=>{if((existing[k]??'')!==(fields[k]??'')&&fields[k]!==existing[k])changes[k]=fields[k]})
+        if(changes.vendor_delivery_date)changes.vendor_date_changed_at=new Date().toISOString()
+        if(Object.keys(changes).length===0)return{mode:'skip',key:existing.item_id,name:existing.name,reason:notes.length?notes.join(' · '):'no changes'}
+        const summary=Object.keys(changes).filter(k=>k!=='vendor_date_changed_at').map(k=>{
+          const label=k==='parent_project'?'project':k==='request_type'?'type':k==='vendor_delivery_date'?'vendor date':k
+          return `${label}: ${existing[k]||'—'} → ${changes[k]}`
+        }).join(' · ')
+        return{mode:'update',key:existing.item_id,name:existing.name,existingId:existing.id,existingStatus:existing.status,changes,summary,notes}
+      }
+      // ---- insert: needs a name
+      if(!name)return{mode:'skip',key:jira||'(no key)',name:'',reason:'new row without a Summary/Name — nothing to create'}
+      if(!fields.parent_project&&defaultProj){fields.parent_project=defaultProj.name;if(defaultProj.team)fields.team=defaultProj.team}
+      return{mode:'insert',key:jira||'—',name,fields,notes,
+        summary:[fields.request_type||'Enhancement',fields.priority||'P3',fields.status||'New',fields.parent_project||'no project'].join(' · ')}
+    }).filter(Boolean)
+    if(!(out as any[]).some((r:any)=>r.mode!=='skip')&&(out as any[]).length===0){setJrErr('No usable rows found.');return}
+    setJrRows(out as any[])
+  }
+  async function runImport(){
+    setJrBusy(true)
+    let cur=[...items]
+    const inserts=jrRows.filter(r=>r.mode==='insert')
+    const updates=jrRows.filter(r=>r.mode==='update')
+    let inserted=0,updated=0
+    if(inserts.length){
+      const base=parseInt(/^RTL-(\d+)$/.exec(nextItemId(cur))![1],10)
+      const payloads=inserts.map((r,ix)=>({
+        item_id:`RTL-${String(base+ix).padStart(3,'0')}`,
+        name:r.fields.name,description:r.fields.description||null,jira_key:r.fields.jira_key||null,
+        request_type:r.fields.request_type||'Enhancement',priority:r.fields.priority||'P3',
+        status:r.fields.status||(space==='home'?'To Do':'New'),effort:r.fields.effort||'M',
+        swimlane:'POS',region:'',vendor:r.fields.vendor||'',flagged:false,
+        vendor_delivery_date:r.fields.vendor_delivery_date||null,
+        parent_project:r.fields.parent_project||null,team:r.fields.team||null,
+        sort_order:cur.length+ix,space,
+      }))
+      const{data,error}=await supabase.from('items').insert(payloads).select()
+      if(error){setJrErr('Insert failed: '+error.message);setJrBusy(false);return}
+      if(data){setItems((prev:any[])=>[...prev,...data]);cur=[...cur,...data];inserted=data.length}
+    }
+    for(const r of updates){
+      const{status,...rest}=r.changes
+      if(Object.keys(rest).length){
+        setItems((prev:any[])=>prev.map(i=>i.id===r.existingId?{...i,...rest}:i))
+        cur=cur.map(i=>i.id===r.existingId?{...i,...rest}:i)
+        const{error}=await supabase.from('items').update(rest).eq('id',r.existingId)
+        if(error){setJrErr(`Update failed on ${r.key}: `+error.message);setJrBusy(false);return}
+      }
+      if(status){
+        await applyItemStatus(cur,setItems,r.existingId,status)
+        // mirror the same transform locally so later rows compute ranks against fresh data
+        if(!ITEM_TERMINAL.includes(status)){
+          cur=cur.map(i=>i.id===r.existingId?{...i,status}:i)
+        }else{
+          const active=cur.filter(i=>i.id!==r.existingId&&!ITEM_TERMINAL.includes(i.status)&&i.priority!=='P1'&&i.priority!=='P2')
+            .sort((a,b)=>(a.committed_priority??a.sort_order??999)-(b.committed_priority??b.sort_order??999))
+          const rank=new Map(active.map((i,idx)=>[i.id,idx]))
+          cur=cur.map(i=>i.id===r.existingId?{...i,status,committed_priority:null}:rank.has(i.id)?{...i,committed_priority:rank.get(i.id)}:i)
+        }
+      }
+      updated++
+    }
+    setJrBusy(false)
+    setJrRows([])
+    setJrDone(`Imported ${inserted} new item${inserted!==1?'s':''}, updated ${updated} item${updated!==1?'s':''}.`)
+  }
   useEffect(()=>{setStatusOpts([...statusesFor(space)])},[space])
   const [rtOpts,setRtOpts]=useState([...REQUEST_TYPES])
   const [regionOpts,setRegionOpts]=useState(['North America','EMEA','Japan','China','Global','NA/EMEA/JP'])
@@ -1339,6 +1516,75 @@ const sorted=items.filter(i=>!isItemDone(i)).sort((a,b)=>{
 
   return(
     <div style={{display:'flex',flexDirection:'column',height:'100%'}}>
+      {jrOpen&&(
+        <div onClick={()=>!jrBusy&&setJrOpen(false)} style={{position:'fixed',inset:0,background:'rgba(0,0,0,0.65)',zIndex:300,display:'flex',alignItems:'center',justifyContent:'center'}}>
+          <div onClick={e=>e.stopPropagation()} style={{background:'#162436',border:'1px solid #243447',borderRadius:12,width:760,maxWidth:'94vw',maxHeight:'86vh',display:'flex',flexDirection:'column' as const,padding:18,boxSizing:'border-box' as const}}>
+            <div style={{display:'flex',alignItems:'center',gap:10,marginBottom:10}}>
+              <span style={{fontSize:15,fontWeight:800,color:'#F4F6F8'}}>⬆ CSV Import</span>
+              <button onClick={()=>setJrOpen(false)} style={{marginLeft:'auto',background:'none',border:'none',color:'#7A8FA6',fontSize:18,cursor:'pointer'}}>✕</button>
+            </div>
+            <div style={{fontSize:11,color:'#7A8FA6',marginBottom:10,lineHeight:1.5}}>
+              Works with Jira exports or hand-built files. Match by <b>RTL ID</b> or <b>Jira Key</b> → update; no match → insert (needs a Name/Summary).
+              Recognized columns: ID, Jira Key, Name, Type, Pri, Status, Description, Project, Size, Vendor, Vendor Date.
+              Blank cells never overwrite · unrecognized values are skipped with a note, never guessed.
+            </div>
+            <div style={{display:'flex',gap:8,alignItems:'center',marginBottom:10,flexWrap:'wrap' as const}}>
+              <input type="file" accept=".csv,text/csv" onChange={e=>{
+                const f=e.target.files?.[0];if(!f)return
+                const rd=new FileReader();rd.onload=()=>analyzeCsv(String(rd.result||''));rd.readAsText(f)
+              }} style={{fontSize:11,color:'#7A8FA6'}}/>
+              <select value={jrProj} onChange={e=>setJrProj(e.target.value)} title="Fallback project for new rows without a Project column value" style={{background:'#0D1B2A',border:'1px solid #243447',borderRadius:6,color:'#F4F6F8',fontSize:11,padding:'5px 8px',maxWidth:220}}>
+                <option value="">Default project for new rows: none</option>
+                {projects.filter(p=>!PROJECT_TERMINAL.includes(p.status)).map(p=><option key={p.id} value={p.id}>{p.name}</option>)}
+              </select>
+            </div>
+            {jrErr&&<div style={{background:'rgba(231,76,60,0.12)',border:'1px solid #E74C3C',borderRadius:6,color:'#E74C3C',fontSize:11,padding:'7px 10px',marginBottom:10}}>{jrErr}</div>}
+            {jrDone&&<div style={{background:'rgba(39,174,96,0.12)',border:'1px solid #27AE60',borderRadius:6,color:'#27AE60',fontSize:12,fontWeight:700,padding:'7px 10px',marginBottom:10}}>✓ {jrDone}</div>}
+            {jrRows.length>0&&(()=>{
+              const ins=jrRows.filter(r=>r.mode==='insert')
+              const upd=jrRows.filter(r=>r.mode==='update')
+              const skip=jrRows.filter(r=>r.mode==='skip')
+              return(
+                <>
+                <div style={{fontSize:12,color:'#F4F6F8',fontWeight:700,marginBottom:6}}>
+                  {ins.length} new · {upd.length} status update{upd.length!==1?'s':''} · {skip.length} unchanged
+                </div>
+                <div style={{overflowY:'auto',flex:1,minHeight:0,border:'1px solid #243447',borderRadius:8}}>
+                  <table style={{width:'100%',borderCollapse:'collapse' as const,fontSize:11}}>
+                    <thead><tr style={{position:'sticky' as const,top:0,background:'#12202F'}}>
+                      {['','Key','Item','Changes'].map(h=><th key={h} style={{textAlign:'left',padding:'5px 8px',color:'#7A8FA6',fontSize:10,borderBottom:'1px solid #243447'}}>{h}</th>)}
+                    </tr></thead>
+                    <tbody>
+                    {jrRows.map((r,ix)=>(
+                      <tr key={ix} style={{opacity:r.mode==='skip'?0.45:1,borderBottom:'1px solid #1A2838'}}>
+                        <td style={{padding:'4px 8px'}}>
+                          <span style={{fontSize:9,fontWeight:700,color:r.mode==='insert'?'#27AE60':r.mode==='skip'?'#7A8FA6':'#5DADE2'}}>
+                            {r.mode==='insert'?'NEW':r.mode==='skip'?'SKIP':'UPD'}
+                          </span>
+                        </td>
+                        <td style={{padding:'4px 8px',fontFamily:'monospace',color:'#5DADE2',whiteSpace:'nowrap' as const}}>{r.key}</td>
+                        <td style={{padding:'4px 8px',color:'#F4F6F8',maxWidth:240,overflow:'hidden',whiteSpace:'nowrap' as const,textOverflow:'ellipsis'}}>{r.name}</td>
+                        <td style={{padding:'4px 8px',color:'#C8C8D4',maxWidth:320}}>
+                          {r.mode==='skip'?<span style={{fontStyle:'italic'}}>{r.reason}</span>:r.summary}
+                          {r.notes?.length>0&&<div style={{fontSize:10,color:'#C8973A'}}>{r.notes.join(' · ')}</div>}
+                        </td>
+                      </tr>
+                    ))}
+                    </tbody>
+                  </table>
+                </div>
+                <div style={{display:'flex',gap:8,marginTop:12,justifyContent:'flex-end'}}>
+                  <button onClick={()=>setJrRows([])} disabled={jrBusy} style={{background:'none',border:'1px solid #243447',borderRadius:6,color:'#7A8FA6',fontSize:12,padding:'7px 14px',cursor:'pointer'}}>Clear</button>
+                  <button onClick={runImport} disabled={jrBusy||(ins.length===0&&upd.length===0)} style={{background:'#5DADE2',border:'none',borderRadius:6,color:'#0D1B2A',fontSize:12,fontWeight:700,padding:'7px 18px',cursor:'pointer',opacity:jrBusy||(ins.length===0&&upd.length===0)?0.5:1}}>
+                    {jrBusy?'Importing…':`Import ${ins.length} new${upd.length?` + update ${upd.length}`:''}`}
+                  </button>
+                </div>
+                </>
+              )
+            })()}
+          </div>
+        </div>
+      )}
       <div style={{display:'flex',gap:8,padding:'10px 20px',borderBottom:'1px solid #243447',flexWrap:'wrap',alignItems:'center',background:'#162436'}}>
         <input placeholder="Search..." value={srch} onChange={e=>setSrch(e.target.value)} style={{...sel,width:160}}/>
         <select value={ft} onChange={e=>setFt(e.target.value)} style={sel}><option value="All">All Teams</option>{TEAMS.map(t=><option key={t}>{t}</option>)}</select>
@@ -1355,6 +1601,7 @@ const sorted=items.filter(i=>!isItemDone(i)).sort((a,b)=>{
         </button>
         <div style={{marginLeft:'auto',display:'flex',gap:8}}>
           <button onClick={exportExcel} title="Export current view to Excel in ranked order" style={{...sel,color:'#27AE60',border:'1px solid rgba(39,174,96,0.4)'}}>⬇ Excel</button>
+          <button onClick={()=>{setJrOpen(true);setJrRows([]);setJrErr('');setJrDone('')}} title="Import CSV — Jira exports or hand-built files; matches by RTL ID or Jira Key to update, inserts the rest" style={{...sel,color:'#5DADE2',border:'1px solid rgba(93,173,226,0.4)'}}>⬆ Import CSV</button>
           <button onClick={()=>setSac(true)} style={{...sel,color:'#7A8FA6'}}>+ Column</button>
           <button onClick={()=>setAi(true)} style={{background:'#C8973A',color:'#0D1B2A',border:'none',borderRadius:6,padding:'5px 14px',fontSize:12,fontWeight:700,cursor:'pointer'}}>+ Add Item</button>
         </div>
