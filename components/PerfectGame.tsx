@@ -711,10 +711,18 @@ function Projects({items,setItems,projects,setProjects,milestones,setMilestones,
     // Empty strings are invalid for Postgres date columns — send null instead
     const payload={...form,start_date:form.start_date||null,end_date:form.ongoing?null:(form.end_date||null)}
     if(editing) {
+      const oldName=editing.name
+      const newName=payload.name.trim()
       const{data,error}=await supabase.from('projects').update({...payload,updated_at:new Date().toISOString()}).eq('id',editing.id).select().single()
       if(error){alert('Failed to save project: '+error.message);setSaving(false);return}
       if(data) setProjects(projects.map(p=>p.id===editing.id?data:p))
-      await maybeCloseItems(editing,payload.status)
+      // Items link to projects by name — a rename must cascade or every item is orphaned
+      if(oldName&&newName&&oldName!==newName){
+        setItems(items.map(i=>i.parent_project===oldName?{...i,parent_project:newName}:i))
+        const{error:cascErr}=await supabase.from('items').update({parent_project:newName}).eq('parent_project',oldName)
+        if(cascErr)alert('Project renamed, but re-linking its items failed: '+cascErr.message+'\nRe-open and re-save the project to retry.')
+      }
+      await maybeCloseItems({...editing,name:newName},payload.status)
       setEditing(null)
     } else {
       const{data,error}=await supabase.from('projects').insert({...payload,sort_order:projects.length,space}).select().single()
@@ -2892,6 +2900,18 @@ function ComposeUpdate({projects,milestones,items,onClose}:{projects:any[],miles
         })()}
       </div>`
     }
+    // Closed in the last quarter — Complete projects whose timeline ended in the trailing 90 days
+    const q90=Date.now()-90*86400000
+    const closedRecent=projects.filter((p:any)=>p.status==='Complete'&&p.end_date&&+new Date(p.end_date+'T12:00:00')>=q90&&+new Date(p.end_date+'T12:00:00')<=Date.now()+86400000)
+      .sort((a:any,b:any)=>a.end_date<b.end_date?1:-1)
+    const closedHtml=closedRecent.length?`<div style="${H2}">Closed — Last Quarter (${closedRecent.length})</div>
+      <table cellspacing="0" style="border-collapse:collapse;width:100%;table-layout:fixed;">
+      <colgroup><col style="width:560px;"/><col style="width:120px;"/></colgroup>
+      <tr><th style="${TH_}">Project</th><th style="${TH_}">Closed</th></tr>
+      ${closedRecent.map((p:any)=>`<tr>
+        <td style="${TD_}overflow:hidden;"><b>${p.name}</b></td>
+        <td style="${TD_}white-space:nowrap;font-weight:bold;">${hs(fmtD(p.end_date))}</td>
+      </tr>`).join('')}</table>`:''
     const milestonesHtml=upcoming.length?`<div style="${H2}">Milestones (${upcoming.length})</div>
       <table cellspacing="0" style="border-collapse:collapse;width:100%;table-layout:fixed;">
       <colgroup><col style="width:70px;"/><col style="width:220px;"/><col style="width:560px;"/></colgroup>
@@ -2915,6 +2935,7 @@ function ComposeUpdate({projects,milestones,items,onClose}:{projects:any[],miles
       })()}
       ${flaggedHtml}
       ${top10Html}
+      ${closedHtml}
     </div>`
     setPreviewHtml(html)
     setSaving(false)
