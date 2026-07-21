@@ -2448,6 +2448,7 @@ function Roadmap({items,setItems,projects,setProjects,milestones}:{items:any[],p
 function Teams({items,projects,milestones}:{items:any[],projects:any[],milestones:any[]}) {
   const [extractHtml,setExtractHtml]=useState<string|null>(null)
   const [copiedX,setCopiedX]=useState(false)
+  const [newDays,setNewDays]=useState(7)
   const teams=[...new Set(items.map(i=>i.team).filter(Boolean))].sort() as string[]
   const [team,setTeam]=useState(teams[0]||'')
   const [showDone,setShowDone]=useState(false)
@@ -2618,6 +2619,39 @@ function Teams({items,projects,milestones}:{items:any[],projects:any[],milestone
     </div>`
     setExtractHtml(html)
   }
+  function generateNewExtract(){
+    const hs=(t:string)=>(t||'').replace(/ /g,'&nbsp;')
+    const TD_='padding:3px 7px;border:1px solid #D9D9D9;font-size:13px;color:#222222;vertical-align:top;'
+    const TH_='padding:3px 7px;border:1px solid #D9D9D9;font-size:13px;color:#222222;background:#F2F2F2;font-weight:bold;text-align:left;'
+    const cutoff=Date.now()-newDays*86400000
+    const fresh=items.filter(i=>i.team===team&&i.created_at&&+new Date(i.created_at)>=cutoff)
+      .sort((a,b)=>{
+        const pa=PRIORITY_ORDER[a.priority]??4,pb=PRIORITY_ORDER[b.priority]??4
+        if(pa!==pb)return pa-pb
+        return a.created_at<b.created_at?1:-1
+      })
+    const fmtD=(d:string)=>new Date(d).toLocaleDateString('default',{month:'short',day:'numeric'})
+    const priTxt=(p:string)=>{const c=p==='P1'?'#C00000':p==='P2'?'#E36C09':p==='P3'?'#1F6FC4':'#595959';return `<span style="color:${c};font-weight:bold;">${p||''}</span>`}
+    const today=new Date().toLocaleDateString('default',{month:'long',day:'numeric',year:'numeric'})
+    const html=`<div style="font-family:Calibri,'Segoe UI',Arial,sans-serif;max-width:960px;color:#222222;">
+      <div style="font-size:20px;font-weight:bold;color:#1F1F1F;">${team} — New Items (Last ${newDays} Days)</div>
+      <div style="font-size:13px;color:#595959;margin:2px 0 12px;">${today} · ${fresh.length} new item${fresh.length!==1?'s':''} added to the backlog</div>
+      ${fresh.length?`<table cellspacing="0" style="border-collapse:collapse;width:100%;table-layout:fixed;">
+      <colgroup><col style="width:60px;"/><col style="width:66px;"/><col style="width:300px;"/><col style="width:150px;"/><col style="width:96px;"/><col style="width:34px;"/><col style="width:34px;"/><col style="width:130px;"/></colgroup>
+      <tr><th style="${TH_}">Added</th><th style="${TH_}">ID</th><th style="${TH_}">Item</th><th style="${TH_}">Project</th><th style="${TH_}">Type</th><th style="${TH_}">Pri</th><th style="${TH_}">Size</th><th style="${TH_}">Status</th></tr>
+      ${fresh.map(i=>`<tr>
+        <td style="${TD_}white-space:nowrap;">${hs(fmtD(i.created_at))}</td>
+        <td style="${TD_}white-space:nowrap;overflow:hidden;">${hs(i.item_id)}</td>
+        <td style="${TD_}overflow:hidden;word-wrap:break-word;"><b>${i.name}</b>${i.description?`<div style="font-size:11px;color:#595959;margin-top:1px;">${i.description}</div>`:''}</td>
+        <td style="${TD_}overflow:hidden;">${i.parent_project||'<span style="color:#7F7F7F;">—</span>'}</td>
+        <td style="${TD_}overflow:hidden;">${hs(i.request_type)}</td>
+        <td style="${TD_}white-space:nowrap;">${priTxt(i.priority)}</td>
+        <td style="${TD_}text-align:center;">${i.effort||''}</td>
+        <td style="${TD_}overflow:hidden;">${hs(i.status)}</td>
+      </tr>`).join('')}</table>`:`<div style="font-size:13px;color:#595959;font-style:italic;">No new items in this window.</div>`}
+    </div>`
+    setExtractHtml(html)
+  }
   async function copyExtract(){
     try{
       const blob=new Blob([extractHtml||''],{type:'text/html'})
@@ -2658,6 +2692,12 @@ function Teams({items,projects,milestones}:{items:any[],projects:any[],milestone
           <input type="checkbox" checked={showDone} onChange={e=>setShowDone(e.target.checked)}/> Show completed
         </label>
         <button onClick={generateExtract} style={{background:'#C8973A',border:'none',borderRadius:6,color:'#0D1B2A',fontSize:12,fontWeight:700,padding:'7px 16px',cursor:'pointer'}}>⬇ Extract for {team}</button>
+        <div style={{display:'flex',alignItems:'center',gap:0}}>
+          <button onClick={generateNewExtract} title="Items added recently — send so nothing sits unseen" style={{background:'#27AE60',border:'none',borderRadius:'6px 0 0 6px',color:'#fff',fontSize:12,fontWeight:700,padding:'7px 12px',cursor:'pointer'}}>✨ New Items</button>
+          <select value={newDays} onChange={e=>setNewDays(parseInt(e.target.value))} style={{background:'#1E8449',border:'none',borderRadius:'0 6px 6px 0',color:'#fff',fontSize:11,fontWeight:700,padding:'7px 4px',cursor:'pointer'}}>
+            <option value={7}>7d</option><option value={14}>14d</option><option value={30}>30d</option>
+          </select>
+        </div>
       </div>
       <div style={{fontSize:12,color:'#7A8FA6',marginBottom:18}}>{ranked.length} items · read-only view · numbers show this team's queue order</div>
 
