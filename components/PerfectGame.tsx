@@ -1221,9 +1221,10 @@ const sorted=items.filter(i=>!isItemDone(i)).sort((a,b)=>{
       await applyItemStatus(items,setItems,id,val)
       return
     }
-    setItems(items.map(i=>i.id===id?{...i,[field]:val}:i))
-    if(selected?.id===id) setSelected(s=>({...s,[field]:val}))
-    await supabase.from('items').update({[field]:val}).eq('id',id)
+    const extra=field==='vendor_delivery_date'?{vendor_date_changed_at:new Date().toISOString()}:{}
+    setItems(items.map(i=>i.id===id?{...i,[field]:val,...extra}:i))
+    if(selected?.id===id) setSelected(s=>({...s,[field]:val,...extra}))
+    await supabase.from('items').update({[field]:val,...extra}).eq('id',id)
   }
   async function flag(id) {
     const item=items.find(i=>i.id===id)
@@ -1626,9 +1627,10 @@ function Roadmap({items,setItems,projects,setProjects,milestones}:{items:any[],p
   const [detailItem,setDetailItem]=useState(null)
 
   async function updItem(id,field,val){
-    setItems((prev:any[])=>prev.map(i=>i.id===id?{...i,[field]:val}:i))
-    setDetailItem((d:any)=>d&&d.id===id?{...d,[field]:val}:d)
-    await supabase.from('items').update({[field]:val}).eq('id',id)
+    const extra=field==='vendor_delivery_date'?{vendor_date_changed_at:new Date().toISOString()}:{}
+    setItems((prev:any[])=>prev.map(i=>i.id===id?{...i,[field]:val,...extra}:i))
+    setDetailItem((d:any)=>d&&d.id===id?{...d,[field]:val,...extra}:d)
+    await supabase.from('items').update({[field]:val,...extra}).eq('id',id)
   }
   const [projectsPanelOpen,setProjectsPanelOpen]=useState(true)
   const [backlogSectionOpen,setBacklogSectionOpen]=useState(true)
@@ -2445,7 +2447,7 @@ function Roadmap({items,setItems,projects,setProjects,milestones}:{items:any[],p
 // ── STAKEHOLDER ───────────────────────────────────────────────────────────
 // ── TEAMS ─────────────────────────────────────────────────────────────────
 // Read-only per-team work queue. All editing happens in Backlog/Projects/Roadmap.
-function Teams({items,projects,milestones}:{items:any[],projects:any[],milestones:any[]}) {
+function Teams({items,projects,milestones,ccrs,ccrItems}:{items:any[],projects:any[],milestones:any[],ccrs:any[],ccrItems:any[]}) {
   const [extractHtml,setExtractHtml]=useState<string|null>(null)
   const [copiedX,setCopiedX]=useState(false)
   const [newDays,setNewDays]=useState(7)
@@ -2633,10 +2635,47 @@ function Teams({items,projects,milestones}:{items:any[],projects:any[],milestone
     const fmtD=(d:string)=>new Date(d).toLocaleDateString('default',{month:'short',day:'numeric'})
     const priTxt=(p:string)=>{const c=p==='P1'?'#C00000':p==='P2'?'#E36C09':p==='P3'?'#1F6FC4':'#595959';return `<span style="color:${c};font-weight:bold;">${p||''}</span>`}
     const today=new Date().toLocaleDateString('default',{month:'long',day:'numeric',year:'numeric'})
+    const SH='font-size:15px;font-weight:bold;color:#1F1F1F;margin:18px 0 6px;border-bottom:1px solid #BFBFBF;padding-bottom:3px;'
+    const teamProjSet=new Set(projects.filter((p:any)=>p.team===team).map((p:any)=>p.name))
+    // New projects for this team
+    const freshProjects=projects.filter((p:any)=>p.team===team&&p.created_at&&+new Date(p.created_at)>=cutoff)
+      .sort((a:any,b:any)=>a.created_at<b.created_at?1:-1)
+    // New milestones on this team's projects
+    const projById=new Map(projects.map((p:any)=>[p.id,p]))
+    const freshMs=milestones.filter((m:any)=>{
+      const pr:any=projById.get(m.project_id)
+      return pr&&pr.team===team&&m.created_at&&+new Date(m.created_at)>=cutoff
+    }).sort((a:any,b:any)=>a.date<b.date?-1:1)
+    // Vendor date changes on this team's items (tracked from now on via vendor_date_changed_at)
+    const vendorChanged=items.filter(i=>i.team===team&&i.vendor_date_changed_at&&+new Date(i.vendor_date_changed_at)>=cutoff&&i.vendor_delivery_date)
+      .sort((a,b)=>a.vendor_date_changed_at<b.vendor_date_changed_at?1:-1)
+    // New CCRs tied to this team (via project team, or via any linked item's team)
+    const freshCcrs=ccrs.filter((c:any)=>{
+      if(!c.created_at||+new Date(c.created_at)<cutoff)return false
+      const pr:any=c.project_id?projById.get(c.project_id):null
+      if(pr)return pr.team===team
+      const linked=ccrItems.filter((l:any)=>l.ccr_id===c.id).map((l:any)=>items.find(x=>x.id===l.item_id)).filter(Boolean)
+      if(linked.length)return linked.some((x:any)=>x.team===team)
+      return true // unassociated CCRs appear for every team rather than vanishing
+    }).sort((a:any,b:any)=>a.created_at<b.created_at?1:-1)
+    const total=fresh.length+freshProjects.length+freshMs.length+vendorChanged.length+freshCcrs.length
     const html=`<div style="font-family:Calibri,'Segoe UI',Arial,sans-serif;max-width:960px;color:#222222;">
-      <div style="font-size:20px;font-weight:bold;color:#1F1F1F;">${team} — New Items (Last ${newDays} Days)</div>
-      <div style="font-size:13px;color:#595959;margin:2px 0 12px;">${today} · ${fresh.length} new item${fresh.length!==1?'s':''} added to the backlog</div>
-      ${fresh.length?`<table cellspacing="0" style="border-collapse:collapse;width:100%;table-layout:fixed;">
+      <div style="font-size:20px;font-weight:bold;color:#1F1F1F;">${team} — What's New (Last ${newDays} Days)</div>
+      <div style="font-size:13px;color:#595959;margin:2px 0 12px;">${today} · ${fresh.length} item${fresh.length!==1?'s':''} · ${freshProjects.length} project${freshProjects.length!==1?'s':''} · ${freshMs.length} milestone${freshMs.length!==1?'s':''} · ${vendorChanged.length} vendor date change${vendorChanged.length!==1?'s':''} · ${freshCcrs.length} CCR${freshCcrs.length!==1?'s':''}</div>
+      ${total===0?`<div style="font-size:13px;color:#595959;font-style:italic;">Nothing new in this window.</div>`:''}
+      ${freshProjects.length?`<div style="${SH}">New Projects (${freshProjects.length})</div>
+      <table cellspacing="0" style="border-collapse:collapse;width:100%;table-layout:fixed;">
+      <colgroup><col style="width:60px;"/><col style="width:360px;"/><col style="width:34px;"/><col style="width:130px;"/><col style="width:170px;"/></colgroup>
+      <tr><th style="${TH_}">Added</th><th style="${TH_}">Project</th><th style="${TH_}">Pri</th><th style="${TH_}">Status</th><th style="${TH_}">Timeline</th></tr>
+      ${freshProjects.map((p:any)=>`<tr>
+        <td style="${TD_}white-space:nowrap;">${hs(fmtD(p.created_at))}</td>
+        <td style="${TD_}overflow:hidden;"><b>${p.name}</b>${p.description?`<div style="font-size:11px;color:#595959;margin-top:1px;">${p.description}</div>`:''}</td>
+        <td style="${TD_}white-space:nowrap;">${priTxt(p.priority)}</td>
+        <td style="${TD_}overflow:hidden;">${hs(p.status)}</td>
+        <td style="${TD_}white-space:nowrap;">${p.start_date?hs(fmtD(p.start_date)):'—'}${p.ongoing?' – Ongoing ∞':p.end_date?' – '+hs(fmtD(p.end_date)):''}</td>
+      </tr>`).join('')}</table>`:''}
+      ${fresh.length?`<div style="${SH}">New Items (${fresh.length})</div>
+      <table cellspacing="0" style="border-collapse:collapse;width:100%;table-layout:fixed;">
       <colgroup><col style="width:60px;"/><col style="width:66px;"/><col style="width:300px;"/><col style="width:150px;"/><col style="width:96px;"/><col style="width:34px;"/><col style="width:34px;"/><col style="width:130px;"/></colgroup>
       <tr><th style="${TH_}">Added</th><th style="${TH_}">ID</th><th style="${TH_}">Item</th><th style="${TH_}">Project</th><th style="${TH_}">Type</th><th style="${TH_}">Pri</th><th style="${TH_}">Size</th><th style="${TH_}">Status</th></tr>
       ${fresh.map(i=>`<tr>
@@ -2648,7 +2687,40 @@ function Teams({items,projects,milestones}:{items:any[],projects:any[],milestone
         <td style="${TD_}white-space:nowrap;">${priTxt(i.priority)}</td>
         <td style="${TD_}text-align:center;">${i.effort||''}</td>
         <td style="${TD_}overflow:hidden;">${hs(i.status)}</td>
-      </tr>`).join('')}</table>`:`<div style="font-size:13px;color:#595959;font-style:italic;">No new items in this window.</div>`}
+      </tr>`).join('')}</table>`:''}
+      ${freshMs.length?`<div style="${SH}">New Milestones (${freshMs.length})</div>
+      <table cellspacing="0" style="border-collapse:collapse;width:100%;table-layout:fixed;">
+      <colgroup><col style="width:60px;"/><col style="width:76px;"/><col style="width:220px;"/><col style="width:470px;"/></colgroup>
+      <tr><th style="${TH_}">Added</th><th style="${TH_}">Date</th><th style="${TH_}">Project</th><th style="${TH_}">Milestone</th></tr>
+      ${freshMs.map((m:any)=>{const pr:any=projById.get(m.project_id);return `<tr>
+        <td style="${TD_}white-space:nowrap;">${hs(fmtD(m.created_at))}</td>
+        <td style="${TD_}white-space:nowrap;font-weight:bold;">${hs(fmtD(m.date))}</td>
+        <td style="${TD_}overflow:hidden;">${pr?.name||''}</td>
+        <td style="${TD_}overflow:hidden;">${m.name}</td>
+      </tr>`}).join('')}</table>`:''}
+      ${vendorChanged.length?`<div style="${SH}">Vendor Date Changes (${vendorChanged.length})</div>
+      <table cellspacing="0" style="border-collapse:collapse;width:100%;table-layout:fixed;">
+      <colgroup><col style="width:60px;"/><col style="width:66px;"/><col style="width:330px;"/><col style="width:180px;"/><col style="width:110px;"/></colgroup>
+      <tr><th style="${TH_}">Changed</th><th style="${TH_}">ID</th><th style="${TH_}">Item</th><th style="${TH_}">Project</th><th style="${TH_}">New Vendor Date</th></tr>
+      ${vendorChanged.map(i=>`<tr>
+        <td style="${TD_}white-space:nowrap;">${hs(fmtD(i.vendor_date_changed_at))}</td>
+        <td style="${TD_}white-space:nowrap;overflow:hidden;">${hs(i.item_id)}</td>
+        <td style="${TD_}overflow:hidden;"><b>${i.name}</b></td>
+        <td style="${TD_}overflow:hidden;">${i.parent_project||'<span style="color:#7F7F7F;">—</span>'}</td>
+        <td style="${TD_}white-space:nowrap;font-weight:bold;color:#8A6D1F;">${hs(fmtD(i.vendor_delivery_date))}</td>
+      </tr>`).join('')}</table>`:''}
+      ${freshCcrs.length?`<div style="${SH}">New Change Requests (${freshCcrs.length})</div>
+      <table cellspacing="0" style="border-collapse:collapse;width:100%;table-layout:fixed;">
+      <colgroup><col style="width:60px;"/><col style="width:330px;"/><col style="width:110px;"/><col style="width:110px;"/><col style="width:180px;"/><col style="width:90px;"/></colgroup>
+      <tr><th style="${TH_}">Added</th><th style="${TH_}">Change Request</th><th style="${TH_}">CCR #</th><th style="${TH_}">Status</th><th style="${TH_}">Project</th><th style="${TH_}">Target</th></tr>
+      ${freshCcrs.map((c:any)=>{const pr:any=c.project_id?projById.get(c.project_id):null;return `<tr>
+        <td style="${TD_}white-space:nowrap;">${hs(fmtD(c.created_at))}</td>
+        <td style="${TD_}overflow:hidden;"><b>${c.title}</b></td>
+        <td style="${TD_}white-space:nowrap;font-family:Consolas,monospace;">${c.ccr_number||'—'}</td>
+        <td style="${TD_}overflow:hidden;">${hs(c.status)}</td>
+        <td style="${TD_}overflow:hidden;">${pr?.name||'—'}</td>
+        <td style="${TD_}white-space:nowrap;">${c.target_date?hs(fmtD(c.target_date)):'—'}</td>
+      </tr>`}).join('')}</table>`:''}
     </div>`
     setExtractHtml(html)
   }
@@ -4287,7 +4359,7 @@ useEffect(()=>{
         {activeTab==='backlog'&&<Backlog items={sItems} setItems={setSItems} projects={sProjects} setProjects={setSProjects} space={space}/>}
         {activeTab==='projects'&&<Projects items={sItems} setItems={setSItems} projects={sProjects} setProjects={setSProjects} milestones={sMilestones} setMilestones={setSMilestones} tasks={tasks} setTasks={setTasks} space={space}/>}
 {activeTab==='roadmap'&&<Roadmap items={sItems} setItems={setSItems} projects={sProjects} setProjects={setSProjects} milestones={sMilestones}/>}
-        {activeTab==='teams'&&<Teams items={sItems} projects={sProjects} milestones={sMilestones}/>}
+        {activeTab==='teams'&&<Teams items={sItems} projects={sProjects} milestones={sMilestones} ccrs={ccrs} ccrItems={ccrItems}/>}
         {activeTab==='desk'&&<Desk items={items} setItems={setItems} projects={projects} setProjects={setProjects} milestones={milestones} setMilestones={setMilestones} tasks={tasks} setTasks={setTasks} ccrs={ccrs} setCcrs={setCcrs} ccrItems={ccrItems} setCcrItems={setCcrItems} space={space}/>}
         {activeTab==='stakeholder'&&<Stakeholder items={sItems} projects={sProjects} milestones={sMilestones}/>}
         {activeTab==='done'&&<DoneTab items={sItems} setItems={setSItems} projects={sProjects} setProjects={setSProjects}/>}
