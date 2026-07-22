@@ -4735,6 +4735,7 @@ function Assistant({open,setOpen,seed,setSeed,items,setItems,projects,setProject
   const mobile=useIsMobile()
 
   const audioRef=useRef<any>(null)
+  const voiceErrShown=useRef(false)
   const handsFree=useRef(false) // last user turn came from the mic → keep the conversation going
   function stopAudio(){try{audioRef.current?.pause();audioRef.current&&(audioRef.current.currentTime=0)}catch{};try{window.speechSynthesis?.cancel()}catch{}}
   async function speak(text:string){
@@ -4744,6 +4745,12 @@ function Assistant({open,setOpen,seed,setSeed,items,setItems,projects,setProject
     if(!clean)return
     try{
       const r=await fetch('/api/voice',{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify({text:clean})})
+      if(!r.ok&&!voiceErrShown.current){
+        voiceErrShown.current=true
+        let why='HTTP '+r.status+(r.status===404?' — is the file at app/api/voice/route.ts?':'')
+        try{const j=await r.clone().json();if(j?.error)why=j.error+(/quota|billing/i.test(j.error)?' — enable billing at platform.openai.com':'')}catch{}
+        setMsgs(m=>[...m,{role:'act',text:'🔇 Using fallback voice — /api/voice failed: '+why}])
+      }
       if(r.ok){
         const blob=await r.blob()
         const url=URL.createObjectURL(blob)
