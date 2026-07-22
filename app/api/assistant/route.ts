@@ -117,7 +117,13 @@ Rules:
 - If a project or item reference doesn't match, the tool result will say so and list candidates — ask the user, never guess between candidates.
 - For destructive or sweeping changes, confirm intent in one short question first.
 - When asked for a morning brief or overview, call get_overview and present it tightly: overdue first, then today/this week, milestones, CCRs owed, flags, open tasks. Bullets, not paragraphs. End with one line offering to act on any of it.
-- Never invent data — everything you report must come from tool results.`
+- Never invent data — everything you report must come from tool results.${context?.voice ? `
+
+VOICE MODE — the user is speaking with you and your reply will be read aloud:
+- Reply in natural spoken prose, 1–3 short sentences. Contractions are good. Never use bullet points, headers, tables, or markdown.
+- Don't read out ids, dates in ISO format, or field-by-field confirmations — say it like a person: "Done — that's in Boomi and flagged for the dev conversation."
+- For the brief, give the headline version in a few flowing sentences (what's overdue, what's landing, what you owe) and offer detail if wanted.
+- Ask at most one short question when you need clarification.` : ''}`
 
   const resp = await fetch('https://api.anthropic.com/v1/messages', {
     method: 'POST',
