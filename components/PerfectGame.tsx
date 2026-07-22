@@ -4731,6 +4731,7 @@ function Assistant({open,setOpen,seed,setSeed,items,setItems,projects,setProject
   const [voiceOut,setVoiceOut]=useState(()=>{try{return localStorage.getItem('pg_voice')==='1'}catch{return false}})
   const [listening,setListening]=useState(false)
   const recRef=useRef<any>(null)
+  const silenceTimer=useRef<any>(null)
   const scrollRef=useRef<any>(null)
   const mobile=useIsMobile()
 
@@ -4788,23 +4789,34 @@ function Assistant({open,setOpen,seed,setSeed,items,setItems,projects,setProject
     try{
       const rec=new SR()
       recRef.current=rec
-      rec.lang='en-US';rec.interimResults=true;rec.continuous=false
+      // continuous + our own silence timer — the browser's built-in end-of-speech
+      // detection cuts off after a very short pause; this gives real thinking room.
+      rec.lang='en-US';rec.interimResults=true;rec.continuous=true
       let final=''
+      const SILENCE_MS=2200
+      const clearSilenceTimer=()=>{if(silenceTimer.current){clearTimeout(silenceTimer.current);silenceTimer.current=null}}
+      const armSilenceTimer=()=>{
+        clearSilenceTimer()
+        silenceTimer.current=setTimeout(()=>{try{rec.stop()}catch{}},SILENCE_MS)
+      }
       rec.onresult=(e:any)=>{
+        armSilenceTimer() // any new speech (interim or final) resets the countdown
         let interim=''
         for(let i=e.resultIndex;i<e.results.length;i++){
           const t=e.results[i][0].transcript
-          if(e.results[i].isFinal)final+=t;else interim+=t
+          if(e.results[i].isFinal)final+=t+' ';else interim+=t
         }
         setInput((final+interim).trim())
       }
       rec.onend=()=>{
+        clearSilenceTimer()
         setListening(false)
         if(final.trim()){handsFree.current=true;setInput('');send(final.trim())}
         else if(auto)handsFree.current=false // silence ends the hands-free chain quietly
       }
-      rec.onerror=()=>{setListening(false);if(auto)handsFree.current=false}
+      rec.onerror=(e:any)=>{clearSilenceTimer();setListening(false);if(auto)handsFree.current=false;if(e?.error==='no-speech'&&!auto)alert("Didn't catch anything — tap the mic and try again.")}
       setListening(true)
+      armSilenceTimer() // room to start talking before the first result arrives
       rec.start()
     }catch{setListening(false)}
   }
@@ -4919,6 +4931,26 @@ function Assistant({open,setOpen,seed,setSeed,items,setItems,projects,setProject
         if(!st)return{error:`"${inp.status}" is not a valid status`,valid:statusesFor(spaceOf(it))}
         await applyItemStatus(items,setItems,it.id,st)
         return{updated:{id:it.item_id,name:it.name,status:st}}
+      }
+      if(name==='delete_item'){
+        const it=findItem(inp.item)
+        if(!it)return{error:`No item matched "${inp.item}"`,hint:'Try find_items first'}
+        const label=`${it.item_id} — ${it.name}`
+        setItems((prev:any[])=>prev.filter(x=>x.id!==it.id))
+        const{error}=await supabase.from('items').delete().eq('id',it.id)
+        if(error){setItems((prev:any[])=>[...prev,it]);return{error:error.message}}
+        return{deleted:{item:label}}
+      }
+      if(name==='delete_task'){
+        const q=(inp.task||'').toLowerCase()
+        const pool=tasks.filter((t:any)=>spaceOf(t)===space)
+        const t=pool.find((x:any)=>(x.title||'').toLowerCase()===q)||pool.find((x:any)=>(x.title||'').toLowerCase().includes(q))
+        if(!t)return{error:`No task matched "${inp.task}"`}
+        const label=t.title
+        setTasks((prev:any[])=>prev.filter((x:any)=>x.id!==t.id))
+        const{error}=await supabase.from('tasks').delete().eq('id',t.id)
+        if(error){setTasks((prev:any[])=>[...prev,t]);return{error:error.message}}
+        return{deleted:{task:label}}
       }
       return{error:`Unknown tool ${name}`}
     }catch(e:any){return{error:String(e?.message||e)}}
