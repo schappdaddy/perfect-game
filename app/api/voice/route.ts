@@ -23,7 +23,7 @@ export async function POST(req: Request) {
       voice: VOICE,
       input: text,
       response_format: 'mp3',
-      instructions: 'Speak naturally and warmly, at an easy conversational pace, like a sharp colleague giving a quick verbal update.',
+      instructions: 'Speak like a laid-back surfer buddy giving you the rundown — chill, unhurried, easygoing, a little breezy. Still clear and easy to follow, just totally relaxed, like you\'re catching up on the beach, not delivering a report.',
     }),
   })
   if (!resp.ok) {
