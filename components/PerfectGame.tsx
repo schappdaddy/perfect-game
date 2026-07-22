@@ -2940,7 +2940,7 @@ function Teams({items,projects,milestones,ccrs,ccrItems}:{items:any[],projects:a
       <tr><th style="${TH_}width:70px;">Date</th><th style="${TH_}width:220px;">Project</th><th style="${TH_}">Milestone</th></tr>
       ${upc.map(m=>{const pr=projects.find(p=>p.id===m.project_id);return `<tr><td style="${TD_}white-space:nowrap;">${hs(fmtD(m.date))}</td><td style="${TD_}">${pr?.name||''}</td><td style="${TD_}">${m.name}${m.type&&m.type!=='Milestone'?` <span style="color:#595959;font-size:11px;">(${m.type})</span>`:''}</td></tr>`}).join('')}</table>`:''
     const devFlags=items.filter(i=>i.team===team&&flagDev(i))
-    const teamFlaggedProj=teamProjects.filter((p:any)=>p.flagged&&!PROJECT_TERMINAL.includes(p.status))
+    const teamFlaggedProj=teamProjects.filter((p:any)=>flagDev(p)&&!PROJECT_TERMINAL.includes(p.status))
     const projFlagsHtml=teamFlaggedProj.length?`<div style="${H2}">Projects for Discussion</div>
       <table cellspacing="0" style="border-collapse:collapse;width:100%;table-layout:fixed;">
       <colgroup><col style="width:240px;"/><col style="width:110px;"/><col style="width:494px;"/></colgroup>
@@ -3317,9 +3317,9 @@ function ComposeUpdate({projects,milestones,items,onClose}:{projects:any[],miles
       <table cellspacing="0" style="border-collapse:collapse;width:100%;table-layout:fixed;">${itemHead()}${p12.map((i:any)=>itemRow(i)).join('')}</table>`:''
     const top10Html=top10.length?`<div style="${H2}">Top 10 Backlog — Not Yet Committed</div>
       <table cellspacing="0" style="border-collapse:collapse;width:100%;table-layout:fixed;">${itemHead(true)}${top10.map((i:any,n:number)=>itemRow(i,n+1)).join('')}</table>`:''
-    const flaggedProj=projects.filter((p:any)=>p.flagged&&!PROJECT_TERMINAL.includes(p.status))
-    const flaggedProjHtml=flaggedProj.length?`<div style="${H2}">Projects Flagged for Discussion</div>
-      <table cellspacing="0" style="border-collapse:collapse;width:100%;table-layout:fixed;">
+    const flaggedProj=projects.filter((p:any)=>flagStk(p)&&!PROJECT_TERMINAL.includes(p.status))
+    const flaggedProjTable=flaggedProj.length?`<div style="font-size:13px;font-weight:bold;color:#595959;margin:4px 0 3px;">Projects (${flaggedProj.length})</div>
+      <table cellspacing="0" style="border-collapse:collapse;width:100%;table-layout:fixed;margin-bottom:8px;">
       <colgroup><col style="width:240px;"/><col style="width:110px;"/><col style="width:70px;"/><col style="width:424px;"/></colgroup>
       <tr><th style="${TH_}">Project</th><th style="${TH_}">Status</th><th style="${TH_}">RAG</th><th style="${TH_}">Discussion Notes</th></tr>
       ${flaggedProj.map((p:any)=>`<tr>
@@ -3328,7 +3328,9 @@ function ComposeUpdate({projects,milestones,items,onClose}:{projects:any[],miles
         <td style="${TD_}white-space:nowrap;color:${p.rag==='Red'?'#C00000':p.rag==='Amber'?'#E36C09':p.rag==='Green'?'#1F8A3B':'#595959'};font-weight:bold;">${p.rag||'—'}</td>
         <td style="${TD_}line-height:1.5;">${p.flag_notes||'<span style="color:#7F7F7F;font-style:italic;">—</span>'}</td>
       </tr>`).join('')}</table>`:''
-    const flaggedHtml=flagged.length?`<div style="${H2}">Flagged for Discussion</div>
+    const flaggedHtml=(flagged.length||flaggedProj.length)?`<div style="${H2}">Flagged for Discussion</div>
+      ${flaggedProjTable}
+      ${flagged.length&&flaggedProj.length?`<div style="font-size:13px;font-weight:bold;color:#595959;margin:4px 0 3px;">Items (${flagged.length})</div>`:''}`+(flagged.length?`
       <table cellspacing="0" style="border-collapse:collapse;width:100%;table-layout:fixed;">
       <colgroup><col style="width:68px;"/><col style="width:240px;"/><col style="width:150px;"/><col style="width:36px;"/><col style="width:350px;"/></colgroup>
       <tr><th style="${TH_}">ID</th><th style="${TH_}">Item</th><th style="${TH_}">Project</th><th style="${TH_}">Pri</th><th style="${TH_}">Discussion Notes</th></tr>
@@ -3338,7 +3340,7 @@ function ComposeUpdate({projects,milestones,items,onClose}:{projects:any[],miles
         <td style="${TD_}">${i.parent_project||'<span style="color:#7F7F7F;">—</span>'}</td>
         <td style="${TD_}white-space:nowrap;">${priTxt(i.priority)}</td>
         <td style="${TD_}line-height:1.5;">${i.notes||'<span style="color:#7F7F7F;font-style:italic;">No discussion notes yet.</span>'}</td>
-      </tr>`).join('')}</table>`:''
+      </tr>`).join('')}</table>`:''):''
 
     const projBlock=(p:any,tag?:string)=>{
       const d=drafts[p.id]||{}
@@ -3402,7 +3404,6 @@ function ComposeUpdate({projects,milestones,items,onClose}:{projects:any[],miles
         return `${onRoadmap.length?`<div style="${H2}">Project Updates — On Roadmap</div>${onRoadmap.map(p=>projBlock(p)).join('')}`:''}
         ${backlogP.length?`<div style="${H2}">Project Updates — Backlog</div>${backlogP.map(p=>projBlock(p,'BACKLOG')).join('')}`:''}`
       })()}
-      ${flaggedProjHtml}
       ${flaggedHtml}
       ${top10Html}
       ${closedHtml}
@@ -3552,7 +3553,7 @@ function Stakeholder({items,projects,milestones}:{items:any[],projects:any[],mil
       {disc.length>0&&(
         <>
           {(()=>{
-            const fp=projects.filter((p:any)=>p.flagged&&!PROJECT_TERMINAL.includes(p.status))
+            const fp=projects.filter((p:any)=>flagStk(p)&&!PROJECT_TERMINAL.includes(p.status))
             if(!fp.length)return null
             return(
               <>
@@ -4021,32 +4022,33 @@ function Desk({items,setItems,projects,setProjects,milestones,setMilestones,task
           )
         })()}
         {(()=>{
-          const fp=projects.filter(p=>inDeskSpace(p)&&p.flagged&&!PROJECT_TERMINAL.includes(p.status))
-          if(!fp.length)return null
-          return(
-            <div style={{marginBottom:16}}>
-              <div style={{fontSize:11,fontWeight:700,letterSpacing:1,color:'#C8973A',marginBottom:8}}>◈ FLAGGED PROJECTS ({fp.length})</div>
-              {fp.map(p=>(
-                <div key={p.id} style={{background:'#12202F',border:'1px solid rgba(200,151,58,0.35)',borderRadius:8,padding:'8px 10px',marginBottom:8}}>
-                  <div style={{display:'flex',alignItems:'center',gap:6}}>
-                    <span style={{width:8,height:8,borderRadius:2,background:p.color||'#3A4A5E',flexShrink:0}}/>
-                    <span onClick={()=>setProjView(p)} style={{fontSize:12,fontWeight:700,color:'#F4F6F8',flex:1,overflow:'hidden',whiteSpace:'nowrap' as const,textOverflow:'ellipsis',cursor:'pointer'}}>{homeTag(p)?'🏠 ':''}{p.name}</span>
-                    <span style={{fontSize:10}}>{p.rag==='Red'?'🔴':p.rag==='Amber'?'🟡':p.rag==='Green'?'🟢':'⚪'}</span>
-                    <button onClick={async()=>{setProjects((prev:any[])=>prev.map(x=>x.id===p.id?{...x,flagged:false}:x));await supabase.from('projects').update({flagged:false}).eq('id',p.id)}}
-                      title="Unflag" style={{background:'none',border:'none',color:'#3A4A5E',fontSize:12,cursor:'pointer',padding:0,flexShrink:0}}>✕</button>
-                  </div>
-                  {p.flag_notes&&<div style={{fontSize:10,color:'#C8C8D4',marginTop:4,lineHeight:1.4,whiteSpace:'pre-wrap' as const}}>{p.flag_notes}</div>}
-                </div>
-              ))}
+          const devProj=projects.filter(p=>inDeskSpace(p)&&flagDev(p)&&!PROJECT_TERMINAL.includes(p.status))
+          const stkProj=projects.filter(p=>inDeskSpace(p)&&flagStk(p)&&!PROJECT_TERMINAL.includes(p.status))
+          const projRow=(p:any)=>(
+            <div key={p.id} style={{background:'#12202F',border:'1px solid rgba(200,151,58,0.35)',borderRadius:8,padding:'7px 9px',marginBottom:6}}>
+              <div style={{display:'flex',alignItems:'center',gap:6}}>
+                <span style={{width:8,height:8,borderRadius:2,background:p.color||'#3A4A5E',flexShrink:0}}/>
+                <span onClick={()=>setProjView(p)} style={{fontSize:12,fontWeight:700,color:'#F4F6F8',flex:1,overflow:'hidden',whiteSpace:'nowrap' as const,textOverflow:'ellipsis',cursor:'pointer'}}>{homeTag(p)?'🏠 ':''}{p.name}</span>
+                <span style={{fontSize:10}}>{p.rag==='Red'?'🔴':p.rag==='Amber'?'🟡':p.rag==='Green'?'🟢':'⚪'}</span>
+                <button onClick={async()=>{setProjects((prev:any[])=>prev.map(x=>x.id===p.id?{...x,flagged:false,flag_audience:null}:x));await supabase.from('projects').update({flagged:false,flag_audience:null}).eq('id',p.id)}}
+                  title="Unflag" style={{background:'none',border:'none',color:'#3A4A5E',fontSize:12,cursor:'pointer',padding:0,flexShrink:0}}>✕</button>
+              </div>
+              {p.flag_notes&&<div style={{fontSize:10,color:'#C8C8D4',marginTop:4,lineHeight:1.4,whiteSpace:'pre-wrap' as const}}>{p.flag_notes}</div>}
             </div>
           )
-        })()}
-        {([['🚩 DEV FLAGGED',flaggedDevL,devOpen,setDevOpen,unflagDev],['◉ STAKEHOLDER FLAGGED',flaggedStkL,stkOpen,setStkOpen,unflagStk]] as any[]).map(([title,list,open,setOpen,unflag]:any)=>(
+          return([['🚩 DEV FLAGGED',flaggedDevL,devProj,devOpen,setDevOpen,unflagDev],['◉ STAKEHOLDER FLAGGED',flaggedStkL,stkProj,stkOpen,setStkOpen,unflagStk]] as any[]).map(([title,list,projList,open,setOpen,unflag]:any)=>(
           <div key={title} style={railCard as any}>
             <button onClick={()=>setOpen((o:boolean)=>!o)} style={{background:'none',border:'none',padding:0,cursor:'pointer',width:'100%',display:'flex',alignItems:'center',gap:6,...railTitle as any,marginBottom:open?8:0}}>
-              <span style={{fontSize:9}}>{open?'▾':'▸'}</span>{title} ({list.length})
+              <span style={{fontSize:9}}>{open?'▾':'▸'}</span>{title} ({list.length+projList.length})
             </button>
-            {open&&list.length===0&&<div style={{fontSize:11,color:'#7A8FA6',fontStyle:'italic'}}>Nothing flagged</div>}
+            {open&&list.length===0&&projList.length===0&&<div style={{fontSize:11,color:'#7A8FA6',fontStyle:'italic'}}>Nothing flagged</div>}
+            {open&&projList.length>0&&(
+              <>
+              <div style={{fontSize:9,fontWeight:700,letterSpacing:1,color:'#7A8FA6',margin:'2px 0 5px'}}>◈ PROJECTS ({projList.length})</div>
+              {projList.map(projRow)}
+              {list.length>0&&<div style={{fontSize:9,fontWeight:700,letterSpacing:1,color:'#7A8FA6',margin:'8px 0 5px'}}>≡ ITEMS ({list.length})</div>}
+              </>
+            )}
             {open&&list.map((i:any)=>{
               const editing=noteEditId===i.id
               return(
@@ -4070,7 +4072,7 @@ function Desk({items,setItems,projects,setProjects,milestones,setMilestones,task
               )
             })}
           </div>
-        ))}
+        ))})()}
       </div>
       <div style={{flex:1,minHeight:0,display:mobile&&deskView!=='plan'?'none':'flex',flexDirection:'column' as const,padding:mobile?'12px 12px':'18px 24px',overflow:'hidden',minWidth:0}}>
         <div style={{display:'flex',alignItems:'center',gap:10,marginBottom:12}}>
@@ -4321,8 +4323,15 @@ function Desk({items,setItems,projects,setProjects,milestones,setMilestones,task
                   )
                 })}
               </div>
-              <button onClick={()=>updateProj({flagged:!projView.flagged})} title={projView.flagged?'Unflag — remove from discussion':'Flag for discussion'}
-                style={{background:'none',border:'none',cursor:'pointer',fontSize:16,opacity:projView.flagged?1:0.25,lineHeight:1}}>🚩</button>
+              <button onClick={()=>{
+                  const cur=!projView.flagged?null:(projView.flag_audience||'both')
+                  const next=cur===null?{flagged:true,flag_audience:'dev'}
+                    :cur==='dev'?{flagged:true,flag_audience:'stakeholder'}
+                    :cur==='stakeholder'?{flagged:true,flag_audience:'both'}
+                    :{flagged:false,flag_audience:null}
+                  updateProj(next)
+                }} title={projView.flagged?`Flagged: ${projView.flag_audience||'both'} — click to cycle`:'Click to flag for dev'}
+                style={{background:'none',border:'none',cursor:'pointer',fontSize:16,opacity:projView.flagged?1:0.25,lineHeight:1}}>🚩{projView.flagged&&<span style={{fontSize:9,fontWeight:800,color:'#C8973A',verticalAlign:'top'}}>{flagLabel(projView)}</span>}</button>
               <button onClick={()=>setProjView(null)} style={{marginLeft:'auto',background:'none',border:'none',color:'#7A8FA6',fontSize:18,cursor:'pointer',lineHeight:1}}>✕</button>
             </div>
             {projView.flagged&&(
