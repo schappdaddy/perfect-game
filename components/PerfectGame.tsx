@@ -4734,13 +4734,32 @@ function Assistant({open,setOpen,seed,setSeed,items,setItems,projects,setProject
   const scrollRef=useRef<any>(null)
   const mobile=useIsMobile()
 
-  function speak(text:string){
+  const audioRef=useRef<any>(null)
+  const handsFree=useRef(false) // last user turn came from the mic → keep the conversation going
+  function stopAudio(){try{audioRef.current?.pause();audioRef.current&&(audioRef.current.currentTime=0)}catch{};try{window.speechSynthesis?.cancel()}catch{}}
+  async function speak(text:string){
+    if(!voiceOut)return
+    stopAudio()
+    const clean=text.replace(/[*_#`•◈≡→]/g,' ').trim()
+    if(!clean)return
     try{
-      if(!voiceOut||!('speechSynthesis' in window))return
-      window.speechSynthesis.cancel()
-      const clean=text.replace(/[*_#`•◈≡→]/g,'').replace(/RTL-/g,'R T L ')
-      const u=new SpeechSynthesisUtterance(clean)
+      const r=await fetch('/api/voice',{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify({text:clean})})
+      if(r.ok){
+        const blob=await r.blob()
+        const url=URL.createObjectURL(blob)
+        if(!audioRef.current)audioRef.current=new Audio()
+        const a=audioRef.current
+        a.src=url
+        a.onended=()=>{URL.revokeObjectURL(url);if(handsFree.current&&voiceOut)setTimeout(()=>toggleMic(true),250)}
+        await a.play()
+        return
+      }
+    }catch{}
+    // Fallback: browser voice, so it still talks if the key is missing
+    try{
+      const u=new SpeechSynthesisUtterance(clean.replace(/RTL-/g,'R T L '))
       u.rate=1.05
+      u.onend=()=>{if(handsFree.current&&voiceOut)setTimeout(()=>toggleMic(true),250)}
       window.speechSynthesis.speak(u)
     }catch{}
   }
@@ -4748,13 +4767,17 @@ function Assistant({open,setOpen,seed,setSeed,items,setItems,projects,setProject
     const v=!voiceOut
     setVoiceOut(v)
     try{localStorage.setItem('pg_voice',v?'1':'0')}catch{}
-    if(v){try{window.speechSynthesis.cancel();window.speechSynthesis.speak(new SpeechSynthesisUtterance('Voice on'))}catch{}}
-    else{try{window.speechSynthesis.cancel()}catch{}}
+    if(v){
+      // Unlock iOS audio inside this tap, then confirm with the real voice
+      try{if(!audioRef.current)audioRef.current=new Audio();audioRef.current.play().catch(()=>{})}catch{}
+      speak("Voice is on. I'm listening whenever you tap the mic.")
+    }else{handsFree.current=false;stopAudio()}
   }
-  function toggleMic(){
-    if(listening){try{recRef.current?.stop()}catch{};setListening(false);return}
+  function toggleMic(auto?:boolean){
+    if(listening){try{recRef.current?.stop()}catch{};setListening(false);if(!auto)handsFree.current=false;return}
     const SR=(window as any).SpeechRecognition||(window as any).webkitSpeechRecognition
-    if(!SR){alert('Speech input isn\u2019t available in this browser \u2014 use the \ud83c\udfa4 on your keyboard instead.');return}
+    if(!SR){if(!auto)alert('Speech input isn\u2019t available in this browser \u2014 use the \ud83c\udfa4 on your keyboard instead.');return}
+    stopAudio() // barge-in: talking interrupts the reply
     try{
       const rec=new SR()
       recRef.current=rec
@@ -4770,14 +4793,15 @@ function Assistant({open,setOpen,seed,setSeed,items,setItems,projects,setProject
       }
       rec.onend=()=>{
         setListening(false)
-        if(final.trim()){setInput('');send(final.trim())}
+        if(final.trim()){handsFree.current=true;setInput('');send(final.trim())}
+        else if(auto)handsFree.current=false // silence ends the hands-free chain quietly
       }
-      rec.onerror=()=>setListening(false)
+      rec.onerror=()=>{setListening(false);if(auto)handsFree.current=false}
       setListening(true)
       rec.start()
     }catch{setListening(false)}
   }
-  useEffect(()=>{return()=>{try{window.speechSynthesis?.cancel();recRef.current?.stop()}catch{}}},[])
+  useEffect(()=>{return()=>{try{stopAudio();recRef.current?.stop()}catch{}}},[])
 
   useEffect(()=>{if(scrollRef.current)scrollRef.current.scrollTop=scrollRef.current.scrollHeight},[msgs,busy])
   // Seed from the Desk quick bar
@@ -4900,7 +4924,7 @@ function Assistant({open,setOpen,seed,setSeed,items,setItems,projects,setProject
     setInput('')
     let history=[...apiMsgs,{role:'user',content:text}]
     const context={
-      today:localISO(new Date()),space,
+      today:localISO(new Date()),space,voice:voiceOut,
       projects:projects.filter((p:any)=>spaceOf(p)===space&&!PROJECT_TERMINAL.includes(p.status)).map((p:any)=>p.name),
       teams:TEAMS,statuses:statusesFor(space),
     }
@@ -4958,7 +4982,7 @@ function Assistant({open,setOpen,seed,setSeed,items,setItems,projects,setProject
         {busy&&<div style={{fontSize:11,color:'#7A8FA6',fontStyle:'italic'}}>thinking…</div>}
       </div>
       <div style={{display:'flex',gap:7,padding:'10px 12px',borderTop:'1px solid #243447',flexShrink:0}}>
-        <button onClick={toggleMic} title={listening?'Listening — tap to stop':'Tap and speak'}
+        <button onClick={()=>toggleMic()} title={listening?'Listening — tap to stop':'Tap and speak'}
           style={{background:listening?'#E74C3C':'#1E3048',border:'1px solid '+(listening?'#E74C3C':'#243447'),borderRadius:8,color:'#fff',fontSize:15,padding:'0 12px',cursor:'pointer',flexShrink:0,animation:listening?'pgPulse 1.2s infinite':'none'}}>🎤</button>
         <input value={input} onChange={e=>setInput(e.target.value)} onKeyDown={e=>{if(e.key==='Enter')send(input)}}
           placeholder={listening?'Listening…':'Tell me or ask me anything…'}
