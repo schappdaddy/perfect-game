@@ -135,6 +135,7 @@ function sc(s) {
   return m[s]||'#7A8FA6'
 }
 // Sequential item IDs — max existing RTL number + 1. Random IDs collided with real data.
+const localISO=(d:Date)=>`${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,'0')}-${String(d.getDate()).padStart(2,'0')}`
 function nextItemId(items){
   const max=items.reduce((m,i)=>{
     const match=/^RTL-(\d+)$/.exec(i.item_id||'')
@@ -3601,7 +3602,8 @@ function crumbAge(dateStr:string){
   return Math.floor((Date.now()-+d)/86400000)
 }
 
-function Desk({items,setItems,projects,setProjects,milestones,setMilestones,tasks,setTasks,ccrs,setCcrs,ccrItems,setCcrItems,space}:{items:any[],setItems:any,projects:any[],setProjects:any,milestones:any[],setMilestones:any,tasks:any[],setTasks:any,ccrs:any[],setCcrs:any,ccrItems:any[],setCcrItems:any,space:string}) {
+function Desk({items,setItems,projects,setProjects,milestones,setMilestones,tasks,setTasks,ccrs,setCcrs,ccrItems,setCcrItems,space,openAssistant}:{items:any[],setItems:any,projects:any[],setProjects:any,milestones:any[],setMilestones:any,tasks:any[],setTasks:any,ccrs:any[],setCcrs:any,ccrItems:any[],setCcrItems:any,space:string,openAssistant?:any}) {
+  const [asstText,setAsstText]=useState('')
   const [deskSpace,setDeskSpace]=useState(space) // work | home | both — Desk is the one place worlds can meet
   useEffect(()=>{setDeskSpace(space)},[space])
   const inDeskSpace=(x:any)=>deskSpace==='both'?true:spaceOf(x)===deskSpace
@@ -3676,7 +3678,6 @@ function Desk({items,setItems,projects,setProjects,milestones,setMilestones,task
     setItems((prev:any[])=>prev.map(i=>i.id===item.id?{...i,...next}:i))
     await supabase.from('items').update(next).eq('id',item.id)
   }
-  const localISO=(d:Date)=>`${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,'0')}-${String(d.getDate()).padStart(2,'0')}`
   const [devOpen,setDevOpen]=useState(true)
   const [stkOpen,setStkOpen]=useState(true)
   const [railOpen,setRailOpen]=useState<any>({due:true,ms:true,vend:true,proj:true})
@@ -4099,6 +4100,16 @@ function Desk({items,setItems,projects,setProjects,milestones,setMilestones,task
           )}
           <button onClick={()=>setRaw(r=>!r)} style={{background:raw?'#C8973A':'#1E3048',border:'1px solid #243447',borderRadius:6,color:raw?'#0D1B2A':'#7A8FA6',padding:'4px 14px',fontSize:11,fontWeight:700,cursor:'pointer'}}>{raw?'Done':'Raw'}</button>
         </div>
+        {openAssistant&&(
+          <div style={{display:'flex',gap:7,marginBottom:10}}>
+            <input value={asstText} onChange={e=>setAsstText(e.target.value)}
+              onKeyDown={e=>{if(e.key==='Enter'&&asstText.trim()){openAssistant(asstText.trim());setAsstText('')}}}
+              placeholder="💬 Tell the assistant… add an item, create a CCR, ask what's due (🎤 on your keyboard)"
+              style={{flex:1,minWidth:0,background:'#0D1B2A',border:'1px solid #243447',borderRadius:8,color:'#F4F6F8',fontSize:12,padding:'8px 11px'}}/>
+            <button onClick={()=>{if(asstText.trim()){openAssistant(asstText.trim());setAsstText('')}}} disabled={!asstText.trim()}
+              style={{background:'#C8973A',border:'none',borderRadius:8,color:'#0D1B2A',fontSize:12,fontWeight:800,padding:'0 14px',cursor:'pointer',opacity:asstText.trim()?1:0.5}}>➤</button>
+          </div>
+        )}
         {/* Project tasks — dated reminders attached to projects */}
         <div style={{background:'#12202F',border:'1px solid #243447',borderRadius:10,padding:'10px 14px',marginBottom:12,maxHeight:'38%',display:'flex',flexDirection:'column' as const}}>
           <button onClick={()=>setTasksOpen(o=>!o)} style={{background:'none',border:'none',padding:0,cursor:'pointer',display:'flex',alignItems:'center',gap:6,fontSize:11,fontWeight:700,letterSpacing:1,color:'#C8973A',marginBottom:tasksOpen?8:0}}>
@@ -4708,6 +4719,205 @@ function DoneTab({items,setItems,projects,setProjects,ccrs,ccrItems,space}:{item
   )
 }
 
+
+// ─────────────────────────────────────────────────────────────────
+// Assistant — conversational copilot. Client runs the tool loop against
+// live app state; /api/assistant proxies Claude and holds the key.
+function Assistant({open,setOpen,seed,setSeed,items,setItems,projects,setProjects,milestones,tasks,setTasks,ccrs,setCcrs,ccrItems,setCcrItems,space}:any){
+  const [msgs,setMsgs]=useState<any[]>([])       // UI transcript: {role:'user'|'assistant'|'act',text}
+  const [apiMsgs,setApiMsgs]=useState<any[]>([]) // raw Anthropic message history
+  const [input,setInput]=useState('')
+  const [busy,setBusy]=useState(false)
+  const scrollRef=useRef<any>(null)
+  const mobile=useIsMobile()
+
+  useEffect(()=>{if(scrollRef.current)scrollRef.current.scrollTop=scrollRef.current.scrollHeight},[msgs,busy])
+  // Seed from the Desk quick bar
+  useEffect(()=>{if(open&&seed){const t=seed;setSeed('');send(t)}},[open,seed])
+  // Morning brief: first open of the day leads with it
+  useEffect(()=>{
+    if(!open)return
+    try{
+      const today=localISO(new Date())
+      if(localStorage.getItem('pg_brief_date')!==today&&msgs.length===0){
+        localStorage.setItem('pg_brief_date',today)
+        send('Good morning — give me my brief.')
+      }
+    }catch{}
+  },[open])
+
+  const findProject=(ref:string)=>{
+    if(!ref)return null
+    const r=ref.toLowerCase()
+    const pool=projects.filter((p:any)=>spaceOf(p)===space)
+    return pool.find((p:any)=>p.name.toLowerCase()===r)||pool.find((p:any)=>p.name.toLowerCase().includes(r))||null
+  }
+  const findItem=(ref:string)=>{
+    const r=(ref||'').toLowerCase().trim()
+    const pool=items.filter((i:any)=>spaceOf(i)===space)
+    return pool.find((i:any)=>(i.item_id||'').toLowerCase()===r)
+      ||pool.filter((i:any)=>!ITEM_TERMINAL.includes(i.status)).find((i:any)=>(i.name||'').toLowerCase().includes(r))
+      ||pool.find((i:any)=>(i.name||'').toLowerCase().includes(r))||null
+  }
+
+  // ── Tool executors: same writes the UI makes, reported back as JSON
+  async function execTool(name:string,inp:any):Promise<any>{
+    try{
+      if(name==='get_overview'){
+        const now=Date.now(),in7=now+7*86400000
+        const act=items.filter((i:any)=>spaceOf(i)===space&&!ITEM_TERMINAL.includes(i.status))
+        const due=act.filter((i:any)=>i.end_date&&+new Date(i.end_date+'T12:00:00')<=in7)
+          .map((i:any)=>({id:i.item_id,name:i.name,end:i.end_date,status:i.status,project:i.parent_project,overdue:+new Date(i.end_date+'T12:00:00')<now}))
+        const ms=milestones.filter((m:any)=>spaceOf(m)===space&&!m.completed&&+new Date(m.date+'T12:00:00')>=now-86400000&&+new Date(m.date+'T12:00:00')<=now+14*86400000)
+          .map((m:any)=>({date:m.date,name:m.name,project:projects.find((p:any)=>p.id===m.project_id)?.name}))
+        const openCcrs=ccrs.filter((c:any)=>c.status!=='Closed').map((c:any)=>({title:c.title,status:c.status,number:c.ccr_number,target:c.target_date,project:projects.find((p:any)=>p.id===c.project_id)?.name}))
+        const flagsI=act.filter((i:any)=>i.flagged).map((i:any)=>({id:i.item_id,name:i.name,audience:i.flag_audience||'both',notes:i.notes}))
+        const flagsP=projects.filter((p:any)=>spaceOf(p)===space&&p.flagged&&!PROJECT_TERMINAL.includes(p.status)).map((p:any)=>({name:p.name,audience:p.flag_audience||'both',notes:p.flag_notes,rag:p.rag}))
+        const openTasks=tasks.filter((t:any)=>spaceOf(t)===space&&!t.done).map((t:any)=>({title:t.title,due:t.due_date,project:projects.find((p:any)=>p.id===t.project_id)?.name||'General',overdue:t.due_date&&+new Date(t.due_date+'T12:00:00')<now}))
+        return{today:localISO(new Date()),space,counts:{active_items:act.length,projects:projects.filter((p:any)=>spaceOf(p)===space&&!PROJECT_TERMINAL.includes(p.status)).length},due_within_7_days:due,milestones_next_14_days:ms,ccrs_open:openCcrs,flagged_items:flagsI,flagged_projects:flagsP,open_tasks:openTasks}
+      }
+      if(name==='find_items'){
+        const q=(inp.query||'').toLowerCase()
+        const hits=items.filter((i:any)=>spaceOf(i)===space&&((i.item_id||'').toLowerCase().includes(q)||(i.name||'').toLowerCase().includes(q)||(i.parent_project||'').toLowerCase().includes(q)||(i.vendor||'').toLowerCase().includes(q)))
+          .slice(0,12).map((i:any)=>({id:i.item_id,name:i.name,status:i.status,priority:i.priority,project:i.parent_project,flagged:!!i.flagged}))
+        return{matches:hits}
+      }
+      if(name==='add_item'){
+        let team=inp.team||null,parent=null
+        if(inp.project){
+          const pr=findProject(inp.project)
+          if(!pr)return{error:`No project matched "${inp.project}"`,projects:projects.filter((p:any)=>spaceOf(p)===space&&!PROJECT_TERMINAL.includes(p.status)).map((p:any)=>p.name)}
+          parent=pr.name;team=team||pr.team||null
+        }
+        if(team){const t=TEAMS.find(x=>x.toLowerCase().includes(String(team).toLowerCase()));if(t)team=t}
+        const payload:any={item_id:nextItemId(items),name:inp.name,description:inp.description||null,
+          request_type:inp.request_type||'Enhancement',priority:inp.priority||'P3',
+          status:space==='home'?'To Do':'New',effort:inp.effort||'M',swimlane:'POS',region:'',vendor:'',
+          flagged:!!inp.flag_audience,flag_audience:inp.flag_audience||null,notes:inp.flag_notes||null,
+          parent_project:parent,team,sort_order:items.length,space}
+        const{data,error}=await supabase.from('items').insert(payload).select().single()
+        if(error)return{error:error.message}
+        if(data)setItems((prev:any[])=>[...prev,data])
+        return{created:{id:payload.item_id,name:payload.name,project:parent||'none',team:team||'none',priority:payload.priority,type:payload.request_type,flagged:inp.flag_audience||'no'}}
+      }
+      if(name==='create_ccr'){
+        let projectId=null,pname=null
+        if(inp.project){
+          const pr=findProject(inp.project)
+          if(!pr)return{error:`No project matched "${inp.project}"`,projects:projects.filter((p:any)=>spaceOf(p)===space&&!PROJECT_TERMINAL.includes(p.status)).map((p:any)=>p.name)}
+          projectId=pr.id;pname=pr.name
+        }
+        const{data,error}=await supabase.from('ccrs').insert({title:inp.title,project_id:projectId,target_date:inp.target_date||null,status:'To Create'}).select().single()
+        if(error)return{error:error.message}
+        if(data)setCcrs((prev:any[])=>[...prev,data])
+        return{created:{ccr:inp.title,project:pname||'none',target_date:inp.target_date||'none',status:'To Create'}}
+      }
+      if(name==='add_task'){
+        let projectId=null,pname='General',tSpace=space
+        if(inp.project){
+          const pr=findProject(inp.project)
+          if(!pr)return{error:`No project matched "${inp.project}"`,projects:projects.filter((p:any)=>spaceOf(p)===space&&!PROJECT_TERMINAL.includes(p.status)).map((p:any)=>p.name)}
+          projectId=pr.id;pname=pr.name;tSpace=spaceOf(pr)
+        }
+        const ok=await addProjectTask(setTasks,projectId,inp.title,inp.due_date||null,tSpace)
+        if(!ok)return{error:'Task insert failed'}
+        return{created:{task:inp.title,project:pname,due:inp.due_date||'none'}}
+      }
+      if(name==='flag_item'){
+        const it=findItem(inp.item)
+        if(!it)return{error:`No item matched "${inp.item}"`,hint:'Try find_items first'}
+        const upd:any=inp.audience==='none'?{flagged:false,flag_audience:null}:{flagged:true,flag_audience:inp.audience}
+        if(inp.notes!==undefined&&inp.audience!=='none')upd.notes=inp.notes
+        setItems((prev:any[])=>prev.map(x=>x.id===it.id?{...x,...upd}:x))
+        const{error}=await supabase.from('items').update(upd).eq('id',it.id)
+        if(error)return{error:error.message}
+        return{updated:{id:it.item_id,name:it.name,flag:inp.audience,notes:upd.notes??it.notes??null}}
+      }
+      if(name==='update_item_status'){
+        const it=findItem(inp.item)
+        if(!it)return{error:`No item matched "${inp.item}"`,hint:'Try find_items first'}
+        const st=statusesFor(spaceOf(it)).find(x=>x.toLowerCase()===String(inp.status||'').toLowerCase())
+        if(!st)return{error:`"${inp.status}" is not a valid status`,valid:statusesFor(spaceOf(it))}
+        await applyItemStatus(items,setItems,it.id,st)
+        return{updated:{id:it.item_id,name:it.name,status:st}}
+      }
+      return{error:`Unknown tool ${name}`}
+    }catch(e:any){return{error:String(e?.message||e)}}
+  }
+
+  async function send(text:string){
+    if(!text.trim()||busy)return
+    setBusy(true)
+    setMsgs(m=>[...m,{role:'user',text}])
+    setInput('')
+    let history=[...apiMsgs,{role:'user',content:text}]
+    const context={
+      today:localISO(new Date()),space,
+      projects:projects.filter((p:any)=>spaceOf(p)===space&&!PROJECT_TERMINAL.includes(p.status)).map((p:any)=>p.name),
+      teams:TEAMS,statuses:statusesFor(space),
+    }
+    try{
+      for(let hop=0;hop<6;hop++){
+        const r=await fetch('/api/assistant',{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify({messages:history,context})})
+        const data=await r.json()
+        if(!r.ok){setMsgs(m=>[...m,{role:'assistant',text:'⚠ '+(data?.error||'Assistant request failed')+(r.status===500?' — check ANTHROPIC_API_KEY in Vercel.':'')}]);break}
+        history=[...history,{role:'assistant',content:data.content}]
+        const toolUses=(data.content||[]).filter((b:any)=>b.type==='tool_use')
+        const texts=(data.content||[]).filter((b:any)=>b.type==='text').map((b:any)=>b.text).join('\n').trim()
+        if(texts)setMsgs(m=>[...m,{role:'assistant',text:texts}])
+        if(toolUses.length===0)break
+        const results:any[]=[]
+        for(const tu of toolUses){
+          setMsgs(m=>[...m,{role:'act',text:`⚙ ${tu.name.replace(/_/g,' ')}…`}])
+          const out=await execTool(tu.name,tu.input||{})
+          results.push({type:'tool_result',tool_use_id:tu.id,content:JSON.stringify(out)})
+        }
+        history=[...history,{role:'user',content:results}]
+      }
+      setApiMsgs(history)
+    }catch(e:any){
+      setMsgs(m=>[...m,{role:'assistant',text:'⚠ '+String(e?.message||e)}])
+    }
+    setBusy(false)
+  }
+
+  if(!open)return(
+    <button onClick={()=>setOpen(true)} title="Assistant"
+      style={{position:'fixed',right:18,bottom:18,zIndex:400,width:48,height:48,borderRadius:24,background:'#C8973A',border:'none',color:'#0D1B2A',fontSize:22,cursor:'pointer',boxShadow:'0 4px 16px rgba(0,0,0,0.5)'}}>💬</button>
+  )
+  return(
+    <div style={{position:'fixed',right:mobile?0:18,bottom:mobile?0:18,top:mobile?0:'auto',left:mobile?0:'auto',zIndex:400,width:mobile?'100%':400,height:mobile?'100%':560,background:'#0F1C2B',border:'1px solid #243447',borderRadius:mobile?0:12,display:'flex',flexDirection:'column' as const,boxShadow:'0 8px 32px rgba(0,0,0,0.6)',boxSizing:'border-box' as const}}>
+      <div style={{display:'flex',alignItems:'center',gap:8,padding:'10px 14px',borderBottom:'1px solid #243447',flexShrink:0}}>
+        <span style={{fontSize:13,fontWeight:800,color:'#F4F6F8'}}>💬 Assistant</span>
+        <span style={{fontSize:9,color:'#7A8FA6',border:'1px solid #243447',borderRadius:8,padding:'1px 7px'}}>{space==='home'?'🏠 Home':'🏢 Work'}</span>
+        <button onClick={()=>{setMsgs([]);setApiMsgs([])}} title="New conversation" style={{marginLeft:'auto',background:'none',border:'1px solid #243447',borderRadius:5,color:'#7A8FA6',fontSize:10,padding:'2px 8px',cursor:'pointer'}}>New</button>
+        <button onClick={()=>setOpen(false)} style={{background:'none',border:'none',color:'#7A8FA6',fontSize:17,cursor:'pointer',lineHeight:1}}>✕</button>
+      </div>
+      <div ref={scrollRef} style={{flex:1,minHeight:0,overflowY:'auto',padding:'12px 14px'}}>
+        {msgs.length===0&&!busy&&(
+          <div style={{fontSize:11,color:'#7A8FA6',lineHeight:1.7}}>
+            Try:<br/>“Add backlog item X to Boomi, flag it for dev”<br/>“Create a CCR for POS deployment next Tuesday”<br/>“Task on Peak Prep: reach out to stakeholders Friday”<br/>“What's due this week?” · “Morning brief”
+          </div>
+        )}
+        {msgs.map((m,ix)=>m.role==='act'
+          ?<div key={ix} style={{fontSize:10,color:'#5DADE2',margin:'2px 0 8px',fontStyle:'italic'}}>{m.text}</div>
+          :<div key={ix} style={{marginBottom:10,display:'flex',justifyContent:m.role==='user'?'flex-end':'flex-start'}}>
+            <div style={{maxWidth:'88%',background:m.role==='user'?'#C8973A':'#162436',color:m.role==='user'?'#0D1B2A':'#E8ECF1',border:m.role==='user'?'none':'1px solid #243447',borderRadius:10,padding:'8px 11px',fontSize:12,lineHeight:1.55,whiteSpace:'pre-wrap' as const}}>{m.text}</div>
+          </div>
+        )}
+        {busy&&<div style={{fontSize:11,color:'#7A8FA6',fontStyle:'italic'}}>thinking…</div>}
+      </div>
+      <div style={{display:'flex',gap:7,padding:'10px 12px',borderTop:'1px solid #243447',flexShrink:0}}>
+        <input value={input} onChange={e=>setInput(e.target.value)} onKeyDown={e=>{if(e.key==='Enter')send(input)}}
+          placeholder="Tell me or ask me anything… (use 🎤 on your keyboard)"
+          style={{flex:1,minWidth:0,background:'#0D1B2A',border:'1px solid #243447',borderRadius:8,color:'#F4F6F8',fontSize:13,padding:'9px 11px'}}/>
+        <button onClick={()=>send(input)} disabled={busy||!input.trim()}
+          style={{background:'#C8973A',border:'none',borderRadius:8,color:'#0D1B2A',fontSize:13,fontWeight:800,padding:'0 15px',cursor:'pointer',opacity:busy||!input.trim()?0.5:1}}>➤</button>
+      </div>
+    </div>
+  )
+}
+
 export default function PerfectGame() {
   const [items,setItems]=useState([])
   const [projects,setProjects]=useState([])
@@ -4718,6 +4928,8 @@ export default function PerfectGame() {
   const [loading,setLoading]=useState(true)
   const [activeTab,setActiveTab]=useState('desk')
   const [space,setSpace]=useState('work')
+  const [asstOpen,setAsstOpen]=useState(false)
+  const [asstSeed,setAsstSeed]=useState('')
   const mobile=useIsMobile()
   // Space-scoped views: every tab except Desk sees only the current space.
   // Scoped setters merge edits back into the full arrays so cross-space data is never dropped.
@@ -4842,7 +5054,8 @@ useEffect(()=>{
         {activeTab==='projects'&&<Projects items={sItems} setItems={setSItems} projects={sProjects} setProjects={setSProjects} milestones={sMilestones} setMilestones={setSMilestones} tasks={tasks} setTasks={setTasks} space={space} ccrs={ccrs} ccrItems={ccrItems}/>}
 {activeTab==='roadmap'&&<Roadmap items={sItems} setItems={setSItems} projects={sProjects} setProjects={setSProjects} milestones={sMilestones}/>}
         {activeTab==='teams'&&<Teams items={sItems} projects={sProjects} milestones={sMilestones} ccrs={ccrs} ccrItems={ccrItems}/>}
-        {activeTab==='desk'&&<Desk items={items} setItems={setItems} projects={projects} setProjects={setProjects} milestones={milestones} setMilestones={setMilestones} tasks={tasks} setTasks={setTasks} ccrs={ccrs} setCcrs={setCcrs} ccrItems={ccrItems} setCcrItems={setCcrItems} space={space}/>}
+        {activeTab==='desk'&&<Desk items={items} setItems={setItems} projects={projects} setProjects={setProjects} milestones={milestones} setMilestones={setMilestones} tasks={tasks} setTasks={setTasks} ccrs={ccrs} setCcrs={setCcrs} ccrItems={ccrItems} setCcrItems={setCcrItems} space={space} openAssistant={(t:string)=>{setAsstSeed(t);setAsstOpen(true)}}/>}
+        <Assistant open={asstOpen} setOpen={setAsstOpen} seed={asstSeed} setSeed={setAsstSeed} items={items} setItems={setItems} projects={projects} setProjects={setProjects} milestones={milestones} tasks={tasks} setTasks={setTasks} ccrs={ccrs} setCcrs={setCcrs} ccrItems={ccrItems} setCcrItems={setCcrItems} space={space}/>
         {activeTab==='stakeholder'&&<Stakeholder items={sItems} projects={sProjects} milestones={sMilestones}/>}
         {activeTab==='done'&&<DoneTab items={sItems} setItems={setSItems} projects={sProjects} setProjects={setSProjects} ccrs={ccrs} ccrItems={ccrItems} space={space}/>}
       </div>
