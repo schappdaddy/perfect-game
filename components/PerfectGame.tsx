@@ -3351,7 +3351,7 @@ function ComposeUpdate({projects,milestones,items,onClose}:{projects:any[],miles
     const yr=new Date().getFullYear()
     const closedRecent=projects.filter((p:any)=>p.status==='Complete'&&p.end_date&&new Date(p.end_date+'T12:00:00').getFullYear()===yr)
       .sort((a:any,b:any)=>a.end_date<b.end_date?1:-1)
-    const closedHtml=closedRecent.length?`<div style="${H2}">Completed Projects </div>
+    const closedHtml=closedRecent.length?`<div style="${H2}">Completed Projects — ${yr} (${closedRecent.length})</div>
       <table cellspacing="0" style="border-collapse:collapse;width:100%;table-layout:fixed;">
       <colgroup><col style="width:560px;"/><col style="width:120px;"/></colgroup>
       <tr><th style="${TH_}">Project</th><th style="${TH_}">Completed</th></tr>
@@ -3456,8 +3456,8 @@ function ComposeUpdate({projects,milestones,items,onClose}:{projects:any[],miles
 function Stakeholder({items,projects,milestones}:{items:any[],projects:any[],milestones:any[]}) {
   const [composing,setComposing]=useState(false)
   const [fl,setFl]=useState({})
-  const p1=items.filter(i=>i.priority==='P1')
-  const p2=items.filter(i=>i.priority==='P2')
+  const p1=items.filter(i=>i.priority==='P1'&&!ITEM_TERMINAL.includes(i.status))
+  const p2=items.filter(i=>i.priority==='P2'&&!ITEM_TERMINAL.includes(i.status))
   const bl=items.filter(i=>i.priority!=='P1'&&i.priority!=='P2').slice(0,10)
   const disc=items.filter(flagStk)
   const redProjects=projects.filter(p=>p.rag==='Red')
