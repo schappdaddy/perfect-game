@@ -3289,7 +3289,7 @@ function ComposeUpdate({projects,milestones,items,onClose}:{projects:any[],miles
     // Item sections
     const p12=items.filter((i:any)=>(i.priority==='P1'||i.priority==='P2')&&!ITEM_TERMINAL.includes(i.status))
       .sort((a:any,b:any)=>(PRIORITY_ORDER[a.priority]??4)-(PRIORITY_ORDER[b.priority]??4)||((a.committed_priority??999)-(b.committed_priority??999)))
-    const top10=items.filter((i:any)=>i.priority!=='P1'&&i.priority!=='P2'&&!(i.start_date&&i.end_date))
+    const top10=items.filter((i:any)=>i.priority!=='P1'&&i.priority!=='P2'&&!ITEM_TERMINAL.includes(i.status)&&!(i.start_date&&i.end_date))
       .sort((a:any,b:any)=>(a.committed_priority??a.sort_order??999)-(b.committed_priority??b.sort_order??999)).slice(0,10)
     const flagged=items.filter(flagStk)
     const itemRow=(i:any,n?:number)=>`<tr>
@@ -3458,7 +3458,8 @@ function Stakeholder({items,projects,milestones}:{items:any[],projects:any[],mil
   const [fl,setFl]=useState({})
   const p1=items.filter(i=>i.priority==='P1'&&!ITEM_TERMINAL.includes(i.status))
   const p2=items.filter(i=>i.priority==='P2'&&!ITEM_TERMINAL.includes(i.status))
-  const bl=items.filter(i=>i.priority!=='P1'&&i.priority!=='P2').slice(0,10)
+  const bl=items.filter(i=>i.priority!=='P1'&&i.priority!=='P2'&&!ITEM_TERMINAL.includes(i.status)&&!(i.start_date&&i.end_date))
+    .sort((a,b)=>(a.committed_priority??a.sort_order??999)-(b.committed_priority??b.sort_order??999)).slice(0,10)
   const disc=items.filter(flagStk)
   const redProjects=projects.filter(p=>p.rag==='Red')
   const amberProjects=projects.filter(p=>p.rag==='Amber')
