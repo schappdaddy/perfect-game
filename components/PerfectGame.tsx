@@ -2940,6 +2940,16 @@ function Teams({items,projects,milestones,ccrs,ccrItems}:{items:any[],projects:a
       <tr><th style="${TH_}width:70px;">Date</th><th style="${TH_}width:220px;">Project</th><th style="${TH_}">Milestone</th></tr>
       ${upc.map(m=>{const pr=projects.find(p=>p.id===m.project_id);return `<tr><td style="${TD_}white-space:nowrap;">${hs(fmtD(m.date))}</td><td style="${TD_}">${pr?.name||''}</td><td style="${TD_}">${m.name}${m.type&&m.type!=='Milestone'?` <span style="color:#595959;font-size:11px;">(${m.type})</span>`:''}</td></tr>`}).join('')}</table>`:''
     const devFlags=items.filter(i=>i.team===team&&flagDev(i))
+    const teamFlaggedProj=teamProjects.filter((p:any)=>p.flagged&&!PROJECT_TERMINAL.includes(p.status))
+    const projFlagsHtml=teamFlaggedProj.length?`<div style="${H2}">Projects for Discussion</div>
+      <table cellspacing="0" style="border-collapse:collapse;width:100%;table-layout:fixed;">
+      <colgroup><col style="width:240px;"/><col style="width:110px;"/><col style="width:494px;"/></colgroup>
+      <tr><th style="${TH_}">Project</th><th style="${TH_}">Status</th><th style="${TH_}">Notes</th></tr>
+      ${teamFlaggedProj.map((p:any)=>`<tr>
+        <td style="${TD_}overflow:hidden;"><b>${p.name}</b></td>
+        <td style="${TD_}overflow:hidden;">${hs(p.status)}</td>
+        <td style="${TD_}line-height:1.5;">${p.flag_notes||'<span style="color:#7F7F7F;font-style:italic;">—</span>'}</td>
+      </tr>`).join('')}</table>`:''
     const flagsHtml=devFlags.length?`<div style="${H2}">For Discussion</div>
       <table cellspacing="0" style="border-collapse:collapse;width:100%;">
       <tr><th style="${TH_}width:60px;">ID</th><th style="${TH_}width:240px;">Item</th><th style="${TH_}width:150px;">Project</th><th style="${TH_}">Notes</th></tr>
@@ -2952,6 +2962,7 @@ function Teams({items,projects,milestones,ccrs,ccrItems}:{items:any[],projects:a
       ${msHtml}
       ${projectsHtml}
       ${bugsHtml}
+      ${projFlagsHtml}
       ${flagsHtml}
     </div>`
     setExtractHtml(html)
@@ -3306,6 +3317,17 @@ function ComposeUpdate({projects,milestones,items,onClose}:{projects:any[],miles
       <table cellspacing="0" style="border-collapse:collapse;width:100%;table-layout:fixed;">${itemHead()}${p12.map((i:any)=>itemRow(i)).join('')}</table>`:''
     const top10Html=top10.length?`<div style="${H2}">Top 10 Backlog — Not Yet Committed</div>
       <table cellspacing="0" style="border-collapse:collapse;width:100%;table-layout:fixed;">${itemHead(true)}${top10.map((i:any,n:number)=>itemRow(i,n+1)).join('')}</table>`:''
+    const flaggedProj=projects.filter((p:any)=>p.flagged&&!PROJECT_TERMINAL.includes(p.status))
+    const flaggedProjHtml=flaggedProj.length?`<div style="${H2}">Projects Flagged for Discussion</div>
+      <table cellspacing="0" style="border-collapse:collapse;width:100%;table-layout:fixed;">
+      <colgroup><col style="width:240px;"/><col style="width:110px;"/><col style="width:70px;"/><col style="width:424px;"/></colgroup>
+      <tr><th style="${TH_}">Project</th><th style="${TH_}">Status</th><th style="${TH_}">RAG</th><th style="${TH_}">Discussion Notes</th></tr>
+      ${flaggedProj.map((p:any)=>`<tr>
+        <td style="${TD_}overflow:hidden;"><b>${p.name}</b></td>
+        <td style="${TD_}overflow:hidden;">${hs(p.status)}</td>
+        <td style="${TD_}white-space:nowrap;color:${p.rag==='Red'?'#C00000':p.rag==='Amber'?'#E36C09':p.rag==='Green'?'#1F8A3B':'#595959'};font-weight:bold;">${p.rag||'—'}</td>
+        <td style="${TD_}line-height:1.5;">${p.flag_notes||'<span style="color:#7F7F7F;font-style:italic;">—</span>'}</td>
+      </tr>`).join('')}</table>`:''
     const flaggedHtml=flagged.length?`<div style="${H2}">Flagged for Discussion</div>
       <table cellspacing="0" style="border-collapse:collapse;width:100%;table-layout:fixed;">
       <colgroup><col style="width:68px;"/><col style="width:240px;"/><col style="width:150px;"/><col style="width:36px;"/><col style="width:350px;"/></colgroup>
@@ -3380,6 +3402,7 @@ function ComposeUpdate({projects,milestones,items,onClose}:{projects:any[],miles
         return `${onRoadmap.length?`<div style="${H2}">Project Updates — On Roadmap</div>${onRoadmap.map(p=>projBlock(p)).join('')}`:''}
         ${backlogP.length?`<div style="${H2}">Project Updates — Backlog</div>${backlogP.map(p=>projBlock(p,'BACKLOG')).join('')}`:''}`
       })()}
+      ${flaggedProjHtml}
       ${flaggedHtml}
       ${top10Html}
       ${closedHtml}
@@ -3528,6 +3551,24 @@ function Stakeholder({items,projects,milestones}:{items:any[],projects:any[],mil
 
       {disc.length>0&&(
         <>
+          {(()=>{
+            const fp=projects.filter((p:any)=>p.flagged&&!PROJECT_TERMINAL.includes(p.status))
+            if(!fp.length)return null
+            return(
+              <>
+              <div style={{fontSize:13,fontWeight:700,color:'#C8973A',letterSpacing:1,marginBottom:10,marginTop:20}}>◈ FLAGGED PROJECTS</div>
+              {fp.map((p:any)=>(
+                <div key={p.id} style={{background:'#162436',border:'1px solid rgba(200,151,58,0.35)',borderRadius:8,padding:'10px 16px',marginBottom:6,display:'flex',alignItems:'flex-start',gap:12}}>
+                  <span style={{width:10,height:10,borderRadius:2,background:p.color||'#3A4A5E',marginTop:3,flexShrink:0}}/>
+                  <div style={{flex:1}}>
+                    <div style={{fontSize:13,color:'#F4F6F8',fontWeight:700}}>{p.name} <span style={{fontSize:11,fontWeight:400,color:'#7A8FA6'}}>· {p.status} · {p.rag||'—'}</span></div>
+                    {p.flag_notes&&<div style={{fontSize:11,color:'#C8C8D4',marginTop:3,whiteSpace:'pre-wrap' as const,lineHeight:1.5}}>{p.flag_notes}</div>}
+                  </div>
+                </div>
+              ))}
+              </>
+            )
+          })()}
           <div style={{fontSize:13,fontWeight:700,color:'#C8973A',letterSpacing:1,marginBottom:10,marginTop:20}}>🚩 FLAGGED FOR DISCUSSION</div>
           {disc.map(item=>(
             <div key={item.id} style={{background:'rgba(200,151,58,0.1)',border:'1px solid rgba(200,151,58,0.3)',borderRadius:8,padding:'10px 16px',marginBottom:6}}>
@@ -3979,6 +4020,27 @@ function Desk({items,setItems,projects,setProjects,milestones,setMilestones,task
             </div>
           )
         })()}
+        {(()=>{
+          const fp=projects.filter(p=>inDeskSpace(p)&&p.flagged&&!PROJECT_TERMINAL.includes(p.status))
+          if(!fp.length)return null
+          return(
+            <div style={{marginBottom:16}}>
+              <div style={{fontSize:11,fontWeight:700,letterSpacing:1,color:'#C8973A',marginBottom:8}}>◈ FLAGGED PROJECTS ({fp.length})</div>
+              {fp.map(p=>(
+                <div key={p.id} style={{background:'#12202F',border:'1px solid rgba(200,151,58,0.35)',borderRadius:8,padding:'8px 10px',marginBottom:8}}>
+                  <div style={{display:'flex',alignItems:'center',gap:6}}>
+                    <span style={{width:8,height:8,borderRadius:2,background:p.color||'#3A4A5E',flexShrink:0}}/>
+                    <span onClick={()=>setProjView(p)} style={{fontSize:12,fontWeight:700,color:'#F4F6F8',flex:1,overflow:'hidden',whiteSpace:'nowrap' as const,textOverflow:'ellipsis',cursor:'pointer'}}>{homeTag(p)?'🏠 ':''}{p.name}</span>
+                    <span style={{fontSize:10}}>{p.rag==='Red'?'🔴':p.rag==='Amber'?'🟡':p.rag==='Green'?'🟢':'⚪'}</span>
+                    <button onClick={async()=>{setProjects((prev:any[])=>prev.map(x=>x.id===p.id?{...x,flagged:false}:x));await supabase.from('projects').update({flagged:false}).eq('id',p.id)}}
+                      title="Unflag" style={{background:'none',border:'none',color:'#3A4A5E',fontSize:12,cursor:'pointer',padding:0,flexShrink:0}}>✕</button>
+                  </div>
+                  {p.flag_notes&&<div style={{fontSize:10,color:'#C8C8D4',marginTop:4,lineHeight:1.4,whiteSpace:'pre-wrap' as const}}>{p.flag_notes}</div>}
+                </div>
+              ))}
+            </div>
+          )
+        })()}
         {([['🚩 DEV FLAGGED',flaggedDevL,devOpen,setDevOpen,unflagDev],['◉ STAKEHOLDER FLAGGED',flaggedStkL,stkOpen,setStkOpen,unflagStk]] as any[]).map(([title,list,open,setOpen,unflag]:any)=>(
           <div key={title} style={railCard as any}>
             <button onClick={()=>setOpen((o:boolean)=>!o)} style={{background:'none',border:'none',padding:0,cursor:'pointer',width:'100%',display:'flex',alignItems:'center',gap:6,...railTitle as any,marginBottom:open?8:0}}>
@@ -4259,8 +4321,14 @@ function Desk({items,setItems,projects,setProjects,milestones,setMilestones,task
                   )
                 })}
               </div>
+              <button onClick={()=>updateProj({flagged:!projView.flagged})} title={projView.flagged?'Unflag — remove from discussion':'Flag for discussion'}
+                style={{background:'none',border:'none',cursor:'pointer',fontSize:16,opacity:projView.flagged?1:0.25,lineHeight:1}}>🚩</button>
               <button onClick={()=>setProjView(null)} style={{marginLeft:'auto',background:'none',border:'none',color:'#7A8FA6',fontSize:18,cursor:'pointer',lineHeight:1}}>✕</button>
             </div>
+            {projView.flagged&&(
+              <textarea value={projView.flag_notes||''} onChange={e=>updateProj({flag_notes:e.target.value})} placeholder="Discussion notes…" rows={2}
+                style={{width:'100%',boxSizing:'border-box' as const,background:'#0D1B2A',border:'1px solid rgba(200,151,58,0.4)',borderRadius:6,color:'#F4F6F8',fontSize:11,padding:'6px 8px',resize:'vertical' as const,fontFamily:'inherit',marginBottom:10,lineHeight:1.4}}/>
+            )}
             <div style={{display:'flex',gap:6,flexWrap:'wrap' as const,marginBottom:10,alignItems:'center'}}>
               <select value={projView.status||''} onChange={e=>updateProj({status:e.target.value})} title="Status"
                 style={{background:'#1E3048',border:'1px solid #243447',borderRadius:4,color:'#F4F6F8',fontSize:10,fontWeight:600,padding:'3px 6px',cursor:'pointer'}}>
