@@ -5,7 +5,7 @@
 
 export const runtime = 'edge'
 
-const MODEL = process.env.ASSISTANT_MODEL || 'claude-3-5-haiku-latest'
+const MODEL = process.env.ASSISTANT_MODEL || 'claude-haiku-4-5-20251001'
 
 const TOOLS = [
   {
@@ -130,7 +130,8 @@ Rules:
   })
   const data = await resp.json()
   if (!resp.ok) {
-    return new Response(JSON.stringify({ error: data?.error?.message || 'Anthropic API error' }), { status: 502 })
+    const msg = data?.error?.message || 'Anthropic API error'
+    return new Response(JSON.stringify({ error: /model/i.test(msg) ? `Model not available (${MODEL}): ${msg}. Set ASSISTANT_MODEL in Vercel to override.` : msg }), { status: 502 })
   }
   return new Response(JSON.stringify({ content: data.content, stop_reason: data.stop_reason }), {
     headers: { 'content-type': 'application/json' },
