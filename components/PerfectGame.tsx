@@ -1990,7 +1990,8 @@ function Roadmap({items,setItems,projects,setProjects,milestones}:{items:any[],p
     const am=a.committed_priority??a.sort_order??999,bm=b.committed_priority??b.sort_order??999
     return am-bm
   })
-  const filteredProjects=projects.filter(p=>ft==='All'||p.team===ft)
+  const [hideDone,setHideDone]=useState(false)
+  const filteredProjects=projects.filter(p=>(ft==='All'||p.team===ft)&&(!hideDone||!PROJECT_TERMINAL.includes(p.status)))
   const flaggedItems=items.filter(flagStk) // roadmap discussion = stakeholder audience
 
   async function saveDiscussNote(item){
@@ -2250,6 +2251,9 @@ function Roadmap({items,setItems,projects,setProjects,milestones}:{items:any[],p
           </select>
           <button onClick={()=>setSortDir(d=>d==='asc'?'desc':'asc')} style={{...sel,fontSize:13,padding:'3px 10px'}}>{sortDir==='asc'?'↑':'↓'}</button>
         </div>}
+        <label style={{display:'flex',alignItems:'center',gap:5,fontSize:11,color:'#7A8FA6',cursor:'pointer',whiteSpace:'nowrap' as const}} title="Remove Complete/Cancelled projects from the board">
+          <input type="checkbox" checked={hideDone} onChange={e=>setHideDone(e.target.checked)} style={{accentColor:'#C8973A'}}/>Hide completed
+        </label>
         {!mobileR&&<div style={{display:'flex',alignItems:'center',gap:6}}>
           <span style={{fontSize:12,color:'#7A8FA6'}}>Zoom</span>
           <input type="range" min={0.5} max={3} step={0.1} value={zoom} onChange={e=>setZoom(parseFloat(e.target.value))} style={{width:90,accentColor:'#C8973A'}}/>
@@ -2331,7 +2335,7 @@ function Roadmap({items,setItems,projects,setProjects,milestones}:{items:any[],p
                 const rbd=ragBorder(group.rag)
                 return(
                   <div key={group.id}>
-                    <div style={{height:PARENT_H,background:rb,borderBottom:'1px solid #243447',borderTop:`2px solid ${rbd}`,display:'flex',alignItems:'center',padding:'0 8px',gap:6}}>
+                    <div style={{height:PARENT_H,background:PROJECT_TERMINAL.includes(group.status)?'rgba(122,143,166,0.05)':rb,borderBottom:'1px solid #243447',borderTop:`2px solid ${PROJECT_TERMINAL.includes(group.status)?'#3A4A5E':rbd}`,display:'flex',alignItems:'center',padding:'0 8px',gap:6,opacity:PROJECT_TERMINAL.includes(group.status)?0.6:1}}>
                       <button onClick={()=>toggleCollapse(group.id)} style={{background:'none',border:'none',cursor:'pointer',color:'#C8973A',fontSize:14,padding:'2px 4px',lineHeight:1,flexShrink:0}}>
                         {isCollapsed?'▶':'▼'}
                       </button>
@@ -2449,9 +2453,9 @@ function Roadmap({items,setItems,projects,setProjects,milestones}:{items:any[],p
                           <div onMouseDown={e=>startProjectBarDrag(e,group,'left')} style={{position:'absolute',left:0,top:0,bottom:0,width:10,cursor:'ew-resize',zIndex:5,background:'rgba(255,255,255,0.2)',borderRadius:'4px 0 0 4px'}}/>
                           <div draggable onDragStart={e=>{e.dataTransfer.setData('projectId',group.id);e.dataTransfer.effectAllowed='move'}}
                             onMouseDown={e=>startProjectBarDrag(e,group,'move')}
-                            style={{position:'absolute',left:0,right:0,top:0,bottom:0,background:group.ongoing?`linear-gradient(90deg, ${rc} 0%, ${rc} 55%, ${rc}33 100%)`:rc,borderRadius:6,display:'flex',alignItems:'center',padding:'0 14px',fontSize:11,fontWeight:700,color:'#fff',overflow:'hidden',whiteSpace:'nowrap' as const,opacity:draggingBar===group.id?0.7:0.9,border:group.ongoing?'1px dashed rgba(255,255,255,0.45)':group.violations.length>0?'2px dashed rgba(255,255,255,0.5)':'none',boxShadow:`0 2px 8px ${rc}55`,cursor:draggingBar===group.id?'grabbing':'grab'}}>
-                            {group.rag==='Red'?'🔴':group.rag==='Amber'?'🟡':group.rag==='Green'?'🟢':'⚪'} {group.name}{group.ongoing?' ∞':''}
-                            {group.violations.length>0&&<span style={{marginLeft:6,fontSize:10}}>⚠️</span>}
+                            style={{position:'absolute',left:0,right:0,top:0,bottom:0,background:PROJECT_TERMINAL.includes(group.status)?'repeating-linear-gradient(45deg,#2E3D4E,#2E3D4E 8px,#26333F 8px,#26333F 16px)':group.ongoing?`linear-gradient(90deg, ${rc} 0%, ${rc} 55%, ${rc}33 100%)`:rc,borderRadius:6,display:'flex',alignItems:'center',padding:'0 14px',fontSize:11,fontWeight:700,color:PROJECT_TERMINAL.includes(group.status)?'#8FA3B8':'#fff',overflow:'hidden',whiteSpace:'nowrap' as const,opacity:draggingBar===group.id?0.7:PROJECT_TERMINAL.includes(group.status)?0.75:0.9,border:PROJECT_TERMINAL.includes(group.status)?'1px solid #3A4A5E':group.ongoing?'1px dashed rgba(255,255,255,0.45)':group.violations.length>0?'2px dashed rgba(255,255,255,0.5)':'none',boxShadow:PROJECT_TERMINAL.includes(group.status)?'none':`0 2px 8px ${rc}55`,cursor:draggingBar===group.id?'grabbing':'grab'}}>
+                            {PROJECT_TERMINAL.includes(group.status)?(group.status==='Cancelled'?'✕':'✓'):group.rag==='Red'?'🔴':group.rag==='Amber'?'🟡':group.rag==='Green'?'🟢':'⚪'} {group.name}{group.ongoing?' ∞':''}{PROJECT_TERMINAL.includes(group.status)?` — ${group.status}`:''}
+                            {!PROJECT_TERMINAL.includes(group.status)&&group.violations.length>0&&<span style={{marginLeft:6,fontSize:10}}>⚠️</span>}
                           </div>
                           <div onMouseDown={e=>startProjectBarDrag(e,group,'right')} style={{position:'absolute',right:0,top:0,bottom:0,width:10,cursor:'ew-resize',zIndex:5,background:'rgba(255,255,255,0.2)',borderRadius:'0 4px 4px 0'}}/>
                         </div>
@@ -3202,7 +3206,7 @@ function Teams({items,projects,milestones,ccrs,ccrItems}:{items:any[],projects:a
 
 // ── STAKEHOLDER UPDATE COMPOSER ───────────────────────────────────────────
 function ComposeUpdate({projects,milestones,items,onClose}:{projects:any[],milestones:any[],items:any[],onClose:any}) {
-  const active=projects.filter(p=>p.status!=='Complete'&&p.status!=='Cancelled')
+  const active=projects.filter(p=>!PROJECT_TERMINAL.includes(p.status))
   const [sel,setSel]=useState(()=>new Set(active.map(p=>p.id)))
   const [drafts,setDrafts]=useState<any>({})
   const [last,setLast]=useState<any>({})
@@ -3283,7 +3287,7 @@ function ComposeUpdate({projects,milestones,items,onClose}:{projects:any[],miles
     }
 
     // Item sections
-    const p12=items.filter((i:any)=>i.priority==='P1'||i.priority==='P2')
+    const p12=items.filter((i:any)=>(i.priority==='P1'||i.priority==='P2')&&!ITEM_TERMINAL.includes(i.status))
       .sort((a:any,b:any)=>(PRIORITY_ORDER[a.priority]??4)-(PRIORITY_ORDER[b.priority]??4)||((a.committed_priority??999)-(b.committed_priority??999)))
     const top10=items.filter((i:any)=>i.priority!=='P1'&&i.priority!=='P2'&&!(i.start_date&&i.end_date))
       .sort((a:any,b:any)=>(a.committed_priority??a.sort_order??999)-(b.committed_priority??b.sort_order??999)).slice(0,10)
@@ -3318,7 +3322,7 @@ function ComposeUpdate({projects,milestones,items,onClose}:{projects:any[],miles
       const d=drafts[p.id]||{}
       const upd=(d.update||'').trim()||(last[p.id]?.update_text||'')
       const blk=(d.blockers||'').trim()
-      const pItems=items.filter((i:any)=>i.parent_project===p.name&&i.start_date&&i.end_date)
+      const pItems=items.filter((i:any)=>i.parent_project===p.name&&i.start_date&&i.end_date&&!ITEM_TERMINAL.includes(i.status))
         .sort((a:any,b:any)=>(a.end_date<b.end_date?-1:a.end_date>b.end_date?1:0))
       const pUncommitted=items.filter((i:any)=>i.parent_project===p.name&&!(i.start_date&&i.end_date)&&!/done|will not/i.test(i.status||''))
         .sort((a:any,b:any)=>((PRIORITY_ORDER[a.priority]??4)-(PRIORITY_ORDER[b.priority]??4))||((a.committed_priority??999)-(b.committed_priority??999)))
@@ -3343,14 +3347,14 @@ function ComposeUpdate({projects,milestones,items,onClose}:{projects:any[],miles
         })()}
       </div>`
     }
-    // Closed in the last quarter — Complete projects whose timeline ended in the trailing 90 days
-    const q90=Date.now()-90*86400000
-    const closedRecent=projects.filter((p:any)=>p.status==='Complete'&&p.end_date&&+new Date(p.end_date+'T12:00:00')>=q90&&+new Date(p.end_date+'T12:00:00')<=Date.now()+86400000)
+    // Completed this year — project name + completion date (end of timeline)
+    const yr=new Date().getFullYear()
+    const closedRecent=projects.filter((p:any)=>p.status==='Complete'&&p.end_date&&new Date(p.end_date+'T12:00:00').getFullYear()===yr)
       .sort((a:any,b:any)=>a.end_date<b.end_date?1:-1)
-    const closedHtml=closedRecent.length?`<div style="${H2}">Closed — Last Quarter (${closedRecent.length})</div>
+    const closedHtml=closedRecent.length?`<div style="${H2}">Completed Projects — ${yr} (${closedRecent.length})</div>
       <table cellspacing="0" style="border-collapse:collapse;width:100%;table-layout:fixed;">
       <colgroup><col style="width:560px;"/><col style="width:120px;"/></colgroup>
-      <tr><th style="${TH_}">Project</th><th style="${TH_}">Closed</th></tr>
+      <tr><th style="${TH_}">Project</th><th style="${TH_}">Completed</th></tr>
       ${closedRecent.map((p:any)=>`<tr>
         <td style="${TD_}overflow:hidden;"><b>${p.name}</b></td>
         <td style="${TD_}white-space:nowrap;font-weight:bold;">${hs(fmtD(p.end_date))}</td>
