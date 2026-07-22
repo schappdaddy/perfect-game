@@ -2941,8 +2941,8 @@ function Teams({items,projects,milestones,ccrs,ccrItems}:{items:any[],projects:a
       ${upc.map(m=>{const pr=projects.find(p=>p.id===m.project_id);return `<tr><td style="${TD_}white-space:nowrap;">${hs(fmtD(m.date))}</td><td style="${TD_}">${pr?.name||''}</td><td style="${TD_}">${m.name}${m.type&&m.type!=='Milestone'?` <span style="color:#595959;font-size:11px;">(${m.type})</span>`:''}</td></tr>`}).join('')}</table>`:''
     const devFlags=items.filter(i=>i.team===team&&flagDev(i))
     const teamFlaggedProj=teamProjects.filter((p:any)=>flagDev(p)&&!PROJECT_TERMINAL.includes(p.status))
-    const projFlagsHtml=teamFlaggedProj.length?`<div style="${H2}">Projects for Discussion</div>
-      <table cellspacing="0" style="border-collapse:collapse;width:100%;table-layout:fixed;">
+    const teamProjFlagTable=teamFlaggedProj.length?`<div style="font-size:13px;font-weight:bold;color:#595959;margin:4px 0 3px;">Projects (${teamFlaggedProj.length})</div>
+      <table cellspacing="0" style="border-collapse:collapse;width:100%;table-layout:fixed;margin-bottom:8px;">
       <colgroup><col style="width:240px;"/><col style="width:110px;"/><col style="width:494px;"/></colgroup>
       <tr><th style="${TH_}">Project</th><th style="${TH_}">Status</th><th style="${TH_}">Notes</th></tr>
       ${teamFlaggedProj.map((p:any)=>`<tr>
@@ -2950,19 +2950,21 @@ function Teams({items,projects,milestones,ccrs,ccrItems}:{items:any[],projects:a
         <td style="${TD_}overflow:hidden;">${hs(p.status)}</td>
         <td style="${TD_}line-height:1.5;">${p.flag_notes||'<span style="color:#7F7F7F;font-style:italic;">—</span>'}</td>
       </tr>`).join('')}</table>`:''
-    const flagsHtml=devFlags.length?`<div style="${H2}">For Discussion</div>
-      <table cellspacing="0" style="border-collapse:collapse;width:100%;">
-      <tr><th style="${TH_}width:60px;">ID</th><th style="${TH_}width:240px;">Item</th><th style="${TH_}width:150px;">Project</th><th style="${TH_}">Notes</th></tr>
-      ${devFlags.map(i=>`<tr><td style="${TD_}white-space:nowrap;">${hs(i.item_id)}</td><td style="${TD_}font-weight:bold;">${i.name}</td><td style="${TD_}">${i.parent_project||'<span style="color:#7F7F7F;">—</span>'}</td><td style="${TD_}line-height:1.5;">${i.notes||'<span style="color:#7F7F7F;font-style:italic;">—</span>'}</td></tr>`).join('')}</table>`:''
+    const flagsHtml=(devFlags.length||teamFlaggedProj.length)?`<div style="${H2}">For Discussion</div>
+      ${teamProjFlagTable}
+      ${devFlags.length&&teamFlaggedProj.length?`<div style="font-size:13px;font-weight:bold;color:#595959;margin:4px 0 3px;">Items (${devFlags.length})</div>`:''}`+(devFlags.length?`
+      <table cellspacing="0" style="border-collapse:collapse;width:100%;table-layout:fixed;">
+      <colgroup><col style="width:60px;"/><col style="width:240px;"/><col style="width:150px;"/><col style="width:394px;"/></colgroup>
+      <tr><th style="${TH_}">ID</th><th style="${TH_}">Item</th><th style="${TH_}">Project</th><th style="${TH_}">Notes</th></tr>
+      ${devFlags.map(i=>`<tr><td style="${TD_}white-space:nowrap;">${hs(i.item_id)}</td><td style="${TD_}font-weight:bold;">${i.name}</td><td style="${TD_}">${i.parent_project||'<span style="color:#7F7F7F;">—</span>'}</td><td style="${TD_}line-height:1.5;">${i.notes||'<span style="color:#7F7F7F;font-style:italic;">—</span>'}</td></tr>`).join('')}</table>`:''):''
     const html=`<div style="font-family:Calibri,'Segoe UI',Arial,sans-serif;max-width:900px;color:#222222;">
       <div style="font-size:22px;font-weight:bold;color:#1F1F1F;">${team} — Work Queue</div>
       <div style="font-size:13px;color:#595959;margin-bottom:12px;">${today}</div>
-      <div style="font-size:13px;color:#222222;margin-bottom:4px;"><b>${inFlight.length} committed</b> · <b>${upNext.length} in backlog</b>${noProj.length?` · ${noProj.length} backlog (no project)`:''}${devFlags.length?` · ${devFlags.length} for discussion`:''}</div>
+      <div style="font-size:13px;color:#222222;margin-bottom:4px;"><b>${inFlight.length} committed</b> · <b>${upNext.length} in backlog</b>${noProj.length?` · ${noProj.length} backlog (no project)`:''}${(devFlags.length+teamFlaggedProj.length)?` · ${devFlags.length+teamFlaggedProj.length} for discussion`:''}</div>
       ${roadmapHtml}
       ${msHtml}
       ${projectsHtml}
       ${bugsHtml}
-      ${projFlagsHtml}
       ${flagsHtml}
     </div>`
     setExtractHtml(html)
