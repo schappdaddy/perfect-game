@@ -3351,7 +3351,7 @@ function ComposeUpdate({projects,milestones,items,onClose}:{projects:any[],miles
     const yr=new Date().getFullYear()
     const closedRecent=projects.filter((p:any)=>p.status==='Complete'&&p.end_date&&new Date(p.end_date+'T12:00:00').getFullYear()===yr)
       .sort((a:any,b:any)=>a.end_date<b.end_date?1:-1)
-    const closedHtml=closedRecent.length?`<div style="${H2}">Completed Projects — ${yr} (${closedRecent.length})</div>
+    const closedHtml=closedRecent.length?`<div style="${H2}">Completed Projects </div>
       <table cellspacing="0" style="border-collapse:collapse;width:100%;table-layout:fixed;">
       <colgroup><col style="width:560px;"/><col style="width:120px;"/></colgroup>
       <tr><th style="${TH_}">Project</th><th style="${TH_}">Completed</th></tr>
