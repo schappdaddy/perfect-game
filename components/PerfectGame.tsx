@@ -1,5 +1,5 @@
 'use client'
-import { useState, useEffect, useRef } from 'react'
+import { useState, useEffect, useRef, Fragment } from 'react'
 import { supabase } from '../lib/supabase'
 import * as XLSX from 'xlsx'
 
@@ -154,6 +154,45 @@ const rateOf=(person:any,roles:any[])=>{
 }
 const fmtUSD=(n:number)=>'$'+Math.round(n).toLocaleString('en-US')
 
+// Deckers fiscal year: Q1=Apr-Jun, Q2=Jul-Sep, Q3=Oct-Dec, Q4=Jan-Mar
+function fyOf(isoDate:string){
+  const d=new Date(isoDate+'T12:00:00')
+  const m=d.getMonth() // 0=Jan
+  const fy=m>=3?d.getFullYear()+1:d.getFullYear() // Apr(3) starts the next FY number
+  const q=m>=3&&m<=5?1:m>=6&&m<=8?2:m>=9&&m<=11?3:4
+  return{fy,quarter:q,label:`FY${fy} Q${q}`}
+}
+// Calendar months (YYYY-MM) a date range touches, each with its own start/end clipped to the range.
+function monthSlices(startISO:string,endISO:string){
+  const slices:{key:string,start:string,end:string}[]=[]
+  if(!startISO||!endISO)return slices
+  let cur=new Date(startISO+'T12:00:00')
+  const end=new Date(endISO+'T12:00:00')
+  while(cur<=end){
+    const y=cur.getFullYear(),m=cur.getMonth()
+    const monthStart=new Date(y,m,1),monthEnd=new Date(y,m+1,0)
+    const sliceStart=cur>monthStart?cur:monthStart
+    const sliceEnd=end<monthEnd?end:monthEnd
+    slices.push({key:`${y}-${String(m+1).padStart(2,'0')}`,start:localISO(sliceStart),end:localISO(sliceEnd)})
+    cur=new Date(y,m+1,1)
+  }
+  return slices
+}
+function monthLabel(key:string){
+  const[y,m]=key.split('-').map(Number)
+  return new Date(y,m-1,1).toLocaleDateString('default',{month:'short',year:'2-digit'})
+}
+// One row's cost/allocation, split across every calendar month its project spans —
+// the basis for both capacity (%) and monthly $ reporting.
+function monthlyRowCost(alloc:number,rate:number,projStart:string,projEnd:string){
+  const out:{key:string,cost:number,days:number}[]=[]
+  for(const sl of monthSlices(projStart,projEnd)){
+    const days=workingDays(sl.start,sl.end)
+    if(days>0)out.push({key:sl.key,cost:days*8*(alloc/100)*rate,days})
+  }
+  return out
+}
+
 // Layer 1: forecast — generic roster rows × the project's own timeline. Static until
 // the project's dates change or a roster row is edited (never auto-drifts otherwise).
 function projectForecast(project:any,projectRoles:any[],roles:any[]){
@@ -168,6 +207,31 @@ function projectForecast(project:any,projectRoles:any[],roles:any[]){
   return{total:byRole.reduce((a,r)=>a+r.cost,0),byRole,days,unset:false}
 }
 // Layer 2: actuals — named people on committed items, rolled up to the project.
+// Builds every project_roles row's monthly $ (person-linked rows only — generic/unassigned
+// rows have no one to attribute capacity to) and rolls it up by person and by team.
+function capacityByMonth(projects:any[],projectRoles:any[],people:any[],roles:any[]){
+  const active=projects.filter((p:any)=>!PROJECT_TERMINAL.includes(p.status)&&p.start_date&&(p.end_date||p.ongoing))
+  const perPerson=new Map<string,Map<string,{cost:number,pct:number}>>() // person_id -> month -> {cost,pct}
+  for(const row of projectRoles){
+    if(!row.person_id)continue
+    const proj=active.find((p:any)=>p.id===row.project_id)
+    if(!proj)continue
+    const person=people.find((p:any)=>p.id===row.person_id)
+    if(!person)continue
+    const rate=rateOf(person,roles)
+    const end=proj.end_date||localISO(new Date(Date.now()+180*86400000)) // ongoing: cap the view at ~6mo out
+    const monthly=monthlyRowCost(row.allocation_pct,rate,proj.start_date,end)
+    if(!perPerson.has(person.id))perPerson.set(person.id,new Map())
+    const pm=perPerson.get(person.id)!
+    for(const m of monthly){
+      const totalDaysInMonth=workingDays(`${m.key}-01`,localISO(new Date(new Date(m.key+'-01T12:00:00').getFullYear(),new Date(m.key+'-01T12:00:00').getMonth()+1,0)))
+      const pct=totalDaysInMonth>0?(m.days/totalDaysInMonth)*row.allocation_pct:0
+      const prev=pm.get(m.key)||{cost:0,pct:0}
+      pm.set(m.key,{cost:prev.cost+m.cost,pct:prev.pct+pct})
+    }
+  }
+  return perPerson
+}
 function projectActual(project:any,items:any[],itemAssignments:any[],people:any[],roles:any[]){
   const projItems=items.filter(i=>i.parent_project===project.name&&i.start_date&&i.end_date)
   const rows:any[]=[]
@@ -283,10 +347,19 @@ function AssignPicker({available,onAdd}:any){
 function ProjectDetail({project,items,setItems,projects,milestones,setMilestones,tasks,setTasks,onClose,d,fmt,ccrs=[],ccrItems=[],roles=[],people=[],projectRoles=[],setProjectRoles,itemAssignments=[],setItemAssignments}:any) {
   const [pdCcrExp,setPdCcrExp]=useState<any>({})
   const [pdAsgOpen,setPdAsgOpen]=useState<any>({}) // item.id -> assignment editor open
-  const [prRole,setPrRole]=useState('');const [prHead,setPrHead]=useState('1');const [prAlloc,setPrAlloc]=useState('100')
+  const [prTeam,setPrTeam]=useState('');const [prPerson,setPrPerson]=useState('');const [prRole,setPrRole]=useState('');const [prHead,setPrHead]=useState('1');const [prAlloc,setPrAlloc]=useState('100')
   async function addProjectRole(){
+    // Named path: a specific roster person (their role/rate come with them — real capacity)
+    if(prPerson){
+      const person=people.find((p:any)=>p.id===prPerson)
+      const{data,error}=await supabase.from('project_roles').insert({project_id:project.id,role_id:person?.role_id||null,person_id:prPerson,headcount:1,allocation_pct:parseFloat(prAlloc)||100}).select().single()
+      if(error){alert('Failed to add: '+error.message);return}
+      if(data){setProjectRoles((prev:any[])=>[...prev,data]);setPrTeam('');setPrPerson('');setPrAlloc('100')}
+      return
+    }
+    // Generic path: role-only placeholder for early-stage forecasting before staffing is known
     if(!prRole)return
-    const{data,error}=await supabase.from('project_roles').insert({project_id:project.id,role_id:prRole,headcount:parseFloat(prHead)||1,allocation_pct:parseFloat(prAlloc)||100}).select().single()
+    const{data,error}=await supabase.from('project_roles').insert({project_id:project.id,role_id:prRole,person_id:null,headcount:parseFloat(prHead)||1,allocation_pct:parseFloat(prAlloc)||100}).select().single()
     if(error){alert('Failed to add role: '+error.message);return}
     if(data){setProjectRoles((prev:any[])=>[...prev,data]);setPrRole('');setPrHead('1');setPrAlloc('100')}
   }
@@ -486,25 +559,41 @@ function ProjectDetail({project,items,setItems,projects,milestones,setMilestones
               )}
               {projRoleRows.map((r:any)=>{
                 const role=roles.find((x:any)=>x.id===r.role_id)
+                const person=r.person_id?people.find((p:any)=>p.id===r.person_id):null
                 return(
                   <div key={r.id} style={{display:'flex',alignItems:'center',gap:6,fontSize:10,marginBottom:5}}>
-                    <span style={{color:'#F4F6F8',flex:1}}>{role?.name||'(role removed)'}</span>
-                    <input type="number" value={r.headcount} onChange={e=>updProjectRole(r.id,{headcount:parseFloat(e.target.value)||1})} style={{width:38,background:'#0D1B2A',border:'1px solid #243447',borderRadius:4,color:'#F4F6F8',padding:'2px 4px',fontSize:10}}/>
-                    <span style={{color:'#7A8FA6'}}>×</span>
+                    <span style={{color:'#F4F6F8',flex:1}}>
+                      {person?<>{person.name} <span style={{color:'#7A8FA6'}}>· {role?.name||'—'}{person.team?' · '+person.team:''}</span></>
+                        :<>{role?.name||'(role removed)'} <span style={{color:'#7A8FA6',fontStyle:'italic'}}>· unassigned</span></>}
+                    </span>
+                    {!person&&<>
+                      <input type="number" value={r.headcount} onChange={e=>updProjectRole(r.id,{headcount:parseFloat(e.target.value)||1})} style={{width:38,background:'#0D1B2A',border:'1px solid #243447',borderRadius:4,color:'#F4F6F8',padding:'2px 4px',fontSize:10}}/>
+                      <span style={{color:'#7A8FA6'}}>×</span>
+                    </>}
                     <input type="number" value={r.allocation_pct} onChange={e=>updProjectRole(r.id,{allocation_pct:parseFloat(e.target.value)||0})} style={{width:44,background:'#0D1B2A',border:'1px solid #243447',borderRadius:4,color:'#F4F6F8',padding:'2px 4px',fontSize:10}}/>
                     <span style={{color:'#7A8FA6'}}>%</span>
                     <button onClick={()=>removeProjectRole(r.id)} style={{background:'none',border:'none',color:'#3A4A5E',fontSize:11,cursor:'pointer'}}>✕</button>
                   </div>
                 )
               })}
-              <div style={{display:'flex',gap:5,marginTop:6}}>
-                <select value={prRole} onChange={e=>setPrRole(e.target.value)} style={{flex:1,minWidth:0,background:'#0D1B2A',border:'1px dashed #243447',borderRadius:5,color:'#7A8FA6',fontSize:10,padding:'4px 6px'}}>
-                  <option value="">+ Add role to forecast…</option>
-                  {roles.map((r:any)=><option key={r.id} value={r.id}>{r.name} (${r.hourly_rate}/hr)</option>)}
+              <div style={{display:'flex',gap:5,marginTop:6,flexWrap:'wrap' as const}}>
+                <select value={prTeam} onChange={e=>{setPrTeam(e.target.value);setPrPerson('');setPrRole('')}} style={{background:'#0D1B2A',border:'1px dashed #243447',borderRadius:5,color:'#7A8FA6',fontSize:10,padding:'4px 6px'}}>
+                  <option value="">Team…</option>
+                  {TEAMS.map(t=><option key={t} value={t}>{t}</option>)}
                 </select>
-                <input type="number" value={prHead} onChange={e=>setPrHead(e.target.value)} title="Headcount" style={{width:38,background:'#0D1B2A',border:'1px dashed #243447',borderRadius:5,color:'#F4F6F8',fontSize:10,padding:'4px 4px'}}/>
+                <select value={prPerson} onChange={e=>setPrPerson(e.target.value)} disabled={!prTeam}
+                  style={{flex:1,minWidth:120,background:'#0D1B2A',border:'1px dashed #243447',borderRadius:5,color:'#7A8FA6',fontSize:10,padding:'4px 6px',opacity:prTeam?1:0.5}}>
+                  <option value="">+ Named person on {prTeam||'…'}</option>
+                  {people.filter((p:any)=>p.active&&p.team===prTeam).map((p:any)=><option key={p.id} value={p.id}>{p.name} ({roles.find((r:any)=>r.id===p.role_id)?.name||'no role'})</option>)}
+                </select>
+                <span style={{color:'#7A8FA6',fontSize:9,alignSelf:'center'}}>or</span>
+                <select value={prRole} onChange={e=>{setPrRole(e.target.value);setPrPerson('')}} style={{background:'#0D1B2A',border:'1px dashed #243447',borderRadius:5,color:'#7A8FA6',fontSize:10,padding:'4px 6px'}}>
+                  <option value="">Generic role (unassigned)…</option>
+                  {roles.map((r:any)=><option key={r.id} value={r.id}>{r.name}</option>)}
+                </select>
+                {!prPerson&&<input type="number" value={prHead} onChange={e=>setPrHead(e.target.value)} title="Headcount" style={{width:38,background:'#0D1B2A',border:'1px dashed #243447',borderRadius:5,color:'#F4F6F8',fontSize:10,padding:'4px 4px'}}/>}
                 <input type="number" value={prAlloc} onChange={e=>setPrAlloc(e.target.value)} title="Allocation %" style={{width:44,background:'#0D1B2A',border:'1px dashed #243447',borderRadius:5,color:'#F4F6F8',fontSize:10,padding:'4px 4px'}}/>
-                <button onClick={addProjectRole} disabled={!prRole} style={{background:'#27AE60',border:'none',borderRadius:5,color:'#fff',fontSize:10,fontWeight:700,padding:'4px 9px',cursor:'pointer',opacity:prRole?1:0.5}}>+</button>
+                <button onClick={addProjectRole} disabled={!prPerson&&!prRole} style={{background:'#27AE60',border:'none',borderRadius:5,color:'#fff',fontSize:10,fontWeight:700,padding:'4px 9px',cursor:'pointer',opacity:(prPerson||prRole)?1:0.5}}>+</button>
               </div>
             </div>
           )
@@ -4732,6 +4821,7 @@ function BudgetTab({roles,setRoles,people,setPeople,projects,items,projectRoles,
   const [newPersonName,setNewPersonName]=useState('')
   const [newPersonRole,setNewPersonRole]=useState('')
   const [newPersonRate,setNewPersonRate]=useState('')
+  const [newPersonTeam,setNewPersonTeam]=useState('')
   const [exporting,setExporting]=useState(false)
 
   async function updRole(id:any,fields:any){
@@ -4755,9 +4845,9 @@ function BudgetTab({roles,setRoles,people,setPeople,projects,items,projectRoles,
   }
   async function addPerson(){
     if(!newPersonName.trim())return
-    const{data,error}=await supabase.from('people').insert({name:newPersonName.trim(),role_id:newPersonRole||null,rate_override:newPersonRate?parseFloat(newPersonRate):null,active:true,sort_order:people.length}).select().single()
+    const{data,error}=await supabase.from('people').insert({name:newPersonName.trim(),role_id:newPersonRole||null,rate_override:newPersonRate?parseFloat(newPersonRate):null,team:newPersonTeam||null,active:true,sort_order:people.length}).select().single()
     if(error){alert('Failed to add person: '+error.message);return}
-    if(data){setPeople((prev:any[])=>[...prev,data]);setNewPersonName('');setNewPersonRole('');setNewPersonRate('')}
+    if(data){setPeople((prev:any[])=>[...prev,data]);setNewPersonName('');setNewPersonRole('');setNewPersonRate('');setNewPersonTeam('')}
   }
   async function deletePerson(id:any){
     if(!confirm('Remove this person from the roster? Their existing item assignments stay on record but will show as "(removed)".'))return
@@ -4800,6 +4890,41 @@ function BudgetTab({roles,setRoles,people,setPeople,projects,items,projectRoles,
       const ws2=XLSX.utils.aoa_to_sheet(detRows)
       ws2['!cols']=[{wch:28},{wch:10},{wch:18},{wch:16},{wch:12},{wch:12}]
       XLSX.utils.book_append_sheet(wb,ws2,'Per-Project Detail')
+
+      // Budget by Period — FY / Quarter / Month, forecast (project_roles rows) vs actual (item_assignments)
+      const monthMap=new Map<string,{forecast:number,actual:number}>()
+      const bump=(key:string,field:'forecast'|'actual',amt:number)=>{
+        const cur=monthMap.get(key)||{forecast:0,actual:0}
+        cur[field]+=amt
+        monthMap.set(key,cur)
+      }
+      for(const row of projectRoles){
+        const proj=activeProjects.find((p:any)=>p.id===row.project_id)
+        if(!proj||!proj.start_date)continue
+        const end=proj.end_date||localISO(new Date(Date.now()+180*86400000))
+        const role=roles.find((r:any)=>r.id===row.role_id)
+        const rate=row.person_id?rateOf(people.find((p:any)=>p.id===row.person_id),roles):(role?.hourly_rate||0)
+        const mult=row.person_id?1:(row.headcount||1)
+        for(const m of monthlyRowCost(row.allocation_pct,rate,proj.start_date,end))bump(m.key,'forecast',m.cost*mult)
+      }
+      for(const r of rollup){
+        for(const row of r.ac.rows){
+          const it=items.find((x:any)=>x.id===row.item_id)
+          if(!it)continue
+          for(const m of monthlyRowCost(row.allocation_pct,row.rate,it.start_date,it.end_date))bump(m.key,'actual',m.cost)
+        }
+      }
+      const periodKeys=[...monthMap.keys()].sort()
+      const perRows:any[]=[['Month','Fiscal Year','Quarter','Forecast','Actual','Delta']]
+      periodKeys.forEach(k=>{
+        const v=monthMap.get(k)!
+        const fy=fyOf(`${k}-15`)
+        perRows.push([monthLabel(k),`FY${fy.fy}`,`Q${fy.quarter}`,Math.round(v.forecast),Math.round(v.actual),Math.round(v.actual-v.forecast)] as any)
+      })
+      const ws3=XLSX.utils.aoa_to_sheet(perRows)
+      ws3['!cols']=[{wch:12},{wch:10},{wch:8},{wch:14},{wch:14},{wch:12}]
+      XLSX.utils.book_append_sheet(wb,ws3,'Budget by Period')
+
       XLSX.writeFile(wb,`Budget Report — ${localISO(new Date())}.xlsx`)
     }catch(e:any){alert('Export failed: '+(e?.message||e))}
     setExporting(false)
@@ -4810,7 +4935,7 @@ function BudgetTab({roles,setRoles,people,setPeople,projects,items,projectRoles,
       <div style={{display:'flex',alignItems:'center',gap:8,marginBottom:18}}>
         <span style={{fontSize:20,fontWeight:800,color:'#F4F6F8'}}>$ Budget</span>
         <div style={{display:'flex',gap:4,marginLeft:16}}>
-          {[['dashboard','Dashboard'],['roster','Roster'],['rates','Rate Card']].map(([k,label])=>(
+          {[['dashboard','Dashboard'],['capacity','Capacity'],['roster','Roster'],['rates','Rate Card']].map(([k,label])=>(
             <button key={k} onClick={()=>setView(k)} style={{background:view===k?'#C8973A':'#1E3048',color:view===k?'#0D1B2A':'#7A8FA6',border:'1px solid '+(view===k?'#C8973A':'#243447'),borderRadius:6,padding:'6px 14px',fontSize:12,fontWeight:700,cursor:'pointer'}}>{label}</button>
           ))}
         </div>
@@ -4852,6 +4977,10 @@ function BudgetTab({roles,setRoles,people,setPeople,projects,items,projectRoles,
                 <option value="">No role</option>
                 {roles.map((r:any)=><option key={r.id} value={r.id}>{r.name}</option>)}
               </select>
+              <select value={p.team||''} onChange={e=>updPerson(p.id,{team:e.target.value||null})} style={{background:'#0D1B2A',border:'1px solid #243447',borderRadius:5,color:'#7A8FA6',fontSize:11,padding:'4px 6px'}}>
+                <option value="">No team</option>
+                {TEAMS.map(t=><option key={t} value={t}>{t}</option>)}
+              </select>
               <div style={{display:'flex',alignItems:'center',gap:3}} title="Blank = inherit role's rate">
                 <span style={{color:'#7A8FA6',fontSize:12}}>$</span>
                 <input type="number" value={p.rate_override??''} onChange={e=>updPerson(p.id,{rate_override:e.target.value?parseFloat(e.target.value):null})} placeholder={String(roles.find((r:any)=>r.id===p.role_id)?.hourly_rate||'—')} style={{width:70,background:'#0D1B2A',border:'1px solid #243447',borderRadius:5,color:'#F4F6F8',fontSize:12,padding:'4px 6px'}}/>
@@ -4869,11 +4998,77 @@ function BudgetTab({roles,setRoles,people,setPeople,projects,items,projectRoles,
               <option value="">No role</option>
               {roles.map((r:any)=><option key={r.id} value={r.id}>{r.name}</option>)}
             </select>
+            <select value={newPersonTeam} onChange={e=>setNewPersonTeam(e.target.value)} style={{background:'#12202F',border:'1px dashed #243447',borderRadius:6,color:'#F4F6F8',fontSize:12,padding:'7px 10px'}}>
+              <option value="">No team</option>
+              {TEAMS.map(t=><option key={t} value={t}>{t}</option>)}
+            </select>
             <input type="number" value={newPersonRate} onChange={e=>setNewPersonRate(e.target.value)} placeholder="$/hr (optional)" style={{width:120,background:'#12202F',border:'1px dashed #243447',borderRadius:6,color:'#F4F6F8',fontSize:12,padding:'7px 10px'}}/>
             <button onClick={addPerson} style={{background:'#5DADE2',border:'none',borderRadius:6,color:'#0D1B2A',fontSize:12,fontWeight:700,padding:'0 16px',cursor:'pointer'}}>+ Add</button>
           </div>
         </div>
       )}
+
+      {view==='capacity'&&(()=>{
+        const perPerson=capacityByMonth(projects,projectRoles,people,roles)
+        const monthKeys:string[]=[]
+        const start=new Date();start.setDate(1)
+        for(let i=0;i<6;i++){const d=new Date(start.getFullYear(),start.getMonth()+i,1);monthKeys.push(`${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,'0')}`)}
+        const teamOrder=[...TEAMS,'']
+        const peopleByTeam=teamOrder.map(t=>({team:t||'No team',people:people.filter((p:any)=>p.active&&(p.team||'')===t)})).filter(g=>g.people.length)
+        const pctColor=(pct:number)=>pct>105?'#E74C3C':pct>=85?'#27AE60':pct>=50?'#E8B95A':'#5DADE2'
+        return(
+          <div style={{overflowX:'auto'}}>
+            <div style={{fontSize:11,color:'#7A8FA6',marginBottom:12,lineHeight:1.5}}>Allocation % per person per month, summed across every project they're named on (only rows linked to a roster person count here — generic/unassigned rows aren't real capacity yet). Rolling 6-month window from today.</div>
+            <table style={{borderCollapse:'collapse',fontSize:11,minWidth:640}}>
+              <thead><tr>
+                <th style={{textAlign:'left',padding:'6px 10px',color:'#7A8FA6',borderBottom:'1px solid #243447',position:'sticky' as const,left:0,background:'#0D1B2A'}}>Person</th>
+                {monthKeys.map(k=><th key={k} style={{textAlign:'center',padding:'6px 10px',color:'#7A8FA6',borderBottom:'1px solid #243447',minWidth:80}}>{monthLabel(k)}</th>)}
+              </tr></thead>
+              <tbody>
+              {peopleByTeam.map(group=>(
+                <Fragment key={group.team}>
+                  <tr><td colSpan={monthKeys.length+1} style={{padding:'10px 10px 4px',fontSize:10,fontWeight:700,letterSpacing:1,color:'#5DADE2'}}>{group.team.toUpperCase()}</td></tr>
+                  {group.people.map((p:any)=>{
+                    const pm=perPerson.get(p.id)
+                    const teamTotalCost=monthKeys.reduce((sum,k)=>sum+(pm?.get(k)?.cost||0),0)
+                    return(
+                      <tr key={p.id}>
+                        <td style={{padding:'4px 10px',color:'#F4F6F8',position:'sticky' as const,left:0,background:'#0D1B2A',whiteSpace:'nowrap' as const}}>{p.name} <span style={{color:'#7A8FA6',fontSize:9}}>· {roles.find((r:any)=>r.id===p.role_id)?.name||'—'}</span></td>
+                        {monthKeys.map(k=>{
+                          const cell=pm?.get(k)
+                          const pct=cell?Math.round(cell.pct):0
+                          return(
+                            <td key={k} style={{textAlign:'center',padding:'4px 10px'}}>
+                              {pct>0?(
+                                <div title={cell?fmtUSD(cell.cost)+' this month':''}>
+                                  <span style={{fontWeight:700,color:pctColor(pct)}}>{pct}%</span>
+                                </div>
+                              ):<span style={{color:'#3A4A5E'}}>—</span>}
+                            </td>
+                          )
+                        })}
+                      </tr>
+                    )
+                  })}
+                  <tr style={{borderTop:'1px solid #243447'}}>
+                    <td style={{padding:'4px 10px',color:'#7A8FA6',fontSize:10,fontStyle:'italic',position:'sticky' as const,left:0,background:'#0D1B2A'}}>Team total</td>
+                    {monthKeys.map(k=>{
+                      const cost=group.people.reduce((sum:number,p:any)=>sum+(perPerson.get(p.id)?.get(k)?.cost||0),0)
+                      const pcts=group.people.map((p:any)=>perPerson.get(p.id)?.get(k)?.pct||0)
+                      const avgPct=pcts.length?Math.round(pcts.reduce((a:number,b:number)=>a+b,0)/pcts.length):0
+                      return<td key={k} style={{textAlign:'center',padding:'4px 10px',fontSize:10}}>
+                        {cost>0?<><span style={{color:'#F4F6F8',fontWeight:700}}>{fmtUSD(cost)}</span><div style={{color:'#7A8FA6',fontSize:9}}>avg {avgPct}%</div></>:<span style={{color:'#3A4A5E'}}>—</span>}
+                      </td>
+                    })}
+                  </tr>
+                </Fragment>
+              ))}
+              {peopleByTeam.length===0&&<tr><td style={{padding:10,color:'#7A8FA6',fontStyle:'italic'}}>No roster people have a team set yet — add teams in the Roster tab.</td></tr>}
+              </tbody>
+            </table>
+          </div>
+        )
+      })()}
 
       {view==='dashboard'&&(
         <div>
