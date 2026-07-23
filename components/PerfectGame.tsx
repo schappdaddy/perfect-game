@@ -236,19 +236,45 @@ function projectActual(project:any,items:any[],itemAssignments:any[],people:any[
   const projItems=items.filter(i=>i.parent_project===project.name&&i.start_date&&i.end_date)
   const rows:any[]=[]
   for(const it of projItems){
-    const days=workingDays(it.start_date,it.end_date)
     const asg=itemAssignments.filter(a=>a.item_id===it.id)
     for(const a of asg){
       const person=people.find((p:any)=>p.id===a.person_id)
       const role=roles.find((r:any)=>r.id===person?.role_id)
       const rate=rateOf(person,roles)
-      const cost=days*8*(a.allocation_pct/100)*rate
-      rows.push({item_id:it.id,item_name:it.name,person_id:a.person_id,person:person?.name||'(removed)',role_id:role?.id,role:role?.name||'—',rate,days,allocation_pct:a.allocation_pct,cost})
+      const hours=a.hours||0
+      const cost=hours*rate
+      rows.push({item_id:it.id,item_name:it.name,item_start:it.start_date,item_end:it.end_date,person_id:a.person_id,person:person?.name||'(removed)',role_id:role?.id,role:role?.name||'—',rate,hours,cost})
     }
   }
   const byRoleMap=new Map<string,number>()
   rows.forEach(r=>byRoleMap.set(r.role,(byRoleMap.get(r.role)||0)+r.cost))
   return{total:rows.reduce((a,r)=>a+r.cost,0),rows,byRole:[...byRoleMap.entries()].map(([role,cost])=>({role,cost}))}
+}
+// Spreads a fixed hours figure evenly across an item's working days, then buckets by
+// calendar month — for reporting only; the headline cost (hours×rate) never depends on this.
+function monthlyHoursCost(totalHours:number,rate:number,itemStart:string,itemEnd:string){
+  const totalDays=workingDays(itemStart,itemEnd)
+  if(totalDays<=0||!totalHours)return[] as{key:string,cost:number}[]
+  const perDay=totalHours/totalDays
+  const out:{key:string,cost:number}[]=[]
+  for(const sl of monthSlices(itemStart,itemEnd)){
+    const days=workingDays(sl.start,sl.end)
+    if(days>0)out.push({key:sl.key,cost:perDay*days*rate})
+  }
+  return out
+}
+// Plan-vs-actual for one person on one project — the comparison shown while assigning.
+function personProjectForecastHours(project:any,personId:any,projectRoles:any[]){
+  if(!project?.start_date)return null
+  const end=project.end_date||localISO(new Date(Date.now()+180*86400000))
+  const days=workingDays(project.start_date,end)
+  const rows=projectRoles.filter((r:any)=>r.project_id===project.id&&r.person_id===personId)
+  if(!rows.length)return null
+  return rows.reduce((sum:number,r:any)=>sum+days*8*(r.allocation_pct/100),0)
+}
+function personProjectActualHours(project:any,personId:any,items:any[],itemAssignments:any[]){
+  const ids=new Set(items.filter((i:any)=>i.parent_project===project.name).map((i:any)=>i.id))
+  return itemAssignments.filter((a:any)=>a.person_id===personId&&ids.has(a.item_id)).reduce((s:number,a:any)=>s+(a.hours||0),0)
 }
 function nextItemId(items){
   const max=items.reduce((m,i)=>{
@@ -334,13 +360,15 @@ function ViolationRow({v,project,fmt,d}:{v:any,project:any,fmt:any,d:any}) {
 }
 function AssignPicker({available,onAdd}:any){
   const[pid,setPid]=useState('')
+  const[hrs,setHrs]=useState('8')
   return(
     <div style={{display:'flex',gap:5}}>
       <select value={pid} onChange={e=>setPid(e.target.value)} style={{flex:1,minWidth:0,background:'#0D1B2A',border:'1px dashed #243447',borderRadius:5,color:'#7A8FA6',fontSize:10,padding:'4px 6px'}}>
         <option value="">+ Assign person…</option>
         {available.map((p:any)=><option key={p.id} value={p.id}>{p.name}</option>)}
       </select>
-      <button onClick={()=>{if(pid){onAdd(pid);setPid('')}}} disabled={!pid} style={{background:'#5DADE2',border:'none',borderRadius:5,color:'#0D1B2A',fontSize:10,fontWeight:700,padding:'4px 10px',cursor:'pointer',opacity:pid?1:0.5}}>+</button>
+      <input type="number" value={hrs} onChange={e=>setHrs(e.target.value)} title="Hours" style={{width:52,background:'#0D1B2A',border:'1px dashed #243447',borderRadius:5,color:'#F4F6F8',fontSize:10,padding:'4px 4px'}}/>
+      <button onClick={()=>{if(pid){onAdd(pid,parseFloat(hrs)||0);setPid('');setHrs('8')}}} disabled={!pid} style={{background:'#5DADE2',border:'none',borderRadius:5,color:'#0D1B2A',fontSize:10,fontWeight:700,padding:'4px 10px',cursor:'pointer',opacity:pid?1:0.5}}>+</button>
     </div>
   )
 }
@@ -371,9 +399,9 @@ function ProjectDetail({project,items,setItems,projects,milestones,setMilestones
     setProjectRoles((prev:any[])=>prev.filter(r=>r.id!==id))
     await supabase.from('project_roles').delete().eq('id',id)
   }
-  async function addAssignment(itemId:any,personId:any,alloc:number){
+  async function addAssignment(itemId:any,personId:any,hours:number){
     if(!personId)return
-    const{data,error}=await supabase.from('item_assignments').insert({item_id:itemId,person_id:personId,allocation_pct:alloc}).select().single()
+    const{data,error}=await supabase.from('item_assignments').insert({item_id:itemId,person_id:personId,hours}).select().single()
     if(error){alert('Failed to assign: '+error.message);return}
     if(data)setItemAssignments((prev:any[])=>[...prev,data])
   }
@@ -774,27 +802,37 @@ function ProjectDetail({project,items,setItems,projects,milestones,setMilestones
                 </div>
                 {pdAsgOpen[item.id]&&(()=>{
                   const asg=itemAssignments.filter((a:any)=>a.item_id===item.id)
-                  const days=workingDays(item.start_date,item.end_date)
-                  const itemCost=asg.reduce((sum:number,a:any)=>{const p=people.find((x:any)=>x.id===a.person_id);return sum+days*8*(a.allocation_pct/100)*rateOf(p,roles)},0)
+                  const itemCost=asg.reduce((sum:number,a:any)=>{const p=people.find((x:any)=>x.id===a.person_id);return sum+(a.hours||0)*rateOf(p,roles)},0)
+                  const itemHours=asg.reduce((sum:number,a:any)=>sum+(a.hours||0),0)
                   const available=people.filter((p:any)=>p.active&&!asg.some((a:any)=>a.person_id===p.id))
                   return(
                     <div style={{marginTop:6,paddingTop:6,borderTop:'1px dashed #243447'}}>
                       {asg.map((a:any)=>{
                         const p=people.find((x:any)=>x.id===a.person_id)
                         const role=roles.find((r:any)=>r.id===p?.role_id)
-                        const cost=days*8*(a.allocation_pct/100)*rateOf(p,roles)
+                        const cost=(a.hours||0)*rateOf(p,roles)
+                        const planHrs=personProjectForecastHours(project,a.person_id,projectRoles)
+                        const actualHrs=personProjectActualHours(project,a.person_id,items,itemAssignments)
+                        const over=planHrs!=null?actualHrs-planHrs:null
                         return(
-                          <div key={a.id} style={{display:'flex',alignItems:'center',gap:6,fontSize:10,marginBottom:4}}>
-                            <span style={{color:'#F4F6F8',flex:1}}>{p?.name||'(removed)'} <span style={{color:'#7A8FA6'}}>· {role?.name||'—'}</span></span>
-                            <input type="number" value={a.allocation_pct} onChange={e=>updAssignment(a.id,{allocation_pct:parseFloat(e.target.value)||0})} style={{width:42,background:'#0D1B2A',border:'1px solid #243447',borderRadius:4,color:'#F4F6F8',padding:'2px 4px',fontSize:10}}/>
-                            <span style={{color:'#7A8FA6'}}>%</span>
-                            <span style={{color:'#5DADE2',width:64,textAlign:'right' as const}}>{fmtUSD(cost)}</span>
-                            <button onClick={()=>removeAssignment(a.id)} style={{background:'none',border:'none',color:'#3A4A5E',fontSize:11,cursor:'pointer'}}>✕</button>
+                          <div key={a.id} style={{marginBottom:6}}>
+                            <div style={{display:'flex',alignItems:'center',gap:6,fontSize:10}}>
+                              <span style={{color:'#F4F6F8',flex:1}}>{p?.name||'(removed)'} <span style={{color:'#7A8FA6'}}>· {role?.name||'—'}</span></span>
+                              <input type="number" value={a.hours||0} onChange={e=>updAssignment(a.id,{hours:parseFloat(e.target.value)||0})} style={{width:48,background:'#0D1B2A',border:'1px solid #243447',borderRadius:4,color:'#F4F6F8',padding:'2px 4px',fontSize:10}}/>
+                              <span style={{color:'#7A8FA6'}}>hrs</span>
+                              <span style={{color:'#5DADE2',width:64,textAlign:'right' as const}}>{fmtUSD(cost)}</span>
+                              <button onClick={()=>removeAssignment(a.id)} style={{background:'none',border:'none',color:'#3A4A5E',fontSize:11,cursor:'pointer'}}>✕</button>
+                            </div>
+                            {planHrs!=null&&(
+                              <div style={{fontSize:9,color:(over||0)>0?'#E74C3C':'#7A8FA6',marginTop:1,paddingLeft:2}}>
+                                Plan: {Math.round(planHrs)}h across this project · Assigned so far: {Math.round(actualHrs)}h{(over||0)>0?` — ${Math.round(over!)}h over plan`:actualHrs<planHrs?` (${Math.round(planHrs-actualHrs)}h remaining)`:''}
+                              </div>
+                            )}
                           </div>
                         )
                       })}
-                      {asg.length>0&&<div style={{fontSize:10,color:'#7A8FA6',textAlign:'right' as const,marginBottom:6}}>Item total: <b style={{color:'#F4F6F8'}}>{fmtUSD(itemCost)}</b> ({days}d)</div>}
-                      <AssignPicker available={available} onAdd={(pid:any)=>addAssignment(item.id,pid,100)}/>
+                      {asg.length>0&&<div style={{fontSize:10,color:'#7A8FA6',textAlign:'right' as const,marginBottom:6}}>Item total: <b style={{color:'#F4F6F8'}}>{fmtUSD(itemCost)}</b> ({itemHours}h)</div>}
+                      <AssignPicker available={available} onAdd={(pid:any,hrs:number)=>addAssignment(item.id,pid,hrs)}/>
                     </div>
                   )
                 })()}
@@ -4911,7 +4949,7 @@ function BudgetTab({roles,setRoles,people,setPeople,projects,items,projectRoles,
         for(const row of r.ac.rows){
           const it=items.find((x:any)=>x.id===row.item_id)
           if(!it)continue
-          for(const m of monthlyRowCost(row.allocation_pct,row.rate,it.start_date,it.end_date))bump(m.key,'actual',m.cost)
+          for(const m of monthlyHoursCost(row.hours,row.rate,it.start_date,it.end_date))bump(m.key,'actual',m.cost)
         }
       }
       const periodKeys=[...monthMap.keys()].sort()
