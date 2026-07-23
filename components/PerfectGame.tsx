@@ -360,15 +360,16 @@ function ViolationRow({v,project,fmt,d}:{v:any,project:any,fmt:any,d:any}) {
 }
 function AssignPicker({available,onAdd}:any){
   const[pid,setPid]=useState('')
-  const[hrs,setHrs]=useState('8')
+  const[days,setDays]=useState('1')
   return(
     <div style={{display:'flex',gap:5}}>
       <select value={pid} onChange={e=>setPid(e.target.value)} style={{flex:1,minWidth:0,background:'#0D1B2A',border:'1px dashed #243447',borderRadius:5,color:'#7A8FA6',fontSize:10,padding:'4px 6px'}}>
         <option value="">+ Assign person…</option>
         {available.map((p:any)=><option key={p.id} value={p.id}>{p.name}</option>)}
       </select>
-      <input type="number" value={hrs} onChange={e=>setHrs(e.target.value)} title="Hours" style={{width:52,background:'#0D1B2A',border:'1px dashed #243447',borderRadius:5,color:'#F4F6F8',fontSize:10,padding:'4px 4px'}}/>
-      <button onClick={()=>{if(pid){onAdd(pid,parseFloat(hrs)||0);setPid('');setHrs('8')}}} disabled={!pid} style={{background:'#5DADE2',border:'none',borderRadius:5,color:'#0D1B2A',fontSize:10,fontWeight:700,padding:'4px 10px',cursor:'pointer',opacity:pid?1:0.5}}>+</button>
+      <input type="number" step="0.5" value={days} onChange={e=>setDays(e.target.value)} title="Days" style={{width:52,background:'#0D1B2A',border:'1px dashed #243447',borderRadius:5,color:'#F4F6F8',fontSize:10,padding:'4px 4px'}}/>
+      <span style={{color:'#7A8FA6',fontSize:9,alignSelf:'center'}}>d</span>
+      <button onClick={()=>{if(pid){onAdd(pid,parseFloat(days)||0);setPid('');setDays('1')}}} disabled={!pid} style={{background:'#5DADE2',border:'none',borderRadius:5,color:'#0D1B2A',fontSize:10,fontWeight:700,padding:'4px 10px',cursor:'pointer',opacity:pid?1:0.5}}>+</button>
     </div>
   )
 }
@@ -399,9 +400,9 @@ function ProjectDetail({project,items,setItems,projects,milestones,setMilestones
     setProjectRoles((prev:any[])=>prev.filter(r=>r.id!==id))
     await supabase.from('project_roles').delete().eq('id',id)
   }
-  async function addAssignment(itemId:any,personId:any,hours:number){
+  async function addAssignment(itemId:any,personId:any,days:number){
     if(!personId)return
-    const{data,error}=await supabase.from('item_assignments').insert({item_id:itemId,person_id:personId,hours}).select().single()
+    const{data,error}=await supabase.from('item_assignments').insert({item_id:itemId,person_id:personId,hours:days*8}).select().single()
     if(error){alert('Failed to assign: '+error.message);return}
     if(data)setItemAssignments((prev:any[])=>[...prev,data])
   }
@@ -803,7 +804,7 @@ function ProjectDetail({project,items,setItems,projects,milestones,setMilestones
                 {pdAsgOpen[item.id]&&(()=>{
                   const asg=itemAssignments.filter((a:any)=>a.item_id===item.id)
                   const itemCost=asg.reduce((sum:number,a:any)=>{const p=people.find((x:any)=>x.id===a.person_id);return sum+(a.hours||0)*rateOf(p,roles)},0)
-                  const itemHours=asg.reduce((sum:number,a:any)=>sum+(a.hours||0),0)
+                  const itemDays=asg.reduce((sum:number,a:any)=>sum+(a.hours||0),0)/8
                   const available=people.filter((p:any)=>p.active&&!asg.some((a:any)=>a.person_id===p.id))
                   return(
                     <div style={{marginTop:6,paddingTop:6,borderTop:'1px dashed #243447'}}>
@@ -818,20 +819,23 @@ function ProjectDetail({project,items,setItems,projects,milestones,setMilestones
                           <div key={a.id} style={{marginBottom:6}}>
                             <div style={{display:'flex',alignItems:'center',gap:6,fontSize:10}}>
                               <span style={{color:'#F4F6F8',flex:1}}>{p?.name||'(removed)'} <span style={{color:'#7A8FA6'}}>· {role?.name||'—'}</span></span>
-                              <input type="number" value={a.hours||0} onChange={e=>updAssignment(a.id,{hours:parseFloat(e.target.value)||0})} style={{width:48,background:'#0D1B2A',border:'1px solid #243447',borderRadius:4,color:'#F4F6F8',padding:'2px 4px',fontSize:10}}/>
-                              <span style={{color:'#7A8FA6'}}>hrs</span>
+                              <input type="number" step="0.5" value={Math.round((a.hours||0)/8*100)/100} onChange={e=>updAssignment(a.id,{hours:(parseFloat(e.target.value)||0)*8})} style={{width:48,background:'#0D1B2A',border:'1px solid #243447',borderRadius:4,color:'#F4F6F8',padding:'2px 4px',fontSize:10}}/>
+                              <span style={{color:'#7A8FA6'}}>days</span>
                               <span style={{color:'#5DADE2',width:64,textAlign:'right' as const}}>{fmtUSD(cost)}</span>
                               <button onClick={()=>removeAssignment(a.id)} style={{background:'none',border:'none',color:'#3A4A5E',fontSize:11,cursor:'pointer'}}>✕</button>
                             </div>
-                            {planHrs!=null&&(
-                              <div style={{fontSize:9,color:(over||0)>0?'#E74C3C':'#7A8FA6',marginTop:1,paddingLeft:2}}>
-                                Plan: {Math.round(planHrs)}h across this project · Assigned so far: {Math.round(actualHrs)}h{(over||0)>0?` — ${Math.round(over!)}h over plan`:actualHrs<planHrs?` (${Math.round(planHrs-actualHrs)}h remaining)`:''}
-                              </div>
-                            )}
+                            {planHrs!=null&&(()=>{
+                              const planD=planHrs/8,actualD=actualHrs/8,overD=over!=null?over/8:null
+                              return(
+                                <div style={{fontSize:9,color:(overD||0)>0?'#E74C3C':'#7A8FA6',marginTop:1,paddingLeft:2}}>
+                                  Plan: {Math.round(planD*10)/10}d across this project · Assigned so far: {Math.round(actualD*10)/10}d{(overD||0)>0?` — ${Math.round(overD!*10)/10}d over plan`:actualD<planD?` (${Math.round((planD-actualD)*10)/10}d remaining)`:''}
+                                </div>
+                              )
+                            })()}
                           </div>
                         )
                       })}
-                      {asg.length>0&&<div style={{fontSize:10,color:'#7A8FA6',textAlign:'right' as const,marginBottom:6}}>Item total: <b style={{color:'#F4F6F8'}}>{fmtUSD(itemCost)}</b> ({itemHours}h)</div>}
+                      {asg.length>0&&<div style={{fontSize:10,color:'#7A8FA6',textAlign:'right' as const,marginBottom:6}}>Item total: <b style={{color:'#F4F6F8'}}>{fmtUSD(itemCost)}</b> ({Math.round(itemDays*10)/10}d)</div>}
                       <AssignPicker available={available} onAdd={(pid:any,hrs:number)=>addAssignment(item.id,pid,hrs)}/>
                     </div>
                   )
