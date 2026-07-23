@@ -136,6 +136,56 @@ function sc(s) {
 }
 // Sequential item IDs — max existing RTL number + 1. Random IDs collided with real data.
 const localISO=(d:Date)=>`${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,'0')}-${String(d.getDate()).padStart(2,'0')}`
+// Weekday count between two YYYY-MM-DD dates, inclusive — the basis for all budget math.
+// Weekends only excluded (offshore devs work through US holidays and vice versa, per Casey).
+function workingDays(startISO:string,endISO:string):number{
+  if(!startISO||!endISO)return 0
+  const start=new Date(startISO+'T12:00:00'),end=new Date(endISO+'T12:00:00')
+  if(end<start)return 0
+  let n=0
+  const d=new Date(start)
+  while(d<=end){const dow=d.getDay();if(dow!==0&&dow!==6)n++;d.setDate(d.getDate()+1)}
+  return n
+}
+const rateOf=(person:any,roles:any[])=>{
+  if(person?.rate_override!=null)return person.rate_override
+  const r=roles.find((x:any)=>x.id===person?.role_id)
+  return r?.hourly_rate||0
+}
+const fmtUSD=(n:number)=>'$'+Math.round(n).toLocaleString('en-US')
+
+// Layer 1: forecast — generic roster rows × the project's own timeline. Static until
+// the project's dates change or a roster row is edited (never auto-drifts otherwise).
+function projectForecast(project:any,projectRoles:any[],roles:any[]){
+  if(!project?.start_date||!project?.end_date)return{total:0,byRole:[] as any[],days:0,unset:true}
+  const days=workingDays(project.start_date,project.end_date)
+  const rows=projectRoles.filter(r=>r.project_id===project.id)
+  const byRole=rows.map(r=>{
+    const role=roles.find((x:any)=>x.id===r.role_id)
+    const cost=days*8*(r.allocation_pct/100)*(r.headcount||1)*(role?.hourly_rate||0)
+    return{role_id:r.role_id,role:role?.name||'(deleted role)',headcount:r.headcount,allocation_pct:r.allocation_pct,rate:role?.hourly_rate||0,cost}
+  })
+  return{total:byRole.reduce((a,r)=>a+r.cost,0),byRole,days,unset:false}
+}
+// Layer 2: actuals — named people on committed items, rolled up to the project.
+function projectActual(project:any,items:any[],itemAssignments:any[],people:any[],roles:any[]){
+  const projItems=items.filter(i=>i.parent_project===project.name&&i.start_date&&i.end_date)
+  const rows:any[]=[]
+  for(const it of projItems){
+    const days=workingDays(it.start_date,it.end_date)
+    const asg=itemAssignments.filter(a=>a.item_id===it.id)
+    for(const a of asg){
+      const person=people.find((p:any)=>p.id===a.person_id)
+      const role=roles.find((r:any)=>r.id===person?.role_id)
+      const rate=rateOf(person,roles)
+      const cost=days*8*(a.allocation_pct/100)*rate
+      rows.push({item_id:it.id,item_name:it.name,person_id:a.person_id,person:person?.name||'(removed)',role_id:role?.id,role:role?.name||'—',rate,days,allocation_pct:a.allocation_pct,cost})
+    }
+  }
+  const byRoleMap=new Map<string,number>()
+  rows.forEach(r=>byRoleMap.set(r.role,(byRoleMap.get(r.role)||0)+r.cost))
+  return{total:rows.reduce((a,r)=>a+r.cost,0),rows,byRole:[...byRoleMap.entries()].map(([role,cost])=>({role,cost}))}
+}
 function nextItemId(items){
   const max=items.reduce((m,i)=>{
     const match=/^RTL-(\d+)$/.exec(i.item_id||'')
@@ -218,8 +268,50 @@ function ViolationRow({v,project,fmt,d}:{v:any,project:any,fmt:any,d:any}) {
     </div>
   )
 }
-function ProjectDetail({project,items,setItems,projects,milestones,setMilestones,tasks,setTasks,onClose,d,fmt,ccrs=[],ccrItems=[]}:any) {
+function AssignPicker({available,onAdd}:any){
+  const[pid,setPid]=useState('')
+  return(
+    <div style={{display:'flex',gap:5}}>
+      <select value={pid} onChange={e=>setPid(e.target.value)} style={{flex:1,minWidth:0,background:'#0D1B2A',border:'1px dashed #243447',borderRadius:5,color:'#7A8FA6',fontSize:10,padding:'4px 6px'}}>
+        <option value="">+ Assign person…</option>
+        {available.map((p:any)=><option key={p.id} value={p.id}>{p.name}</option>)}
+      </select>
+      <button onClick={()=>{if(pid){onAdd(pid);setPid('')}}} disabled={!pid} style={{background:'#5DADE2',border:'none',borderRadius:5,color:'#0D1B2A',fontSize:10,fontWeight:700,padding:'4px 10px',cursor:'pointer',opacity:pid?1:0.5}}>+</button>
+    </div>
+  )
+}
+function ProjectDetail({project,items,setItems,projects,milestones,setMilestones,tasks,setTasks,onClose,d,fmt,ccrs=[],ccrItems=[],roles=[],people=[],projectRoles=[],setProjectRoles,itemAssignments=[],setItemAssignments}:any) {
   const [pdCcrExp,setPdCcrExp]=useState<any>({})
+  const [pdAsgOpen,setPdAsgOpen]=useState<any>({}) // item.id -> assignment editor open
+  const [prRole,setPrRole]=useState('');const [prHead,setPrHead]=useState('1');const [prAlloc,setPrAlloc]=useState('100')
+  async function addProjectRole(){
+    if(!prRole)return
+    const{data,error}=await supabase.from('project_roles').insert({project_id:project.id,role_id:prRole,headcount:parseFloat(prHead)||1,allocation_pct:parseFloat(prAlloc)||100}).select().single()
+    if(error){alert('Failed to add role: '+error.message);return}
+    if(data){setProjectRoles((prev:any[])=>[...prev,data]);setPrRole('');setPrHead('1');setPrAlloc('100')}
+  }
+  async function updProjectRole(id:any,fields:any){
+    setProjectRoles((prev:any[])=>prev.map(r=>r.id===id?{...r,...fields}:r))
+    await supabase.from('project_roles').update(fields).eq('id',id)
+  }
+  async function removeProjectRole(id:any){
+    setProjectRoles((prev:any[])=>prev.filter(r=>r.id!==id))
+    await supabase.from('project_roles').delete().eq('id',id)
+  }
+  async function addAssignment(itemId:any,personId:any,alloc:number){
+    if(!personId)return
+    const{data,error}=await supabase.from('item_assignments').insert({item_id:itemId,person_id:personId,allocation_pct:alloc}).select().single()
+    if(error){alert('Failed to assign: '+error.message);return}
+    if(data)setItemAssignments((prev:any[])=>[...prev,data])
+  }
+  async function updAssignment(id:any,fields:any){
+    setItemAssignments((prev:any[])=>prev.map(a=>a.id===id?{...a,...fields}:a))
+    await supabase.from('item_assignments').update(fields).eq('id',id)
+  }
+  async function removeAssignment(id:any){
+    setItemAssignments((prev:any[])=>prev.filter(a=>a.id!==id))
+    await supabase.from('item_assignments').delete().eq('id',id)
+  }
   const mobileP=useIsMobile()
   const [pdTitle,setPdTitle]=useState('')
   const [pdDate,setPdDate]=useState('')
@@ -372,6 +464,48 @@ function ProjectDetail({project,items,setItems,projects,milestones,setMilestones
                   </div>
                 )
               })}
+            </div>
+          )
+        })()}
+
+        {/* Budget */}
+        {spaceOf(project)==='work'&&(()=>{
+          const fc=projectForecast(project,projectRoles,roles)
+          const ac=projectActual(project,items,itemAssignments,people,roles)
+          const projRoleRows=projectRoles.filter((r:any)=>r.project_id===project.id)
+          return(
+            <div style={{padding:'14px 16px',borderBottom:'1px solid #243447'}}>
+              <div style={{fontSize:12,fontWeight:700,color:'#27AE60',letterSpacing:1,marginBottom:8}}>$ BUDGET</div>
+              {fc.unset?(
+                <div style={{fontSize:10,color:'#7A8FA6',fontStyle:'italic',marginBottom:8}}>Set project start/end dates to forecast a budget.</div>
+              ):(
+                <div style={{display:'flex',gap:16,fontSize:11,marginBottom:10}}>
+                  <span style={{color:'#7A8FA6'}}>Forecast: <b style={{color:'#5DADE2'}}>{fmtUSD(fc.total)}</b></span>
+                  <span style={{color:'#7A8FA6'}}>Actual: <b style={{color:ac.total>fc.total?'#E74C3C':'#27AE60'}}>{fmtUSD(ac.total)}</b></span>
+                </div>
+              )}
+              {projRoleRows.map((r:any)=>{
+                const role=roles.find((x:any)=>x.id===r.role_id)
+                return(
+                  <div key={r.id} style={{display:'flex',alignItems:'center',gap:6,fontSize:10,marginBottom:5}}>
+                    <span style={{color:'#F4F6F8',flex:1}}>{role?.name||'(role removed)'}</span>
+                    <input type="number" value={r.headcount} onChange={e=>updProjectRole(r.id,{headcount:parseFloat(e.target.value)||1})} style={{width:38,background:'#0D1B2A',border:'1px solid #243447',borderRadius:4,color:'#F4F6F8',padding:'2px 4px',fontSize:10}}/>
+                    <span style={{color:'#7A8FA6'}}>×</span>
+                    <input type="number" value={r.allocation_pct} onChange={e=>updProjectRole(r.id,{allocation_pct:parseFloat(e.target.value)||0})} style={{width:44,background:'#0D1B2A',border:'1px solid #243447',borderRadius:4,color:'#F4F6F8',padding:'2px 4px',fontSize:10}}/>
+                    <span style={{color:'#7A8FA6'}}>%</span>
+                    <button onClick={()=>removeProjectRole(r.id)} style={{background:'none',border:'none',color:'#3A4A5E',fontSize:11,cursor:'pointer'}}>✕</button>
+                  </div>
+                )
+              })}
+              <div style={{display:'flex',gap:5,marginTop:6}}>
+                <select value={prRole} onChange={e=>setPrRole(e.target.value)} style={{flex:1,minWidth:0,background:'#0D1B2A',border:'1px dashed #243447',borderRadius:5,color:'#7A8FA6',fontSize:10,padding:'4px 6px'}}>
+                  <option value="">+ Add role to forecast…</option>
+                  {roles.map((r:any)=><option key={r.id} value={r.id}>{r.name} (${r.hourly_rate}/hr)</option>)}
+                </select>
+                <input type="number" value={prHead} onChange={e=>setPrHead(e.target.value)} title="Headcount" style={{width:38,background:'#0D1B2A',border:'1px dashed #243447',borderRadius:5,color:'#F4F6F8',fontSize:10,padding:'4px 4px'}}/>
+                <input type="number" value={prAlloc} onChange={e=>setPrAlloc(e.target.value)} title="Allocation %" style={{width:44,background:'#0D1B2A',border:'1px dashed #243447',borderRadius:5,color:'#F4F6F8',fontSize:10,padding:'4px 4px'}}/>
+                <button onClick={addProjectRole} disabled={!prRole} style={{background:'#27AE60',border:'none',borderRadius:5,color:'#fff',fontSize:10,fontWeight:700,padding:'4px 9px',cursor:'pointer',opacity:prRole?1:0.5}}>+</button>
+              </div>
             </div>
           )
         })()}
@@ -534,17 +668,47 @@ function ProjectDetail({project,items,setItems,projects,milestones,setMilestones
                     style={{background:'#0F1C2B',border:'1px solid #243447',borderRadius:4,color:sc(item.status),fontSize:10,padding:'1px 4px',cursor:'pointer',fontFamily:'inherit'}}>
                     {statusesFor(spaceOf(project)).map(st=><option key={st} value={st}>{st}</option>)}
                   </select>
+                  {spaceOf(project)==='work'&&(
+                    <button onClick={()=>setPdAsgOpen((e:any)=>({...e,[item.id]:!e[item.id]}))} title="Assign people — actual cost"
+                      style={{background:'none',border:'1px solid #243447',borderRadius:4,padding:'2px 7px',fontSize:9,color:'#7A8FA6',cursor:'pointer',flexShrink:0}}>👥 {itemAssignments.filter((a:any)=>a.item_id===item.id).length||''}</button>
+                  )}
                   <button
                     onClick={async()=>{
                       setItems(items.map(i=>i.id===item.id?{...i,start_date:null,end_date:null}:i))
                       await supabase.from('items').update({start_date:null,end_date:null}).eq('id',item.id)
                     }}
-                    style={{marginLeft:'auto',background:'none',border:'1px solid #243447',borderRadius:4,padding:'2px 7px',fontSize:9,color:'#7A8FA6',cursor:'pointer',flexShrink:0}}
+                    style={{marginLeft:spaceOf(project)==='work'?0:'auto',background:'none',border:'1px solid #243447',borderRadius:4,padding:'2px 7px',fontSize:9,color:'#7A8FA6',cursor:'pointer',flexShrink:0}}
                     onMouseEnter={e=>{e.currentTarget.style.borderColor='#E74C3C';e.currentTarget.style.color='#E74C3C'}}
                     onMouseLeave={e=>{e.currentTarget.style.borderColor='#243447';e.currentTarget.style.color='#7A8FA6'}}>
                     ✕ Uncommit
                   </button>
                 </div>
+                {pdAsgOpen[item.id]&&(()=>{
+                  const asg=itemAssignments.filter((a:any)=>a.item_id===item.id)
+                  const days=workingDays(item.start_date,item.end_date)
+                  const itemCost=asg.reduce((sum:number,a:any)=>{const p=people.find((x:any)=>x.id===a.person_id);return sum+days*8*(a.allocation_pct/100)*rateOf(p,roles)},0)
+                  const available=people.filter((p:any)=>p.active&&!asg.some((a:any)=>a.person_id===p.id))
+                  return(
+                    <div style={{marginTop:6,paddingTop:6,borderTop:'1px dashed #243447'}}>
+                      {asg.map((a:any)=>{
+                        const p=people.find((x:any)=>x.id===a.person_id)
+                        const role=roles.find((r:any)=>r.id===p?.role_id)
+                        const cost=days*8*(a.allocation_pct/100)*rateOf(p,roles)
+                        return(
+                          <div key={a.id} style={{display:'flex',alignItems:'center',gap:6,fontSize:10,marginBottom:4}}>
+                            <span style={{color:'#F4F6F8',flex:1}}>{p?.name||'(removed)'} <span style={{color:'#7A8FA6'}}>· {role?.name||'—'}</span></span>
+                            <input type="number" value={a.allocation_pct} onChange={e=>updAssignment(a.id,{allocation_pct:parseFloat(e.target.value)||0})} style={{width:42,background:'#0D1B2A',border:'1px solid #243447',borderRadius:4,color:'#F4F6F8',padding:'2px 4px',fontSize:10}}/>
+                            <span style={{color:'#7A8FA6'}}>%</span>
+                            <span style={{color:'#5DADE2',width:64,textAlign:'right' as const}}>{fmtUSD(cost)}</span>
+                            <button onClick={()=>removeAssignment(a.id)} style={{background:'none',border:'none',color:'#3A4A5E',fontSize:11,cursor:'pointer'}}>✕</button>
+                          </div>
+                        )
+                      })}
+                      {asg.length>0&&<div style={{fontSize:10,color:'#7A8FA6',textAlign:'right' as const,marginBottom:6}}>Item total: <b style={{color:'#F4F6F8'}}>{fmtUSD(itemCost)}</b> ({days}d)</div>}
+                      <AssignPicker available={available} onAdd={(pid:any)=>addAssignment(item.id,pid,100)}/>
+                    </div>
+                  )
+                })()}
               </div>
             )
           })}
@@ -675,7 +839,7 @@ function ProjectDetail({project,items,setItems,projects,milestones,setMilestones
     </div>
   )
 }
-function Projects({items,setItems,projects,setProjects,milestones,setMilestones,tasks,setTasks,space,ccrs,ccrItems}:{items:any[],setItems:any,projects:any[],setProjects:any,milestones:any[],setMilestones:any,tasks:any[],setTasks:any,space:string,ccrs:any[],ccrItems:any[]}) {
+function Projects({items,setItems,projects,setProjects,milestones,setMilestones,tasks,setTasks,space,ccrs,ccrItems,roles=[],people=[],projectRoles=[],setProjectRoles,itemAssignments=[],setItemAssignments}:{items:any[],setItems:any,projects:any[],setProjects:any,milestones:any[],setMilestones:any,tasks:any[],setTasks:any,space:string,ccrs:any[],ccrItems:any[],roles?:any[],people?:any[],projectRoles?:any[],setProjectRoles?:any,itemAssignments?:any[],setItemAssignments?:any}) {
   const mobile=useIsMobile()
   const [adding,setAdding]=useState(false)
   const [editing,setEditing]=useState(null)
@@ -1011,6 +1175,12 @@ function Projects({items,setItems,projects,setProjects,milestones,setMilestones,
     fmt={fmt}
     ccrs={ccrs}
     ccrItems={ccrItems}
+    roles={roles}
+    people={people}
+    projectRoles={projectRoles}
+    setProjectRoles={setProjectRoles}
+    itemAssignments={itemAssignments}
+    setItemAssignments={setItemAssignments}
   />
 )}
 
@@ -4555,6 +4725,209 @@ function Desk({items,setItems,projects,setProjects,milestones,setMilestones,task
 
 
 // ── DONE — history of completed projects and items ───────────────────────
+function BudgetTab({roles,setRoles,people,setPeople,projects,items,projectRoles,itemAssignments}:any){
+  const [view,setView]=useState('dashboard') // dashboard | roster | rates
+  const [newRoleName,setNewRoleName]=useState('')
+  const [newRoleRate,setNewRoleRate]=useState('')
+  const [newPersonName,setNewPersonName]=useState('')
+  const [newPersonRole,setNewPersonRole]=useState('')
+  const [newPersonRate,setNewPersonRate]=useState('')
+  const [exporting,setExporting]=useState(false)
+
+  async function updRole(id:any,fields:any){
+    setRoles((prev:any[])=>prev.map(r=>r.id===id?{...r,...fields}:r))
+    await supabase.from('roles').update(fields).eq('id',id)
+  }
+  async function addRole(){
+    if(!newRoleName.trim())return
+    const{data,error}=await supabase.from('roles').insert({name:newRoleName.trim(),hourly_rate:parseFloat(newRoleRate)||0,type:'contractor',sort_order:roles.length}).select().single()
+    if(error){alert('Failed to add role: '+error.message);return}
+    if(data){setRoles((prev:any[])=>[...prev,data]);setNewRoleName('');setNewRoleRate('')}
+  }
+  async function deleteRole(id:any){
+    if(!confirm('Delete this role? People assigned to it will show as unassigned until given a new role.'))return
+    setRoles((prev:any[])=>prev.filter(r=>r.id!==id))
+    await supabase.from('roles').delete().eq('id',id)
+  }
+  async function updPerson(id:any,fields:any){
+    setPeople((prev:any[])=>prev.map(p=>p.id===id?{...p,...fields}:p))
+    await supabase.from('people').update(fields).eq('id',id)
+  }
+  async function addPerson(){
+    if(!newPersonName.trim())return
+    const{data,error}=await supabase.from('people').insert({name:newPersonName.trim(),role_id:newPersonRole||null,rate_override:newPersonRate?parseFloat(newPersonRate):null,active:true,sort_order:people.length}).select().single()
+    if(error){alert('Failed to add person: '+error.message);return}
+    if(data){setPeople((prev:any[])=>[...prev,data]);setNewPersonName('');setNewPersonRole('');setNewPersonRate('')}
+  }
+  async function deletePerson(id:any){
+    if(!confirm('Remove this person from the roster? Their existing item assignments stay on record but will show as "(removed)".'))return
+    setPeople((prev:any[])=>prev.filter(p=>p.id!==id))
+    await supabase.from('people').delete().eq('id',id)
+  }
+
+  const activeProjects=projects.filter((p:any)=>!PROJECT_TERMINAL.includes(p.status))
+  const rollup=activeProjects.map((p:any)=>{
+    const fc=projectForecast(p,projectRoles,roles)
+    const ac=projectActual(p,items,itemAssignments,people,roles)
+    const elapsedPct=fc.unset?null:Math.min(100,Math.max(0,Math.round((Date.now()-(+new Date(p.start_date+'T12:00:00')))/((+new Date(p.end_date+'T12:00:00'))-(+new Date(p.start_date+'T12:00:00')))*100)))
+    const spentPct=fc.total>0?Math.round(ac.total/fc.total*100):null
+    return{project:p,fc,ac,elapsedPct,spentPct}
+  })
+  const portfolioForecast=rollup.reduce((a,r)=>a+r.fc.total,0)
+  const portfolioActual=rollup.reduce((a,r)=>a+r.ac.total,0)
+
+  async function exportExcel(){
+    setExporting(true)
+    try{
+      const XLSX=await import('xlsx')
+      const wb=XLSX.utils.book_new()
+      // Portfolio Summary
+      const sumRows=[['Project','Forecast','Actual to Date','Delta','% Timeline Elapsed','% Budget Spent']]
+      rollup.forEach(r=>sumRows.push([r.project.name,Math.round(r.fc.total),Math.round(r.ac.total),Math.round(r.ac.total-r.fc.total),r.elapsedPct==null?'—':r.elapsedPct+'%',r.spentPct==null?'—':r.spentPct+'%'] as any))
+      sumRows.push(['TOTAL',Math.round(portfolioForecast),Math.round(portfolioActual),Math.round(portfolioActual-portfolioForecast),'',''] as any)
+      const ws1=XLSX.utils.aoa_to_sheet(sumRows)
+      ws1['!cols']=[{wch:32},{wch:14},{wch:16},{wch:12},{wch:18},{wch:16}]
+      XLSX.utils.book_append_sheet(wb,ws1,'Portfolio Summary')
+      // Per-Project Detail — role-level only, no names
+      const detRows:any[]=[['Project','Layer','Role','Hours/Alloc','Rate','Cost']]
+      rollup.forEach(r=>{
+        detRows.push([r.project.name,'FORECAST','','','',''])
+        r.fc.byRole.forEach((b:any)=>detRows.push(['',' ',b.role,`${b.headcount}x @ ${b.allocation_pct}%`,fmtUSD(b.rate)+'/hr',Math.round(b.cost)]))
+        detRows.push([r.project.name,'ACTUAL','','','',''])
+        r.ac.byRole.forEach((b:any)=>detRows.push(['',' ',b.role,'','',Math.round(b.cost)]))
+        detRows.push(['','','','','',''])
+      })
+      const ws2=XLSX.utils.aoa_to_sheet(detRows)
+      ws2['!cols']=[{wch:28},{wch:10},{wch:18},{wch:16},{wch:12},{wch:12}]
+      XLSX.utils.book_append_sheet(wb,ws2,'Per-Project Detail')
+      XLSX.writeFile(wb,`Budget Report — ${localISO(new Date())}.xlsx`)
+    }catch(e:any){alert('Export failed: '+(e?.message||e))}
+    setExporting(false)
+  }
+
+  return(
+    <div style={{height:'100%',overflowY:'auto',padding:'20px 28px'}}>
+      <div style={{display:'flex',alignItems:'center',gap:8,marginBottom:18}}>
+        <span style={{fontSize:20,fontWeight:800,color:'#F4F6F8'}}>$ Budget</span>
+        <div style={{display:'flex',gap:4,marginLeft:16}}>
+          {[['dashboard','Dashboard'],['roster','Roster'],['rates','Rate Card']].map(([k,label])=>(
+            <button key={k} onClick={()=>setView(k)} style={{background:view===k?'#C8973A':'#1E3048',color:view===k?'#0D1B2A':'#7A8FA6',border:'1px solid '+(view===k?'#C8973A':'#243447'),borderRadius:6,padding:'6px 14px',fontSize:12,fontWeight:700,cursor:'pointer'}}>{label}</button>
+          ))}
+        </div>
+        {view==='dashboard'&&<button onClick={exportExcel} disabled={exporting} style={{marginLeft:'auto',background:'#27AE60',border:'none',borderRadius:6,color:'#fff',fontSize:12,fontWeight:700,padding:'7px 16px',cursor:'pointer',opacity:exporting?0.6:1}}>{exporting?'Exporting…':'⬇ Excel — for leadership'}</button>}
+      </div>
+
+      {view==='rates'&&(
+        <div style={{maxWidth:640}}>
+          <div style={{fontSize:11,color:'#7A8FA6',marginBottom:12,lineHeight:1.5}}>The rate card. Every project roster row and roster person pulls its default rate from here.</div>
+          {roles.map((r:any)=>(
+            <div key={r.id} style={{display:'flex',alignItems:'center',gap:8,background:'#12202F',border:'1px solid #243447',borderRadius:8,padding:'8px 12px',marginBottom:6}}>
+              <input value={r.name} onChange={e=>updRole(r.id,{name:e.target.value})} style={{flex:1,background:'transparent',border:'none',color:'#F4F6F8',fontSize:13,fontWeight:600}}/>
+              <select value={r.type||'contractor'} onChange={e=>updRole(r.id,{type:e.target.value})} style={{background:'#0D1B2A',border:'1px solid #243447',borderRadius:5,color:'#7A8FA6',fontSize:11,padding:'4px 6px'}}>
+                <option value="contractor">Contractor</option><option value="fte">FTE</option>
+              </select>
+              <div style={{display:'flex',alignItems:'center',gap:3}}>
+                <span style={{color:'#7A8FA6',fontSize:12}}>$</span>
+                <input type="number" value={r.hourly_rate} onChange={e=>updRole(r.id,{hourly_rate:parseFloat(e.target.value)||0})} style={{width:70,background:'#0D1B2A',border:'1px solid #243447',borderRadius:5,color:'#F4F6F8',fontSize:12,padding:'4px 6px'}}/>
+                <span style={{color:'#7A8FA6',fontSize:11}}>/hr</span>
+              </div>
+              <button onClick={()=>deleteRole(r.id)} style={{background:'none',border:'none',color:'#3A4A5E',fontSize:13,cursor:'pointer'}}>🗑</button>
+            </div>
+          ))}
+          <div style={{display:'flex',gap:6,marginTop:10}}>
+            <input value={newRoleName} onChange={e=>setNewRoleName(e.target.value)} placeholder="New role name" style={{flex:1,background:'#12202F',border:'1px dashed #243447',borderRadius:6,color:'#F4F6F8',fontSize:12,padding:'7px 10px'}}/>
+            <input type="number" value={newRoleRate} onChange={e=>setNewRoleRate(e.target.value)} placeholder="$/hr" style={{width:90,background:'#12202F',border:'1px dashed #243447',borderRadius:6,color:'#F4F6F8',fontSize:12,padding:'7px 10px'}}/>
+            <button onClick={addRole} style={{background:'#5DADE2',border:'none',borderRadius:6,color:'#0D1B2A',fontSize:12,fontWeight:700,padding:'0 16px',cursor:'pointer'}}>+ Add</button>
+          </div>
+        </div>
+      )}
+
+      {view==='roster'&&(
+        <div style={{maxWidth:680}}>
+          <div style={{fontSize:11,color:'#7A8FA6',marginBottom:12,lineHeight:1.5}}>Named people you assign to items (Layer 2 — actuals). Leave rate blank to inherit the role's rate card price.</div>
+          {people.map((p:any)=>(
+            <div key={p.id} style={{display:'flex',alignItems:'center',gap:8,background:p.active?'#12202F':'#0D1B2A',opacity:p.active?1:0.5,border:'1px solid #243447',borderRadius:8,padding:'8px 12px',marginBottom:6}}>
+              <input value={p.name} onChange={e=>updPerson(p.id,{name:e.target.value})} style={{flex:1,background:'transparent',border:'none',color:'#F4F6F8',fontSize:13,fontWeight:600}}/>
+              <select value={p.role_id||''} onChange={e=>updPerson(p.id,{role_id:e.target.value||null})} style={{background:'#0D1B2A',border:'1px solid #243447',borderRadius:5,color:'#7A8FA6',fontSize:11,padding:'4px 6px'}}>
+                <option value="">No role</option>
+                {roles.map((r:any)=><option key={r.id} value={r.id}>{r.name}</option>)}
+              </select>
+              <div style={{display:'flex',alignItems:'center',gap:3}} title="Blank = inherit role's rate">
+                <span style={{color:'#7A8FA6',fontSize:12}}>$</span>
+                <input type="number" value={p.rate_override??''} onChange={e=>updPerson(p.id,{rate_override:e.target.value?parseFloat(e.target.value):null})} placeholder={String(roles.find((r:any)=>r.id===p.role_id)?.hourly_rate||'—')} style={{width:70,background:'#0D1B2A',border:'1px solid #243447',borderRadius:5,color:'#F4F6F8',fontSize:12,padding:'4px 6px'}}/>
+                <span style={{color:'#7A8FA6',fontSize:11}}>/hr</span>
+              </div>
+              <label style={{display:'flex',alignItems:'center',gap:4,fontSize:10,color:'#7A8FA6',cursor:'pointer'}}>
+                <input type="checkbox" checked={p.active} onChange={e=>updPerson(p.id,{active:e.target.checked})}/>Active
+              </label>
+              <button onClick={()=>deletePerson(p.id)} style={{background:'none',border:'none',color:'#3A4A5E',fontSize:13,cursor:'pointer'}}>🗑</button>
+            </div>
+          ))}
+          <div style={{display:'flex',gap:6,marginTop:10}}>
+            <input value={newPersonName} onChange={e=>setNewPersonName(e.target.value)} placeholder="New person's name" style={{flex:1,background:'#12202F',border:'1px dashed #243447',borderRadius:6,color:'#F4F6F8',fontSize:12,padding:'7px 10px'}}/>
+            <select value={newPersonRole} onChange={e=>setNewPersonRole(e.target.value)} style={{background:'#12202F',border:'1px dashed #243447',borderRadius:6,color:'#F4F6F8',fontSize:12,padding:'7px 10px'}}>
+              <option value="">No role</option>
+              {roles.map((r:any)=><option key={r.id} value={r.id}>{r.name}</option>)}
+            </select>
+            <input type="number" value={newPersonRate} onChange={e=>setNewPersonRate(e.target.value)} placeholder="$/hr (optional)" style={{width:120,background:'#12202F',border:'1px dashed #243447',borderRadius:6,color:'#F4F6F8',fontSize:12,padding:'7px 10px'}}/>
+            <button onClick={addPerson} style={{background:'#5DADE2',border:'none',borderRadius:6,color:'#0D1B2A',fontSize:12,fontWeight:700,padding:'0 16px',cursor:'pointer'}}>+ Add</button>
+          </div>
+        </div>
+      )}
+
+      {view==='dashboard'&&(
+        <div>
+          <div style={{display:'flex',gap:14,marginBottom:20}}>
+            <div style={{background:'#12202F',border:'1px solid #243447',borderRadius:10,padding:'16px 22px'}}>
+              <div style={{fontSize:26,fontWeight:800,color:'#5DADE2'}}>{fmtUSD(portfolioForecast)}</div>
+              <div style={{fontSize:11,color:'#7A8FA6'}}>Portfolio Forecast</div>
+            </div>
+            <div style={{background:'#12202F',border:'1px solid #243447',borderRadius:10,padding:'16px 22px'}}>
+              <div style={{fontSize:26,fontWeight:800,color:portfolioActual>portfolioForecast?'#E74C3C':'#27AE60'}}>{fmtUSD(portfolioActual)}</div>
+              <div style={{fontSize:11,color:'#7A8FA6'}}>Actual to Date</div>
+            </div>
+            <div style={{background:'#12202F',border:'1px solid #243447',borderRadius:10,padding:'16px 22px'}}>
+              <div style={{fontSize:26,fontWeight:800,color:(portfolioActual-portfolioForecast)>0?'#E74C3C':'#7A8FA6'}}>{(portfolioActual-portfolioForecast)>=0?'+':''}{fmtUSD(portfolioActual-portfolioForecast)}</div>
+              <div style={{fontSize:11,color:'#7A8FA6'}}>Delta</div>
+            </div>
+          </div>
+          {rollup.length===0&&<div style={{fontSize:12,color:'#7A8FA6',fontStyle:'italic'}}>No active projects with dates set.</div>}
+          {rollup.map(({project,fc,ac,elapsedPct,spentPct}:any)=>{
+            const flag=elapsedPct!=null&&spentPct!=null&&spentPct-elapsedPct>15
+            return(
+              <div key={project.id} style={{background:'#12202F',border:'1px solid '+(flag?'rgba(231,76,60,0.5)':'#243447'),borderRadius:10,padding:'12px 16px',marginBottom:10}}>
+                <div style={{display:'flex',alignItems:'center',gap:8,marginBottom:6}}>
+                  <span style={{width:9,height:9,borderRadius:2,background:project.color||'#3A4A5E'}}/>
+                  <span style={{fontSize:14,fontWeight:700,color:'#F4F6F8'}}>{project.name}</span>
+                  {flag&&<span style={{fontSize:9,fontWeight:700,color:'#E74C3C',border:'1px solid #E74C3C',borderRadius:8,padding:'1px 7px'}}>BURNING FAST</span>}
+                  {fc.unset&&<span style={{fontSize:10,color:'#7A8FA6',fontStyle:'italic'}}>— set project dates to forecast</span>}
+                </div>
+                {!fc.unset&&(
+                  <>
+                  <div style={{display:'flex',gap:20,fontSize:12,marginBottom:8}}>
+                    <span style={{color:'#7A8FA6'}}>Forecast: <b style={{color:'#5DADE2'}}>{fmtUSD(fc.total)}</b></span>
+                    <span style={{color:'#7A8FA6'}}>Actual: <b style={{color:ac.total>fc.total?'#E74C3C':'#27AE60'}}>{fmtUSD(ac.total)}</b></span>
+                    <span style={{color:'#7A8FA6'}}>Delta: <b style={{color:(ac.total-fc.total)>0?'#E74C3C':'#7A8FA6'}}>{(ac.total-fc.total)>=0?'+':''}{fmtUSD(ac.total-fc.total)}</b></span>
+                  </div>
+                  <div style={{display:'flex',gap:6,fontSize:10,color:'#7A8FA6'}}>
+                    <div style={{flex:1,background:'#0D1B2A',borderRadius:4,height:6,overflow:'hidden',position:'relative' as const}}>
+                      <div style={{width:`${Math.min(100,spentPct||0)}%`,height:'100%',background:flag?'#E74C3C':'#5DADE2'}}/>
+                    </div>
+                    <span>{spentPct==null?'—':spentPct+'% spent'}</span>
+                    <span>·</span>
+                    <span>{elapsedPct==null?'—':elapsedPct+'% elapsed'}</span>
+                  </div>
+                  </>
+                )}
+              </div>
+            )
+          })}
+        </div>
+      )}
+    </div>
+  )
+}
+
 function DoneTab({items,setItems,projects,setProjects,ccrs,ccrItems,space}:{items:any[],setItems:any,projects:any[],setProjects:any,ccrs:any[],ccrItems:any[],space:string}) {
   const [ccrSecOpen,setCcrSecOpen]=useState(true)
   const [dnCcrExp,setDnCcrExp]=useState<any>({})
@@ -5040,6 +5413,10 @@ export default function PerfectGame() {
   const [tasks,setTasks]=useState<any[]>([])
   const [ccrs,setCcrs]=useState<any[]>([])
   const [ccrItems,setCcrItems]=useState<any[]>([])
+  const [roles,setRoles]=useState<any[]>([])
+  const [people,setPeople]=useState<any[]>([])
+  const [projectRoles,setProjectRoles]=useState<any[]>([])
+  const [itemAssignments,setItemAssignments]=useState<any[]>([])
   const [loading,setLoading]=useState(true)
   const [activeTab,setActiveTab]=useState('desk')
   const [space,setSpace]=useState('work')
@@ -5058,23 +5435,31 @@ export default function PerfectGame() {
   const sItems=items.filter(inSpace),sProjects=projects.filter(inSpace),sMilestones=milestones.filter(inSpace)
   const setSItems=scopedSetter(setItems),setSProjects=scopedSetter(setProjects),setSMilestones=scopedSetter(setMilestones)
   // Teams & Stakeholder are work-only concepts
-  useEffect(()=>{if(space==='home'&&(activeTab==='teams'||activeTab==='stakeholder'))setActiveTab('desk')},[space])
+  useEffect(()=>{if(space==='home'&&(activeTab==='teams'||activeTab==='stakeholder'||activeTab==='budget'))setActiveTab('desk')},[space])
 
 useEffect(()=>{
     async function load(){
-      const[{data:itemData},{data:projectData},{data:milestoneData},{data:taskData},{data:ccrData},{data:ccrItemData}]=await Promise.all([
+      const[{data:itemData},{data:projectData},{data:milestoneData},{data:taskData},{data:ccrData},{data:ccrItemData},{data:roleData},{data:peopleData},{data:projRoleData},{data:itemAsgData}]=await Promise.all([
       supabase.from('items').select('*').order('sort_order',{ascending:true}),
       supabase.from('projects').select('*').order('sort_order',{ascending:true}),
       supabase.from('milestones').select('*').order('date',{ascending:true}),
       supabase.from('tasks').select('*').order('due_date',{ascending:true}),
       supabase.from('ccrs').select('*').order('created_at',{ascending:true}),
       supabase.from('ccr_items').select('*'),
+      supabase.from('roles').select('*').order('sort_order',{ascending:true}),
+      supabase.from('people').select('*').order('sort_order',{ascending:true}),
+      supabase.from('project_roles').select('*'),
+      supabase.from('item_assignments').select('*'),
     ])
     if(itemData) setItems(itemData)
     if(milestoneData) setMilestones(milestoneData)
     if(taskData) setTasks(taskData)
     if(ccrData) setCcrs(ccrData)
     if(ccrItemData) setCcrItems(ccrItemData)
+    if(roleData) setRoles(roleData)
+    if(peopleData) setPeople(peopleData)
+    if(projRoleData) setProjectRoles(projRoleData)
+    if(itemAsgData) setItemAssignments(itemAsgData)
 
     // Auto-create any missing projects from parent_project values
     if(itemData&&projectData){
@@ -5121,6 +5506,7 @@ useEffect(()=>{
   {key:'teams',label:'Teams',icon:'⬡'},
   {key:'stakeholder',label:'Stakeholder',icon:'◉'},
   {key:'done',label:'Done',icon:'✓'},
+  {key:'budget',label:'Budget',icon:'$'},
 ]
 
   if(loading) return(
@@ -5144,7 +5530,7 @@ useEffect(()=>{
           </div>
         </div>
         <div style={{display:'flex',height:'100%',overflowX:'auto' as const,WebkitOverflowScrolling:'touch' as any}}>
-          {TABS.filter(tab=>space==='work'||!['teams','stakeholder'].includes(tab.key)).map(tab=>(
+          {TABS.filter(tab=>space==='work'||!['teams','stakeholder','budget'].includes(tab.key)).map(tab=>(
             <button key={tab.key} onClick={()=>setActiveTab(tab.key)} style={{background:activeTab===tab.key?'#0D1B2A':'transparent',color:activeTab===tab.key?'#F4F6F8':'#7A8FA6',border:'none',borderBottom:activeTab===tab.key?'2px solid #C8973A':'2px solid transparent',padding:mobile?'0 10px':'0 13px',cursor:'pointer',fontSize:12.5,fontWeight:activeTab===tab.key?700:400,display:'flex',alignItems:'center',gap:6,height:'100%',position:'relative',whiteSpace:'nowrap' as const,flexShrink:0}}>
               <span style={{fontSize:mobile?17:15}}>{tab.icon}</span>
               {!mobile&&tab.label}
@@ -5166,13 +5552,14 @@ useEffect(()=>{
       </div>
       <div style={{flex:1,overflow:'hidden'}}>
         {activeTab==='backlog'&&<Backlog items={sItems} setItems={setSItems} projects={sProjects} setProjects={setSProjects} space={space} ccrs={ccrs} ccrItems={ccrItems} setCcrItems={setCcrItems}/>}
-        {activeTab==='projects'&&<Projects items={sItems} setItems={setSItems} projects={sProjects} setProjects={setSProjects} milestones={sMilestones} setMilestones={setSMilestones} tasks={tasks} setTasks={setTasks} space={space} ccrs={ccrs} ccrItems={ccrItems}/>}
+        {activeTab==='projects'&&<Projects items={sItems} setItems={setSItems} projects={sProjects} setProjects={setSProjects} milestones={sMilestones} setMilestones={setSMilestones} tasks={tasks} setTasks={setTasks} space={space} ccrs={ccrs} ccrItems={ccrItems} roles={roles} people={people} projectRoles={projectRoles} setProjectRoles={setProjectRoles} itemAssignments={itemAssignments} setItemAssignments={setItemAssignments}/>}
 {activeTab==='roadmap'&&<Roadmap items={sItems} setItems={setSItems} projects={sProjects} setProjects={setSProjects} milestones={sMilestones}/>}
         {activeTab==='teams'&&<Teams items={sItems} projects={sProjects} milestones={sMilestones} ccrs={ccrs} ccrItems={ccrItems}/>}
         {activeTab==='desk'&&<Desk items={items} setItems={setItems} projects={projects} setProjects={setProjects} milestones={milestones} setMilestones={setMilestones} tasks={tasks} setTasks={setTasks} ccrs={ccrs} setCcrs={setCcrs} ccrItems={ccrItems} setCcrItems={setCcrItems} space={space} openAssistant={(t:string)=>{setAsstSeed(t);setAsstOpen(true)}}/>}
         <Assistant open={asstOpen} setOpen={setAsstOpen} seed={asstSeed} setSeed={setAsstSeed} items={items} setItems={setItems} projects={projects} setProjects={setProjects} milestones={milestones} tasks={tasks} setTasks={setTasks} ccrs={ccrs} setCcrs={setCcrs} ccrItems={ccrItems} setCcrItems={setCcrItems} space={space}/>
         {activeTab==='stakeholder'&&<Stakeholder items={sItems} projects={sProjects} milestones={sMilestones}/>}
         {activeTab==='done'&&<DoneTab items={sItems} setItems={setSItems} projects={sProjects} setProjects={setSProjects} ccrs={ccrs} ccrItems={ccrItems} space={space}/>}
+        {activeTab==='budget'&&<BudgetTab roles={roles} setRoles={setRoles} people={people} setPeople={setPeople} projects={sProjects} items={sItems} projectRoles={projectRoles} itemAssignments={itemAssignments}/>}
       </div>
     </div>
   )
