@@ -212,6 +212,7 @@ function projectForecast(project:any,projectRoles:any[],roles:any[]){
 function capacityByMonth(projects:any[],projectRoles:any[],people:any[],roles:any[]){
   const active=projects.filter((p:any)=>!PROJECT_TERMINAL.includes(p.status)&&p.start_date&&(p.end_date||p.ongoing))
   const perPerson=new Map<string,Map<string,{cost:number,pct:number}>>() // person_id -> month -> {cost,pct}
+  const byProject=new Map<string,Map<string,any[]>>() // person_id -> month -> [{project,pct,cost}]
   for(const row of projectRoles){
     if(!row.person_id)continue
     const proj=active.find((p:any)=>p.id===row.project_id)
@@ -222,15 +223,19 @@ function capacityByMonth(projects:any[],projectRoles:any[],people:any[],roles:an
     const end=proj.end_date||localISO(new Date(Date.now()+180*86400000)) // ongoing: cap the view at ~6mo out
     const monthly=monthlyRowCost(row.allocation_pct,rate,proj.start_date,end)
     if(!perPerson.has(person.id))perPerson.set(person.id,new Map())
+    if(!byProject.has(person.id))byProject.set(person.id,new Map())
     const pm=perPerson.get(person.id)!
+    const bp=byProject.get(person.id)!
     for(const m of monthly){
       const totalDaysInMonth=workingDays(`${m.key}-01`,localISO(new Date(new Date(m.key+'-01T12:00:00').getFullYear(),new Date(m.key+'-01T12:00:00').getMonth()+1,0)))
       const pct=totalDaysInMonth>0?(m.days/totalDaysInMonth)*row.allocation_pct:0
       const prev=pm.get(m.key)||{cost:0,pct:0}
       pm.set(m.key,{cost:prev.cost+m.cost,pct:prev.pct+pct})
+      if(!bp.has(m.key))bp.set(m.key,[])
+      bp.get(m.key)!.push({project:proj.name,color:proj.color,pct,cost:m.cost})
     }
   }
-  return perPerson
+  return{perPerson,byProject}
 }
 function projectActual(project:any,items:any[],itemAssignments:any[],people:any[],roles:any[]){
   const projItems=items.filter(i=>i.parent_project===project.name&&i.start_date&&i.end_date)
@@ -4857,7 +4862,8 @@ function Desk({items,setItems,projects,setProjects,milestones,setMilestones,task
 
 // ── DONE — history of completed projects and items ───────────────────────
 function BudgetTab({roles,setRoles,people,setPeople,projects,items,projectRoles,itemAssignments}:any){
-  const [view,setView]=useState('dashboard') // dashboard | roster | rates
+  const [view,setView]=useState('dashboard') // dashboard | capacity | roster | rates
+  const [capSel,setCapSel]=useState<any>(null) // {personId,key} — capacity cell drill-down
   const [newRoleName,setNewRoleName]=useState('')
   const [newRoleRate,setNewRoleRate]=useState('')
   const [newPersonName,setNewPersonName]=useState('')
@@ -5051,16 +5057,20 @@ function BudgetTab({roles,setRoles,people,setPeople,projects,items,projectRoles,
       )}
 
       {view==='capacity'&&(()=>{
-        const perPerson=capacityByMonth(projects,projectRoles,people,roles)
+        const{perPerson,byProject}=capacityByMonth(projects,projectRoles,people,roles)
         const monthKeys:string[]=[]
         const start=new Date();start.setDate(1)
         for(let i=0;i<6;i++){const d=new Date(start.getFullYear(),start.getMonth()+i,1);monthKeys.push(`${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,'0')}`)}
         const teamOrder=[...TEAMS,'']
         const peopleByTeam=teamOrder.map(t=>({team:t||'No team',people:people.filter((p:any)=>p.active&&(p.team||'')===t)})).filter(g=>g.people.length)
         const pctColor=(pct:number)=>pct>105?'#E74C3C':pct>=85?'#27AE60':pct>=50?'#E8B95A':'#5DADE2'
+        const sel=capSel
+        const selPerson=sel?people.find((p:any)=>p.id===sel.personId):null
+        const selBreakdown=sel?(byProject.get(sel.personId)?.get(sel.key)||[]):[]
         return(
+          <div>
           <div style={{overflowX:'auto'}}>
-            <div style={{fontSize:11,color:'#7A8FA6',marginBottom:12,lineHeight:1.5}}>Allocation % per person per month, summed across every project they're named on (only rows linked to a roster person count here — generic/unassigned rows aren't real capacity yet). Rolling 6-month window from today.</div>
+            <div style={{fontSize:11,color:'#7A8FA6',marginBottom:12,lineHeight:1.5}}>Allocation % per person per month, summed across every project they're named on (only rows linked to a roster person count here — generic/unassigned rows aren't real capacity yet). Rolling 6-month window from today. Click any % to see which projects it's coming from.</div>
             <table style={{borderCollapse:'collapse',fontSize:11,minWidth:640}}>
               <thead><tr>
                 <th style={{textAlign:'left',padding:'6px 10px',color:'#7A8FA6',borderBottom:'1px solid #243447',position:'sticky' as const,left:0,background:'#0D1B2A'}}>Person</th>
@@ -5072,17 +5082,18 @@ function BudgetTab({roles,setRoles,people,setPeople,projects,items,projectRoles,
                   <tr><td colSpan={monthKeys.length+1} style={{padding:'10px 10px 4px',fontSize:10,fontWeight:700,letterSpacing:1,color:'#5DADE2'}}>{group.team.toUpperCase()}</td></tr>
                   {group.people.map((p:any)=>{
                     const pm=perPerson.get(p.id)
-                    const teamTotalCost=monthKeys.reduce((sum,k)=>sum+(pm?.get(k)?.cost||0),0)
                     return(
                       <tr key={p.id}>
                         <td style={{padding:'4px 10px',color:'#F4F6F8',position:'sticky' as const,left:0,background:'#0D1B2A',whiteSpace:'nowrap' as const}}>{p.name} <span style={{color:'#7A8FA6',fontSize:9}}>· {roles.find((r:any)=>r.id===p.role_id)?.name||'—'}</span></td>
                         {monthKeys.map(k=>{
                           const cell=pm?.get(k)
                           const pct=cell?Math.round(cell.pct):0
+                          const isSel=sel&&sel.personId===p.id&&sel.key===k
                           return(
                             <td key={k} style={{textAlign:'center',padding:'4px 10px'}}>
                               {pct>0?(
-                                <div title={cell?fmtUSD(cell.cost)+' this month':''}>
+                                <div onClick={()=>setCapSel(isSel?null:{personId:p.id,key:k})} title="Click for project breakdown"
+                                  style={{cursor:'pointer',borderRadius:4,padding:'1px 4px',background:isSel?'#1E3048':'transparent',border:isSel?'1px solid #C8973A':'1px solid transparent'}}>
                                   <span style={{fontWeight:700,color:pctColor(pct)}}>{pct}%</span>
                                 </div>
                               ):<span style={{color:'#3A4A5E'}}>—</span>}
@@ -5108,6 +5119,31 @@ function BudgetTab({roles,setRoles,people,setPeople,projects,items,projectRoles,
               {peopleByTeam.length===0&&<tr><td style={{padding:10,color:'#7A8FA6',fontStyle:'italic'}}>No roster people have a team set yet — add teams in the Roster tab.</td></tr>}
               </tbody>
             </table>
+          </div>
+          {sel&&(
+            <div style={{marginTop:16,background:'#12202F',border:'1px solid #C8973A',borderRadius:10,padding:'12px 16px',maxWidth:480}}>
+              <div style={{display:'flex',alignItems:'center',gap:8,marginBottom:8}}>
+                <span style={{fontSize:12,fontWeight:700,color:'#F4F6F8'}}>{selPerson?.name} — {monthLabel(sel.key)}</span>
+                <button onClick={()=>setCapSel(null)} style={{marginLeft:'auto',background:'none',border:'none',color:'#7A8FA6',fontSize:14,cursor:'pointer'}}>✕</button>
+              </div>
+              {selBreakdown.length===0&&<div style={{fontSize:11,color:'#7A8FA6',fontStyle:'italic'}}>No contributions found.</div>}
+              {[...selBreakdown].sort((a:any,b:any)=>b.pct-a.pct).map((b:any,ix:number)=>(
+                <div key={ix} style={{display:'flex',alignItems:'center',gap:8,fontSize:11,padding:'4px 0',borderBottom:ix<selBreakdown.length-1?'1px solid #1A2838':'none'}}>
+                  <span style={{width:8,height:8,borderRadius:2,background:b.color||'#3A4A5E',flexShrink:0}}/>
+                  <span style={{color:'#F4F6F8',flex:1}}>{b.project}</span>
+                  <span style={{color:pctColor(Math.round(b.pct)),fontWeight:700}}>{Math.round(b.pct)}%</span>
+                  <span style={{color:'#7A8FA6',width:64,textAlign:'right' as const}}>{fmtUSD(b.cost)}</span>
+                </div>
+              ))}
+              {selBreakdown.length>0&&(
+                <div style={{display:'flex',fontSize:11,fontWeight:700,paddingTop:6,marginTop:2,borderTop:'1px solid #243447'}}>
+                  <span style={{color:'#F4F6F8',flex:1}}>Total</span>
+                  <span style={{color:pctColor(Math.round(selBreakdown.reduce((s:number,b:any)=>s+b.pct,0)))}}>{Math.round(selBreakdown.reduce((s:number,b:any)=>s+b.pct,0))}%</span>
+                  <span style={{color:'#7A8FA6',width:64,textAlign:'right' as const,marginLeft:8}}>{fmtUSD(selBreakdown.reduce((s:number,b:any)=>s+b.cost,0))}</span>
+                </div>
+              )}
+            </div>
+          )}
           </div>
         )
       })()}
