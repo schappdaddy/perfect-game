@@ -10,7 +10,7 @@ const MODEL = process.env.ASSISTANT_MODEL || 'claude-haiku-4-5-20251001'
 const TOOLS = [
   {
     name: 'add_item',
-    description: 'Add a backlog item. Use when the user asks to add/create a backlog item, bug, enhancement, or request.',
+    description: 'Add a BACKLOG ITEM — a piece of work to be built/fixed/delivered by the team (a bug, enhancement, tech debt, business request). This is the default for "add an item", "add a backlog item", "add a bug/enhancement/request", or "add X to <project>" with no personal-reminder framing. If in doubt between this and add_task, prefer add_item — items are the team\'s work; tasks are the user\'s personal to-dos.',
     input_schema: {
       type: 'object',
       properties: {
@@ -42,7 +42,7 @@ const TOOLS = [
   },
   {
     name: 'add_task',
-    description: 'Add a personal task, optionally against a project, optionally with a due date.',
+    description: 'Add a personal TASK — a reminder/to-do for the USER personally (e.g. "remind me to...", "add a task for me to...", "I need to follow up on/reach out to/call/email/schedule..."). NOT for team work items — "add a backlog item" or "add X to the backlog" is add_item, never add_task, even if it mentions a project. Only use add_task when the request is explicitly about a personal reminder/to-do, typically with a due date and an action verb like follow up, reach out, call, review, send.',
     input_schema: {
       type: 'object',
       properties: {
@@ -79,6 +79,24 @@ const TOOLS = [
     },
   },
   {
+    name: 'delete_item',
+    description: 'Permanently delete a backlog item. ALWAYS call find_items first if there is any chance of ambiguity, and confirm the exact item with the user (name it back to them) before calling this — deletion cannot be undone.',
+    input_schema: {
+      type: 'object',
+      properties: { item: { type: 'string', description: 'RTL id (e.g. RTL-042) or an exact/distinctive part of the item name, confirmed with the user' } },
+      required: ['item'],
+    },
+  },
+  {
+    name: 'delete_task',
+    description: 'Permanently delete a personal task. Confirm which task (title, and project if there are several similar) with the user before calling this — deletion cannot be undone.',
+    input_schema: {
+      type: 'object',
+      properties: { task: { type: 'string', description: 'Distinctive part of the task title, optionally with its project, confirmed with the user' } },
+      required: ['task'],
+    },
+  },
+  {
     name: 'get_overview',
     description: "Get a live snapshot: due-soon items, upcoming milestones, CCRs owed/open, flagged items and projects, open/overdue tasks, and counts. Use for the morning brief and for questions like \"what's due\", \"what do I owe\", \"what's flagged\".",
     input_schema: { type: 'object', properties: {} },
@@ -112,6 +130,8 @@ Teams: ${(context?.teams || []).join('; ') || '(none)'}.
 Valid item statuses in this space: ${(context?.statuses || []).join('; ') || '(none)'}.
 
 Rules:
+- Deletion is permanent and cannot be undone. Before calling delete_item or delete_task, always state exactly what you're about to delete (its name/id) and get an explicit yes in the same or a following turn — never delete on the first ambiguous mention. If find_items returns more than one plausible match, list them and ask which one.
+- Tool choice: "add a backlog item" / "add an item" / "add a bug/enhancement" → add_item, always — never add_task, even when a project is named. "add a task" / "remind me to" / "I need to follow up/reach out/call" → add_task. When genuinely ambiguous, ask one short question rather than guessing.
 - Be brief and concrete. Confirm every write by restating exactly what was created or changed (ids, project, flags, dates).
 - Resolve relative dates ("next Tuesday", "Friday") to YYYY-MM-DD yourself using today's date.
 - If a project or item reference doesn't match, the tool result will say so and list candidates — ask the user, never guess between candidates.
