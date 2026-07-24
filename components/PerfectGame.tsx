@@ -5172,8 +5172,33 @@ function BudgetTab({roles,setRoles,people,setPeople,projects,items,projectRoles,
       )}
 
       {view==='roster'&&(
-        <div style={{maxWidth:680}}>
+        <div style={{maxWidth:980}}>
           <div style={{fontSize:11,color:'#7A8FA6',marginBottom:12,lineHeight:1.5}}>Named people you assign to items (Layer 2 — actuals). Leave rate blank to inherit the role's rate card price.</div>
+          {(()=>{
+            const deptOptions=[...new Set(['OMNI Engineering','OMNI Consumer',...people.map((p:any)=>p.department).filter(Boolean)])]
+            const vendorOptions=[...new Set(['Toptal','EPAM',...people.map((p:any)=>p.vendor).filter(Boolean)])]
+            const DeptSelect=({value,onChange}:any)=>(
+              <select value={deptOptions.includes(value)?value:''} onChange={e=>{
+                  if(e.target.value==='__new__'){const v=prompt('New department name:');if(v&&v.trim())onChange(v.trim())}
+                  else onChange(e.target.value||null)
+                }} style={{background:'#0D1B2A',border:'1px solid #243447',borderRadius:5,color:'#7A8FA6',fontSize:11,padding:'4px 6px'}}>
+                <option value="">No department</option>
+                {deptOptions.map(d=><option key={d} value={d}>{d}</option>)}
+                <option value="__new__">+ Add new…</option>
+              </select>
+            )
+            const VendorSelect=({value,onChange}:any)=>(
+              <select value={vendorOptions.includes(value)?value:''} onChange={e=>{
+                  if(e.target.value==='__new__'){const v=prompt('New vendor name:');if(v&&v.trim())onChange(v.trim())}
+                  else onChange(e.target.value||null)
+                }} style={{background:'#0D1B2A',border:'1px solid #243447',borderRadius:5,color:'#7A8FA6',fontSize:11,padding:'4px 6px'}}>
+                <option value="">No vendor</option>
+                {vendorOptions.map(v=><option key={v} value={v}>{v}</option>)}
+                <option value="__new__">+ Add new…</option>
+              </select>
+            )
+            return(
+            <>
           {people.map((p:any)=>(
             <div key={p.id} style={{display:'flex',alignItems:'center',gap:8,background:p.active?'#12202F':'#0D1B2A',opacity:p.active?1:0.5,border:'1px solid #243447',borderRadius:8,padding:'8px 12px',marginBottom:6}}>
               <input value={p.name} onChange={e=>updPerson(p.id,{name:e.target.value})} style={{flex:1,background:'transparent',border:'none',color:'#F4F6F8',fontSize:13,fontWeight:600}}/>
@@ -5185,8 +5210,8 @@ function BudgetTab({roles,setRoles,people,setPeople,projects,items,projectRoles,
                 <option value="">No team</option>
                 {TEAMS.map(t=><option key={t} value={t}>{t}</option>)}
               </select>
-              <input list="pg-depts" value={p.department||''} onChange={e=>updPerson(p.id,{department:e.target.value||null})} placeholder="Department" style={{width:110,background:'#0D1B2A',border:'1px solid #243447',borderRadius:5,color:'#7A8FA6',fontSize:11,padding:'4px 6px'}}/>
-              <input list="pg-vendors" value={p.vendor||''} onChange={e=>updPerson(p.id,{vendor:e.target.value||null})} placeholder="Vendor" style={{width:100,background:'#0D1B2A',border:'1px solid #243447',borderRadius:5,color:'#7A8FA6',fontSize:11,padding:'4px 6px'}}/>
+              <DeptSelect value={p.department||''} onChange={(v:any)=>updPerson(p.id,{department:v})}/>
+              <VendorSelect value={p.vendor||''} onChange={(v:any)=>updPerson(p.id,{vendor:v})}/>
               <div style={{display:'flex',alignItems:'center',gap:3}} title="Blank = inherit role's rate">
                 <span style={{color:'#7A8FA6',fontSize:12}}>$</span>
                 <input type="number" value={p.rate_override??''} onChange={e=>updPerson(p.id,{rate_override:e.target.value?parseFloat(e.target.value):null})} placeholder={String(roles.find((r:any)=>r.id===p.role_id)?.hourly_rate||'—')} style={{width:70,background:'#0D1B2A',border:'1px solid #243447',borderRadius:5,color:'#F4F6F8',fontSize:12,padding:'4px 6px'}}/>
@@ -5208,13 +5233,14 @@ function BudgetTab({roles,setRoles,people,setPeople,projects,items,projectRoles,
               <option value="">No team</option>
               {TEAMS.map(t=><option key={t} value={t}>{t}</option>)}
             </select>
-            <input list="pg-depts" value={newPersonDept} onChange={e=>setNewPersonDept(e.target.value)} placeholder="Department" style={{width:130,background:'#12202F',border:'1px dashed #243447',borderRadius:6,color:'#F4F6F8',fontSize:12,padding:'7px 10px'}}/>
-            <input list="pg-vendors" value={newPersonVendor} onChange={e=>setNewPersonVendor(e.target.value)} placeholder="Vendor" style={{width:120,background:'#12202F',border:'1px dashed #243447',borderRadius:6,color:'#F4F6F8',fontSize:12,padding:'7px 10px'}}/>
+            <DeptSelect value={newPersonDept} onChange={(v:any)=>setNewPersonDept(v||'')}/>
+            <VendorSelect value={newPersonVendor} onChange={(v:any)=>setNewPersonVendor(v||'')}/>
             <input type="number" value={newPersonRate} onChange={e=>setNewPersonRate(e.target.value)} placeholder="$/hr (optional)" style={{width:110,background:'#12202F',border:'1px dashed #243447',borderRadius:6,color:'#F4F6F8',fontSize:12,padding:'7px 10px'}}/>
             <button onClick={addPerson} style={{background:'#5DADE2',border:'none',borderRadius:6,color:'#0D1B2A',fontSize:12,fontWeight:700,padding:'0 16px',cursor:'pointer'}}>+ Add</button>
-            <datalist id="pg-depts">{[...new Set(people.map((p:any)=>p.department).filter(Boolean))].map((d:any)=><option key={d} value={d}/>)}<option value="OMNI Engineering"/><option value="OMNI Consumer"/></datalist>
-            <datalist id="pg-vendors">{[...new Set(people.map((p:any)=>p.vendor).filter(Boolean))].map((v:any)=><option key={v} value={v}/>)}<option value="Toptal"/><option value="EPAM"/></datalist>
           </div>
+          </>
+          )
+          })()}
         </div>
       )}
 
@@ -5283,7 +5309,10 @@ function BudgetTab({roles,setRoles,people,setPeople,projects,items,projectRoles,
             <div style={{background:'#12202F',border:'1px dashed #243447',borderRadius:10,padding:'12px 16px',maxWidth:520,marginTop:6}}>
               <div style={{fontSize:11,fontWeight:700,color:'#F4F6F8',marginBottom:8}}>+ Enter a budget / reforecast</div>
               <div style={{display:'flex',gap:6,marginBottom:6,flexWrap:'wrap' as const}}>
-                <input list="pg-depts" value={rfNewDept} onChange={e=>setRfNewDept(e.target.value)} placeholder="Department" style={{flex:1,minWidth:120,background:'#0D1B2A',border:'1px solid #243447',borderRadius:5,color:'#F4F6F8',fontSize:11,padding:'5px 8px'}}/>
+                <select value={rfNewDept} onChange={e=>setRfNewDept(e.target.value)} style={{flex:1,minWidth:120,background:'#0D1B2A',border:'1px solid #243447',borderRadius:5,color:'#F4F6F8',fontSize:11,padding:'5px 8px'}}>
+                  <option value="">Department…</option>
+                  {[...new Set(['OMNI Engineering','OMNI Consumer',...people.map((p:any)=>p.department).filter(Boolean)])].map((d:any)=><option key={d} value={d}>{d}</option>)}
+                </select>
                 <select value={rfNewQ} onChange={e=>setRfNewQ(e.target.value)} style={{background:'#0D1B2A',border:'1px solid #243447',borderRadius:5,color:'#F4F6F8',fontSize:11,padding:'5px 8px'}}>
                   {[1,2,3,4].map(q=><option key={q} value={q}>Q{q}</option>)}
                 </select>
