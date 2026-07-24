@@ -237,6 +237,85 @@ function capacityByMonth(projects:any[],projectRoles:any[],people:any[],roles:an
   }
   return{perPerson,byProject}
 }
+// A dollar amount splits CapEx/OpEx by role — but only on a "Build" project. On a
+// "Support" project (e.g. Peak Prep) nothing is being capitalized, so it's all OpEx
+// regardless of role, even for an otherwise capex-eligible dev.
+function splitCapexOpex(cost:number,role:any,projectBudgetType:string){
+  if(projectBudgetType==='support'||!role?.capex_eligible)return{capex:0,opex:cost}
+  const pct=role.capex_pct??80
+  return{capex:cost*(pct/100),opex:cost*(1-pct/100)}
+}
+// Rolls approved projects' cost (Layer 1 allocated + Layer 2 actual) into
+// fiscal-quarter × department × capex/opex buckets. Only named (person-linked) rows
+// count — same constraint as Capacity, since department/vendor only exist on people.
+function quarterlyRollup(projects:any[],projectRoles:any[],itemAssignments:any[],items:any[],people:any[],roles:any[]){
+  const out=new Map<string,{allocCapex:number,allocOpex:number,actCapex:number,actOpex:number}>()
+  const bump=(fy:number,q:number,dept:string,field:'allocCapex'|'allocOpex'|'actCapex'|'actOpex',amt:number)=>{
+    const key=`${fy}-${q}-${dept}`
+    const cur=out.get(key)||{allocCapex:0,allocOpex:0,actCapex:0,actOpex:0}
+    cur[field]+=amt
+    out.set(key,cur)
+  }
+  const approved=projects.filter((p:any)=>p.budget_status==='approved')
+  // Allocated — Layer 1 roster rows, named people only
+  for(const row of projectRoles){
+    if(!row.person_id)continue
+    const proj=approved.find((p:any)=>p.id===row.project_id)
+    if(!proj||!proj.start_date)continue
+    const person=people.find((p:any)=>p.id===row.person_id)
+    if(!person?.department)continue
+    const role=roles.find((r:any)=>r.id===person.role_id)
+    const rate=rateOf(person,roles)
+    const end=proj.end_date||localISO(new Date(Date.now()+365*86400000))
+    for(const m of monthlyRowCost(row.allocation_pct,rate,proj.start_date,end)){
+      const{fy,quarter}=fyOf(`${m.key}-15`)
+      const{capex,opex}=splitCapexOpex(m.cost,role,proj.budget_type)
+      bump(fy,quarter,person.department,'allocCapex',capex)
+      bump(fy,quarter,person.department,'allocOpex',opex)
+    }
+  }
+  // Actual — Layer 2 item assignments, named people only, on approved projects
+  for(const it of items){
+    const proj=approved.find((p:any)=>p.name===it.parent_project)
+    if(!proj||!it.start_date||!it.end_date)continue
+    const asg=itemAssignments.filter((a:any)=>a.item_id===it.id)
+    for(const a of asg){
+      const person=people.find((p:any)=>p.id===a.person_id)
+      if(!person?.department)continue
+      const role=roles.find((r:any)=>r.id===person.role_id)
+      const rate=rateOf(person,roles)
+      for(const m of monthlyHoursCost(a.hours||0,rate,it.start_date,it.end_date)){
+        const{fy,quarter}=fyOf(`${m.key}-15`)
+        const{capex,opex}=splitCapexOpex(m.cost,role,proj.budget_type)
+        bump(fy,quarter,person.department,'actCapex',capex)
+        bump(fy,quarter,person.department,'actOpex',opex)
+      }
+    }
+  }
+  return out
+}
+// Real spend by vendor — CapEx/OpEx, approved projects only. Billing is about what
+// actually happened, so this uses Layer 2 actuals only, never the Layer 1 forecast.
+function vendorRollup(projects:any[],itemAssignments:any[],items:any[],people:any[],roles:any[]){
+  const out=new Map<string,{capex:number,opex:number}>()
+  const approved=projects.filter((p:any)=>p.budget_status==='approved')
+  for(const it of items){
+    const proj=approved.find((p:any)=>p.name===it.parent_project)
+    if(!proj||!it.start_date||!it.end_date)continue
+    for(const a of itemAssignments.filter((a:any)=>a.item_id===it.id)){
+      const person=people.find((p:any)=>p.id===a.person_id)
+      const vendor=person?.vendor||'(no vendor set)'
+      const role=roles.find((r:any)=>r.id===person?.role_id)
+      const rate=rateOf(person,roles)
+      const cost=(a.hours||0)*rate
+      const{capex,opex}=splitCapexOpex(cost,role,proj.budget_type)
+      const cur=out.get(vendor)||{capex:0,opex:0}
+      cur.capex+=capex;cur.opex+=opex
+      out.set(vendor,cur)
+    }
+  }
+  return out
+}
 function projectActual(project:any,items:any[],itemAssignments:any[],people:any[],roles:any[]){
   const projItems=items.filter(i=>i.parent_project===project.name&&i.start_date&&i.end_date)
   const rows:any[]=[]
@@ -378,7 +457,11 @@ function AssignPicker({available,onAdd}:any){
     </div>
   )
 }
-function ProjectDetail({project,items,setItems,projects,milestones,setMilestones,tasks,setTasks,onClose,d,fmt,ccrs=[],ccrItems=[],roles=[],people=[],projectRoles=[],setProjectRoles,itemAssignments=[],setItemAssignments}:any) {
+function ProjectDetail({project,items,setItems,projects,setProjects,milestones,setMilestones,tasks,setTasks,onClose,d,fmt,ccrs=[],ccrItems=[],roles=[],people=[],projectRoles=[],setProjectRoles,itemAssignments=[],setItemAssignments}:any) {
+  async function updProjectField(fields:any){
+    setProjects((prev:any[])=>prev.map(p=>p.id===project.id?{...p,...fields}:p))
+    await supabase.from('projects').update(fields).eq('id',project.id)
+  }
   const [pdCcrExp,setPdCcrExp]=useState<any>({})
   const [pdAsgOpen,setPdAsgOpen]=useState<any>({}) // item.id -> assignment editor open
   const [prTeam,setPrTeam]=useState('');const [prPerson,setPrPerson]=useState('');const [prRole,setPrRole]=useState('');const [prHead,setPrHead]=useState('1');const [prAlloc,setPrAlloc]=useState('100')
@@ -580,16 +663,43 @@ function ProjectDetail({project,items,setItems,projects,milestones,setMilestones
           const fc=projectForecast(project,projectRoles,roles)
           const ac=projectActual(project,items,itemAssignments,people,roles)
           const projRoleRows=projectRoles.filter((r:any)=>r.project_id===project.id)
+          const bStatus=project.budget_status||'draft'
+          const bType=project.budget_type||'build'
+          // CapEx/OpEx split of the forecast — respects budget type per-row via each row's role
+          let fcCapex=0,fcOpex=0
+          fc.byRole.forEach((b:any)=>{const role=roles.find((r:any)=>r.id===b.role_id);const sp=splitCapexOpex(b.cost,role,bType);fcCapex+=sp.capex;fcOpex+=sp.opex})
+          const stClr=(s:string)=>s==='approved'?'#27AE60':s==='requested'?'#5DADE2':s==='rejected'?'#E74C3C':'#7A8FA6'
           return(
             <div style={{padding:'14px 16px',borderBottom:'1px solid #243447'}}>
-              <div style={{fontSize:12,fontWeight:700,color:'#27AE60',letterSpacing:1,marginBottom:8}}>$ BUDGET</div>
+              <div style={{display:'flex',alignItems:'center',gap:8,marginBottom:8}}>
+                <span style={{fontSize:12,fontWeight:700,color:'#27AE60',letterSpacing:1}}>$ BUDGET</span>
+                <div style={{display:'flex',gap:3,marginLeft:8}}>
+                  {[['build','🔨 Build'],['support','🛠 Support']].map(([k,label])=>(
+                    <button key={k} onClick={()=>updProjectField({budget_type:k})} title={k==='support'?'Nothing capitalized here — everyone bills 100% OpEx':'Role-based CapEx/OpEx split applies'}
+                      style={{background:bType===k?'#1E3048':'transparent',color:bType===k?'#F4F6F8':'#7A8FA6',border:'1px solid '+(bType===k?'#3A4A5E':'#243447'),borderRadius:5,padding:'2px 8px',fontSize:9,fontWeight:700,cursor:'pointer'}}>{label}</button>
+                  ))}
+                </div>
+                <span style={{marginLeft:'auto',fontSize:9,fontWeight:700,color:stClr(bStatus),border:'1px solid '+stClr(bStatus),borderRadius:8,padding:'1px 8px'}}>{bStatus.toUpperCase()}</span>
+              </div>
+              <div style={{display:'flex',gap:6,marginBottom:10}}>
+                {bStatus==='draft'&&<button onClick={()=>updProjectField({budget_status:'requested'})} style={{background:'#5DADE2',border:'none',borderRadius:5,color:'#0D1B2A',fontSize:10,fontWeight:700,padding:'4px 10px',cursor:'pointer'}}>Submit for Approval</button>}
+                {bStatus==='requested'&&<>
+                  <button onClick={()=>updProjectField({budget_status:'approved'})} style={{background:'#27AE60',border:'none',borderRadius:5,color:'#fff',fontSize:10,fontWeight:700,padding:'4px 10px',cursor:'pointer'}}>Approve</button>
+                  <button onClick={()=>updProjectField({budget_status:'rejected'})} style={{background:'#E74C3C',border:'none',borderRadius:5,color:'#fff',fontSize:10,fontWeight:700,padding:'4px 10px',cursor:'pointer'}}>Reject</button>
+                </>}
+                {bStatus==='rejected'&&<button onClick={()=>updProjectField({budget_status:'draft'})} style={{background:'none',border:'1px solid #243447',borderRadius:5,color:'#7A8FA6',fontSize:10,padding:'4px 8px',cursor:'pointer'}}>Revise & Resubmit</button>}
+                {bStatus==='approved'&&<button onClick={()=>updProjectField({budget_status:'draft'})} style={{background:'none',border:'1px solid #243447',borderRadius:5,color:'#7A8FA6',fontSize:10,padding:'4px 8px',cursor:'pointer'}}>Withdraw</button>}
+              </div>
               {fc.unset?(
                 <div style={{fontSize:10,color:'#7A8FA6',fontStyle:'italic',marginBottom:8}}>Set project start/end dates to forecast a budget.</div>
               ):(
-                <div style={{display:'flex',gap:16,fontSize:11,marginBottom:10}}>
+                <>
+                <div style={{display:'flex',gap:16,fontSize:11,marginBottom:4}}>
                   <span style={{color:'#7A8FA6'}}>Forecast: <b style={{color:'#5DADE2'}}>{fmtUSD(fc.total)}</b></span>
                   <span style={{color:'#7A8FA6'}}>Actual: <b style={{color:ac.total>fc.total?'#E74C3C':'#27AE60'}}>{fmtUSD(ac.total)}</b></span>
                 </div>
+                <div style={{fontSize:10,color:'#7A8FA6',marginBottom:10}}>CapEx <b style={{color:'#F4F6F8'}}>{fmtUSD(fcCapex)}</b> / OpEx <b style={{color:'#F4F6F8'}}>{fmtUSD(fcOpex)}</b>{bStatus!=='approved'&&<span style={{fontStyle:'italic'}}> — won't count against the quarterly budget until approved</span>}</div>
+                </>
               )}
               {projRoleRows.map((r:any)=>{
                 const role=roles.find((x:any)=>x.id===r.role_id)
@@ -1302,6 +1412,7 @@ function Projects({items,setItems,projects,setProjects,milestones,setMilestones,
     items={items}
     setItems={setItems}
     projects={projects}
+    setProjects={setProjects}
     milestones={milestones}
     setMilestones={setMilestones}
     tasks={tasks}
@@ -4861,15 +4972,23 @@ function Desk({items,setItems,projects,setProjects,milestones,setMilestones,task
 
 
 // ── DONE — history of completed projects and items ───────────────────────
-function BudgetTab({roles,setRoles,people,setPeople,projects,items,projectRoles,itemAssignments}:any){
-  const [view,setView]=useState('dashboard') // dashboard | capacity | roster | rates
+function BudgetTab({roles,setRoles,people,setPeople,projects,items,projectRoles,itemAssignments,qBudgets,setQBudgets}:any){
+  const [view,setView]=useState('dashboard') // dashboard | capacity | rf | vendor | roster | rates
   const [capSel,setCapSel]=useState<any>(null) // {personId,key} — capacity cell drill-down
+  const [rfFy,setRfFy]=useState<any>(null)
+  const [rfNewDept,setRfNewDept]=useState('')
+  const [rfNewQ,setRfNewQ]=useState('1')
+  const [rfNewLabel,setRfNewLabel]=useState('Original')
+  const [rfNewCapex,setRfNewCapex]=useState('')
+  const [rfNewOpex,setRfNewOpex]=useState('')
   const [newRoleName,setNewRoleName]=useState('')
   const [newRoleRate,setNewRoleRate]=useState('')
   const [newPersonName,setNewPersonName]=useState('')
   const [newPersonRole,setNewPersonRole]=useState('')
   const [newPersonRate,setNewPersonRate]=useState('')
   const [newPersonTeam,setNewPersonTeam]=useState('')
+  const [newPersonVendor,setNewPersonVendor]=useState('')
+  const [newPersonDept,setNewPersonDept]=useState('')
   const [exporting,setExporting]=useState(false)
 
   async function updRole(id:any,fields:any){
@@ -4893,9 +5012,9 @@ function BudgetTab({roles,setRoles,people,setPeople,projects,items,projectRoles,
   }
   async function addPerson(){
     if(!newPersonName.trim())return
-    const{data,error}=await supabase.from('people').insert({name:newPersonName.trim(),role_id:newPersonRole||null,rate_override:newPersonRate?parseFloat(newPersonRate):null,team:newPersonTeam||null,active:true,sort_order:people.length}).select().single()
+    const{data,error}=await supabase.from('people').insert({name:newPersonName.trim(),role_id:newPersonRole||null,rate_override:newPersonRate?parseFloat(newPersonRate):null,team:newPersonTeam||null,vendor:newPersonVendor.trim()||null,department:newPersonDept.trim()||null,active:true,sort_order:people.length}).select().single()
     if(error){alert('Failed to add person: '+error.message);return}
-    if(data){setPeople((prev:any[])=>[...prev,data]);setNewPersonName('');setNewPersonRole('');setNewPersonRate('');setNewPersonTeam('')}
+    if(data){setPeople((prev:any[])=>[...prev,data]);setNewPersonName('');setNewPersonRole('');setNewPersonRate('');setNewPersonTeam('');setNewPersonVendor('');setNewPersonDept('')}
   }
   async function deletePerson(id:any){
     if(!confirm('Remove this person from the roster? Their existing item assignments stay on record but will show as "(removed)".'))return
@@ -4973,6 +5092,34 @@ function BudgetTab({roles,setRoles,people,setPeople,projects,items,projectRoles,
       ws3['!cols']=[{wch:12},{wch:10},{wch:8},{wch:14},{wch:14},{wch:12}]
       XLSX.utils.book_append_sheet(wb,ws3,'Budget by Period')
 
+      // RF Budget — approved ceiling vs actual burn, by department/quarter, current FY
+      const curFy=fyOf(localISO(new Date())).fy
+      const qRollup=quarterlyRollup(projects,projectRoles,itemAssignments,items,people,roles)
+      const depts=[...new Set(people.map((p:any)=>p.department).filter(Boolean))]
+      const rfRows:any[]=[['Department','Quarter','Label','CapEx Approved','CapEx Actual','OpEx Approved','OpEx Actual']]
+      for(const dept of depts){
+        for(let q=1;q<=4;q++){
+          const revs=qBudgets.filter((b:any)=>b.department===dept&&b.fiscal_year===curFy&&b.quarter===q).sort((a:any,b:any)=>a.created_at<b.created_at?1:-1)
+          const bud=revs[0]
+          if(!bud)continue
+          const r=qRollup.get(`${curFy}-${q}-${dept}`)||{actCapex:0,actOpex:0}
+          rfRows.push([dept,`Q${q}`,bud.label,Math.round(bud.capex_approved),Math.round(r.actCapex),Math.round(bud.opex_approved),Math.round(r.actOpex)] as any)
+        }
+      }
+      const ws4=XLSX.utils.aoa_to_sheet(rfRows)
+      ws4['!cols']=[{wch:20},{wch:8},{wch:9},{wch:14},{wch:12},{wch:14},{wch:12}]
+      XLSX.utils.book_append_sheet(wb,ws4,`RF Budget FY${curFy}`)
+
+      // By Vendor — CapEx/OpEx actual spend
+      const vr=vendorRollup(projects,itemAssignments,items,people,roles)
+      const vRows:any[]=[['Vendor','CapEx','OpEx','Total']]
+      const vSorted=[...vr.entries()].map(([vendor,v]:any)=>({vendor,...v})).sort((a,b)=>(b.capex+b.opex)-(a.capex+a.opex))
+      vSorted.forEach(v=>vRows.push([v.vendor,Math.round(v.capex),Math.round(v.opex),Math.round(v.capex+v.opex)] as any))
+      vRows.push(['TOTAL',Math.round(vSorted.reduce((s,v)=>s+v.capex,0)),Math.round(vSorted.reduce((s,v)=>s+v.opex,0)),Math.round(vSorted.reduce((s,v)=>s+v.capex+v.opex,0))] as any)
+      const ws5=XLSX.utils.aoa_to_sheet(vRows)
+      ws5['!cols']=[{wch:20},{wch:14},{wch:14},{wch:14}]
+      XLSX.utils.book_append_sheet(wb,ws5,'By Vendor')
+
       XLSX.writeFile(wb,`Budget Report — ${localISO(new Date())}.xlsx`)
     }catch(e:any){alert('Export failed: '+(e?.message||e))}
     setExporting(false)
@@ -4983,7 +5130,7 @@ function BudgetTab({roles,setRoles,people,setPeople,projects,items,projectRoles,
       <div style={{display:'flex',alignItems:'center',gap:8,marginBottom:18}}>
         <span style={{fontSize:20,fontWeight:800,color:'#F4F6F8'}}>$ Budget</span>
         <div style={{display:'flex',gap:4,marginLeft:16}}>
-          {[['dashboard','Dashboard'],['capacity','Capacity'],['roster','Roster'],['rates','Rate Card']].map(([k,label])=>(
+          {[['dashboard','Dashboard'],['capacity','Capacity'],['rf','RF Budget'],['vendor','Vendor'],['roster','Roster'],['rates','Rate Card']].map(([k,label])=>(
             <button key={k} onClick={()=>setView(k)} style={{background:view===k?'#C8973A':'#1E3048',color:view===k?'#0D1B2A':'#7A8FA6',border:'1px solid '+(view===k?'#C8973A':'#243447'),borderRadius:6,padding:'6px 14px',fontSize:12,fontWeight:700,cursor:'pointer'}}>{label}</button>
           ))}
         </div>
@@ -5004,6 +5151,15 @@ function BudgetTab({roles,setRoles,people,setPeople,projects,items,projectRoles,
                 <input type="number" value={r.hourly_rate} onChange={e=>updRole(r.id,{hourly_rate:parseFloat(e.target.value)||0})} style={{width:70,background:'#0D1B2A',border:'1px solid #243447',borderRadius:5,color:'#F4F6F8',fontSize:12,padding:'4px 6px'}}/>
                 <span style={{color:'#7A8FA6',fontSize:11}}>/hr</span>
               </div>
+              <label style={{display:'flex',alignItems:'center',gap:4,fontSize:10,color:'#7A8FA6',cursor:'pointer'}} title="Can this role's time be capitalized on a Build project?">
+                <input type="checkbox" checked={r.capex_eligible??true} onChange={e=>updRole(r.id,{capex_eligible:e.target.checked})}/>CapEx
+              </label>
+              {(r.capex_eligible??true)&&(
+                <div style={{display:'flex',alignItems:'center',gap:3}}>
+                  <input type="number" value={r.capex_pct??80} onChange={e=>updRole(r.id,{capex_pct:parseFloat(e.target.value)||0})} style={{width:40,background:'#0D1B2A',border:'1px solid #243447',borderRadius:5,color:'#F4F6F8',fontSize:11,padding:'4px 4px'}}/>
+                  <span style={{color:'#7A8FA6',fontSize:10}}>/{100-(r.capex_pct??80)}</span>
+                </div>
+              )}
               <button onClick={()=>deleteRole(r.id)} style={{background:'none',border:'none',color:'#3A4A5E',fontSize:13,cursor:'pointer'}}>🗑</button>
             </div>
           ))}
@@ -5029,6 +5185,8 @@ function BudgetTab({roles,setRoles,people,setPeople,projects,items,projectRoles,
                 <option value="">No team</option>
                 {TEAMS.map(t=><option key={t} value={t}>{t}</option>)}
               </select>
+              <input list="pg-depts" value={p.department||''} onChange={e=>updPerson(p.id,{department:e.target.value||null})} placeholder="Department" style={{width:110,background:'#0D1B2A',border:'1px solid #243447',borderRadius:5,color:'#7A8FA6',fontSize:11,padding:'4px 6px'}}/>
+              <input list="pg-vendors" value={p.vendor||''} onChange={e=>updPerson(p.id,{vendor:e.target.value||null})} placeholder="Vendor" style={{width:100,background:'#0D1B2A',border:'1px solid #243447',borderRadius:5,color:'#7A8FA6',fontSize:11,padding:'4px 6px'}}/>
               <div style={{display:'flex',alignItems:'center',gap:3}} title="Blank = inherit role's rate">
                 <span style={{color:'#7A8FA6',fontSize:12}}>$</span>
                 <input type="number" value={p.rate_override??''} onChange={e=>updPerson(p.id,{rate_override:e.target.value?parseFloat(e.target.value):null})} placeholder={String(roles.find((r:any)=>r.id===p.role_id)?.hourly_rate||'—')} style={{width:70,background:'#0D1B2A',border:'1px solid #243447',borderRadius:5,color:'#F4F6F8',fontSize:12,padding:'4px 6px'}}/>
@@ -5050,11 +5208,134 @@ function BudgetTab({roles,setRoles,people,setPeople,projects,items,projectRoles,
               <option value="">No team</option>
               {TEAMS.map(t=><option key={t} value={t}>{t}</option>)}
             </select>
-            <input type="number" value={newPersonRate} onChange={e=>setNewPersonRate(e.target.value)} placeholder="$/hr (optional)" style={{width:120,background:'#12202F',border:'1px dashed #243447',borderRadius:6,color:'#F4F6F8',fontSize:12,padding:'7px 10px'}}/>
+            <input list="pg-depts" value={newPersonDept} onChange={e=>setNewPersonDept(e.target.value)} placeholder="Department" style={{width:130,background:'#12202F',border:'1px dashed #243447',borderRadius:6,color:'#F4F6F8',fontSize:12,padding:'7px 10px'}}/>
+            <input list="pg-vendors" value={newPersonVendor} onChange={e=>setNewPersonVendor(e.target.value)} placeholder="Vendor" style={{width:120,background:'#12202F',border:'1px dashed #243447',borderRadius:6,color:'#F4F6F8',fontSize:12,padding:'7px 10px'}}/>
+            <input type="number" value={newPersonRate} onChange={e=>setNewPersonRate(e.target.value)} placeholder="$/hr (optional)" style={{width:110,background:'#12202F',border:'1px dashed #243447',borderRadius:6,color:'#F4F6F8',fontSize:12,padding:'7px 10px'}}/>
             <button onClick={addPerson} style={{background:'#5DADE2',border:'none',borderRadius:6,color:'#0D1B2A',fontSize:12,fontWeight:700,padding:'0 16px',cursor:'pointer'}}>+ Add</button>
+            <datalist id="pg-depts">{[...new Set(people.map((p:any)=>p.department).filter(Boolean))].map((d:any)=><option key={d} value={d}/>)}<option value="OMNI Engineering"/><option value="OMNI Consumer"/></datalist>
+            <datalist id="pg-vendors">{[...new Set(people.map((p:any)=>p.vendor).filter(Boolean))].map((v:any)=><option key={v} value={v}/>)}<option value="Toptal"/><option value="EPAM"/></datalist>
           </div>
         </div>
       )}
+
+      {view==='rf'&&(()=>{
+        const thisFY=fyOf(localISO(new Date())).fy
+        const[fy,setFy]=[rfFy||thisFY,setRfFy]
+        const quarters=[1,2,3,4]
+        const rollup=quarterlyRollup(projects,projectRoles,itemAssignments,items,people,roles)
+        const deptOrder=[...new Set([...people.map((p:any)=>p.department).filter(Boolean),...(rfNewDept?[rfNewDept]:[])])]
+        const latestBudget=(dept:string,q:number)=>{
+          const revs=qBudgets.filter((b:any)=>b.department===dept&&b.fiscal_year===fy&&b.quarter===q).sort((a:any,b:any)=>a.created_at<b.created_at?1:-1)
+          return revs[0]||null
+        }
+        const history=(dept:string,q:number)=>qBudgets.filter((b:any)=>b.department===dept&&b.fiscal_year===fy&&b.quarter===q).sort((a:any,b:any)=>a.created_at<b.created_at?-1:1)
+        async function addRevision(){
+          if(!rfNewDept.trim()||!rfNewCapex&&!rfNewOpex)return
+          const{data,error}=await supabase.from('quarterly_budgets').insert({fiscal_year:fy,quarter:parseInt(rfNewQ),department:rfNewDept.trim(),label:rfNewLabel,capex_approved:parseFloat(rfNewCapex)||0,opex_approved:parseFloat(rfNewOpex)||0}).select().single()
+          if(error){alert('Failed to save budget: '+error.message);return}
+          if(data){setQBudgets((prev:any[])=>[...prev,data]);setRfNewCapex('');setRfNewOpex('')}
+        }
+        const barColor=(pct:number)=>pct>100?'#E74C3C':pct>85?'#E8B95A':'#27AE60'
+        return(
+          <div>
+            <div style={{display:'flex',alignItems:'center',gap:10,marginBottom:14}}>
+              <span style={{fontSize:11,color:'#7A8FA6'}}>Fiscal Year</span>
+              <select value={fy} onChange={e=>setRfFy(parseInt(e.target.value))} style={{background:'#12202F',border:'1px solid #243447',borderRadius:6,color:'#F4F6F8',fontSize:12,padding:'5px 8px'}}>
+                {[thisFY-1,thisFY,thisFY+1].map(y=><option key={y} value={y}>FY{y}</option>)}
+              </select>
+              <span style={{fontSize:10,color:'#7A8FA6',fontStyle:'italic'}}>Q1 Apr–Jun · Q2 Jul–Sep · Q3 Oct–Dec · Q4 Jan–Mar. Checkpoints: RF1 (Jul), RF2 (Oct), RF3 (Jan).</span>
+            </div>
+            {deptOrder.length===0&&<div style={{fontSize:12,color:'#7A8FA6',fontStyle:'italic',marginBottom:16}}>No departments set yet — add a department to people in the Roster tab.</div>}
+            {deptOrder.map(dept=>(
+              <div key={dept} style={{marginBottom:22}}>
+                <div style={{fontSize:12,fontWeight:700,color:'#5DADE2',letterSpacing:1,marginBottom:8}}>{dept.toUpperCase()}</div>
+                <div style={{display:'flex',gap:10,flexWrap:'wrap' as const}}>
+                  {quarters.map(q=>{
+                    const bud=latestBudget(dept,q)
+                    const r=rollup.get(`${fy}-${q}-${dept}`)||{allocCapex:0,allocOpex:0,actCapex:0,actOpex:0}
+                    const capexPct=bud?.capex_approved?Math.round(r.actCapex/bud.capex_approved*100):0
+                    const opexPct=bud?.opex_approved?Math.round(r.actOpex/bud.opex_approved*100):0
+                    const hist=history(dept,q)
+                    return(
+                      <div key={q} style={{background:'#12202F',border:'1px solid #243447',borderRadius:10,padding:'10px 14px',width:220}}>
+                        <div style={{display:'flex',alignItems:'center',gap:6,marginBottom:6}}>
+                          <span style={{fontSize:12,fontWeight:700,color:'#F4F6F8'}}>Q{q}</span>
+                          {bud&&<span style={{fontSize:8,color:'#7A8FA6',border:'1px solid #243447',borderRadius:6,padding:'0 5px'}}>{bud.label}</span>}
+                        </div>
+                        {!bud?<div style={{fontSize:10,color:'#7A8FA6',fontStyle:'italic'}}>No budget entered</div>:(
+                          <>
+                          <div style={{fontSize:9,color:'#7A8FA6',marginBottom:2}}>CapEx</div>
+                          <div style={{display:'flex',justifyContent:'space-between',fontSize:10,marginBottom:2}}><span style={{color:'#F4F6F8'}}>{fmtUSD(r.actCapex)}</span><span style={{color:'#7A8FA6'}}>of {fmtUSD(bud.capex_approved)}</span></div>
+                          <div style={{background:'#0D1B2A',borderRadius:4,height:5,overflow:'hidden',marginBottom:8}}><div style={{width:Math.min(100,capexPct)+'%',height:'100%',background:barColor(capexPct)}}/></div>
+                          <div style={{fontSize:9,color:'#7A8FA6',marginBottom:2}}>OpEx</div>
+                          <div style={{display:'flex',justifyContent:'space-between',fontSize:10,marginBottom:2}}><span style={{color:'#F4F6F8'}}>{fmtUSD(r.actOpex)}</span><span style={{color:'#7A8FA6'}}>of {fmtUSD(bud.opex_approved)}</span></div>
+                          <div style={{background:'#0D1B2A',borderRadius:4,height:5,overflow:'hidden'}}><div style={{width:Math.min(100,opexPct)+'%',height:'100%',background:barColor(opexPct)}}/></div>
+                          {(capexPct>90||opexPct>90)&&<div style={{fontSize:9,color:'#E74C3C',marginTop:6,fontWeight:700}}>⚠ Approaching or over ceiling — consider a reforecast</div>}
+                          {hist.length>1&&<div style={{fontSize:8,color:'#7A8FA6',marginTop:6}}>{hist.length} revisions</div>}
+                          </>
+                        )}
+                      </div>
+                    )
+                  })}
+                </div>
+              </div>
+            ))}
+            <div style={{background:'#12202F',border:'1px dashed #243447',borderRadius:10,padding:'12px 16px',maxWidth:520,marginTop:6}}>
+              <div style={{fontSize:11,fontWeight:700,color:'#F4F6F8',marginBottom:8}}>+ Enter a budget / reforecast</div>
+              <div style={{display:'flex',gap:6,marginBottom:6,flexWrap:'wrap' as const}}>
+                <input list="pg-depts" value={rfNewDept} onChange={e=>setRfNewDept(e.target.value)} placeholder="Department" style={{flex:1,minWidth:120,background:'#0D1B2A',border:'1px solid #243447',borderRadius:5,color:'#F4F6F8',fontSize:11,padding:'5px 8px'}}/>
+                <select value={rfNewQ} onChange={e=>setRfNewQ(e.target.value)} style={{background:'#0D1B2A',border:'1px solid #243447',borderRadius:5,color:'#F4F6F8',fontSize:11,padding:'5px 8px'}}>
+                  {[1,2,3,4].map(q=><option key={q} value={q}>Q{q}</option>)}
+                </select>
+                <select value={rfNewLabel} onChange={e=>setRfNewLabel(e.target.value)} style={{background:'#0D1B2A',border:'1px solid #243447',borderRadius:5,color:'#F4F6F8',fontSize:11,padding:'5px 8px'}}>
+                  {['Original','RF1','RF2','RF3'].map(l=><option key={l} value={l}>{l}</option>)}
+                </select>
+              </div>
+              <div style={{display:'flex',gap:6}}>
+                <input type="number" value={rfNewCapex} onChange={e=>setRfNewCapex(e.target.value)} placeholder="CapEx $ approved" style={{flex:1,background:'#0D1B2A',border:'1px solid #243447',borderRadius:5,color:'#F4F6F8',fontSize:11,padding:'5px 8px'}}/>
+                <input type="number" value={rfNewOpex} onChange={e=>setRfNewOpex(e.target.value)} placeholder="OpEx $ approved" style={{flex:1,background:'#0D1B2A',border:'1px solid #243447',borderRadius:5,color:'#F4F6F8',fontSize:11,padding:'5px 8px'}}/>
+                <button onClick={addRevision} style={{background:'#27AE60',border:'none',borderRadius:5,color:'#fff',fontSize:11,fontWeight:700,padding:'5px 14px',cursor:'pointer'}}>Save</button>
+              </div>
+            </div>
+          </div>
+        )
+      })()}
+
+      {view==='vendor'&&(()=>{
+        const vr=vendorRollup(projects,itemAssignments,items,people,roles)
+        const rows=[...vr.entries()].map(([vendor,v])=>({vendor,...v,total:v.capex+v.opex})).sort((a,b)=>b.total-a.total)
+        const grand=rows.reduce((s,r)=>s+r.total,0)
+        return(
+          <div style={{maxWidth:560}}>
+            <div style={{fontSize:11,color:'#7A8FA6',marginBottom:12,lineHeight:1.5}}>Real spend (actual hours × rate) on approved projects, by vendor — CapEx and OpEx split per the role/project-type rule.</div>
+            <table style={{width:'100%',borderCollapse:'collapse',fontSize:12}}>
+              <thead><tr>
+                <th style={{textAlign:'left',padding:'6px 10px',color:'#7A8FA6',borderBottom:'1px solid #243447'}}>Vendor</th>
+                <th style={{textAlign:'right',padding:'6px 10px',color:'#7A8FA6',borderBottom:'1px solid #243447'}}>CapEx</th>
+                <th style={{textAlign:'right',padding:'6px 10px',color:'#7A8FA6',borderBottom:'1px solid #243447'}}>OpEx</th>
+                <th style={{textAlign:'right',padding:'6px 10px',color:'#7A8FA6',borderBottom:'1px solid #243447'}}>Total</th>
+              </tr></thead>
+              <tbody>
+              {rows.map(r=>(
+                <tr key={r.vendor}>
+                  <td style={{padding:'6px 10px',color:'#F4F6F8',borderBottom:'1px solid #1A2838'}}>{r.vendor}</td>
+                  <td style={{textAlign:'right',padding:'6px 10px',color:'#7A8FA6',borderBottom:'1px solid #1A2838'}}>{fmtUSD(r.capex)}</td>
+                  <td style={{textAlign:'right',padding:'6px 10px',color:'#7A8FA6',borderBottom:'1px solid #1A2838'}}>{fmtUSD(r.opex)}</td>
+                  <td style={{textAlign:'right',padding:'6px 10px',color:'#F4F6F8',fontWeight:700,borderBottom:'1px solid #1A2838'}}>{fmtUSD(r.total)}</td>
+                </tr>
+              ))}
+              {rows.length===0&&<tr><td colSpan={4} style={{padding:10,color:'#7A8FA6',fontStyle:'italic'}}>No vendor-attributed actual spend yet.</td></tr>}
+              </tbody>
+              {rows.length>0&&<tfoot><tr>
+                <td style={{padding:'8px 10px',color:'#F4F6F8',fontWeight:800,borderTop:'2px solid #243447'}}>Total</td>
+                <td style={{textAlign:'right',padding:'8px 10px',color:'#5DADE2',fontWeight:800,borderTop:'2px solid #243447'}}>{fmtUSD(rows.reduce((s,r)=>s+r.capex,0))}</td>
+                <td style={{textAlign:'right',padding:'8px 10px',color:'#5DADE2',fontWeight:800,borderTop:'2px solid #243447'}}>{fmtUSD(rows.reduce((s,r)=>s+r.opex,0))}</td>
+                <td style={{textAlign:'right',padding:'8px 10px',color:'#F4F6F8',fontWeight:800,borderTop:'2px solid #243447'}}>{fmtUSD(grand)}</td>
+              </tr></tfoot>}
+            </table>
+          </div>
+        )
+      })()}
 
       {view==='capacity'&&(()=>{
         const{perPerson,byProject}=capacityByMonth(projects,projectRoles,people,roles)
@@ -5690,6 +5971,7 @@ export default function PerfectGame() {
   const [people,setPeople]=useState<any[]>([])
   const [projectRoles,setProjectRoles]=useState<any[]>([])
   const [itemAssignments,setItemAssignments]=useState<any[]>([])
+  const [qBudgets,setQBudgets]=useState<any[]>([])
   const [loading,setLoading]=useState(true)
   const [activeTab,setActiveTab]=useState('desk')
   const [space,setSpace]=useState('work')
@@ -5712,7 +5994,7 @@ export default function PerfectGame() {
 
 useEffect(()=>{
     async function load(){
-      const[{data:itemData},{data:projectData},{data:milestoneData},{data:taskData},{data:ccrData},{data:ccrItemData},{data:roleData},{data:peopleData},{data:projRoleData},{data:itemAsgData}]=await Promise.all([
+      const[{data:itemData},{data:projectData},{data:milestoneData},{data:taskData},{data:ccrData},{data:ccrItemData},{data:roleData},{data:peopleData},{data:projRoleData},{data:itemAsgData},{data:qbData}]=await Promise.all([
       supabase.from('items').select('*').order('sort_order',{ascending:true}),
       supabase.from('projects').select('*').order('sort_order',{ascending:true}),
       supabase.from('milestones').select('*').order('date',{ascending:true}),
@@ -5723,6 +6005,7 @@ useEffect(()=>{
       supabase.from('people').select('*').order('sort_order',{ascending:true}),
       supabase.from('project_roles').select('*'),
       supabase.from('item_assignments').select('*'),
+      supabase.from('quarterly_budgets').select('*').order('created_at',{ascending:true}),
     ])
     if(itemData) setItems(itemData)
     if(milestoneData) setMilestones(milestoneData)
@@ -5733,6 +6016,7 @@ useEffect(()=>{
     if(peopleData) setPeople(peopleData)
     if(projRoleData) setProjectRoles(projRoleData)
     if(itemAsgData) setItemAssignments(itemAsgData)
+    if(qbData) setQBudgets(qbData)
 
     // Auto-create any missing projects from parent_project values
     if(itemData&&projectData){
@@ -5832,7 +6116,7 @@ useEffect(()=>{
         <Assistant open={asstOpen} setOpen={setAsstOpen} seed={asstSeed} setSeed={setAsstSeed} items={items} setItems={setItems} projects={projects} setProjects={setProjects} milestones={milestones} tasks={tasks} setTasks={setTasks} ccrs={ccrs} setCcrs={setCcrs} ccrItems={ccrItems} setCcrItems={setCcrItems} space={space}/>
         {activeTab==='stakeholder'&&<Stakeholder items={sItems} projects={sProjects} milestones={sMilestones}/>}
         {activeTab==='done'&&<DoneTab items={sItems} setItems={setSItems} projects={sProjects} setProjects={setSProjects} ccrs={ccrs} ccrItems={ccrItems} space={space}/>}
-        {activeTab==='budget'&&<BudgetTab roles={roles} setRoles={setRoles} people={people} setPeople={setPeople} projects={sProjects} items={sItems} projectRoles={projectRoles} itemAssignments={itemAssignments}/>}
+        {activeTab==='budget'&&<BudgetTab roles={roles} setRoles={setRoles} people={people} setPeople={setPeople} projects={sProjects} items={sItems} projectRoles={projectRoles} itemAssignments={itemAssignments} qBudgets={qBudgets} setQBudgets={setQBudgets}/>}
       </div>
     </div>
   )
