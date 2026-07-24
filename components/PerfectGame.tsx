@@ -178,6 +178,22 @@ function monthSlices(startISO:string,endISO:string){
   }
   return slices
 }
+// Builds the list of month keys for a chosen window, anchored on the current month.
+function buildMonthKeys(window:string):string[]{
+  const now=new Date()
+  const keys=(startY:number,startM:number,count:number)=>{
+    const out:string[]=[]
+    for(let i=0;i<count;i++){const d=new Date(startY,startM+i,1);out.push(`${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,'0')}`)}
+    return out
+  }
+  if(window==='fy'){
+    // All 12 months of the CURRENT fiscal year (Apr–Mar), not just from today forward
+    const calYear=now.getMonth()>=3?now.getFullYear():now.getFullYear()-1 // FY starts in April
+    return keys(calYear,3,12)
+  }
+  const n=window==='1'?1:window==='3'?3:window==='9'?9:window==='year'?12:6 // default/'6'
+  return keys(now.getFullYear(),now.getMonth(),n)
+}
 function monthLabel(key:string){
   const[y,m]=key.split('-').map(Number)
   return new Date(y,m-1,1).toLocaleDateString('default',{month:'short',year:'2-digit'})
@@ -5006,6 +5022,8 @@ function BudgetTab({roles,setRoles,people,setPeople,projects,items,projectRoles,
   const [rfSel,setRfSel]=useState<any>(null) // {dept,q} — RF quarter card drill-down
   const [vendorFy,setVendorFy]=useState<any>(null)
   const [tcSel,setTcSel]=useState<any>(null) // {personId,key} — Team Cost cell drill-down
+  const [capWindow,setCapWindow]=useState('6')
+  const [tcWindow,setTcWindow]=useState('6')
   const [newRoleName,setNewRoleName]=useState('')
   const [newRoleRate,setNewRoleRate]=useState('')
   const [newPersonName,setNewPersonName]=useState('')
@@ -5590,9 +5608,7 @@ function BudgetTab({roles,setRoles,people,setPeople,projects,items,projectRoles,
 
       {view==='capacity'&&(()=>{
         const{perPerson,byProject}=capacityByMonth(projects,projectRoles,people,roles)
-        const monthKeys:string[]=[]
-        const start=new Date();start.setDate(1)
-        for(let i=0;i<6;i++){const d=new Date(start.getFullYear(),start.getMonth()+i,1);monthKeys.push(`${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,'0')}`)}
+        const monthKeys=buildMonthKeys(capWindow)
         const teamOrder=[...TEAMS,'']
         const peopleByTeam=teamOrder.map(t=>({team:t||'No team',people:people.filter((p:any)=>p.active&&(p.team||'')===t)})).filter(g=>g.people.length)
         const pctColor=(pct:number)=>pct>105?'#E74C3C':pct>=85?'#27AE60':pct>=50?'#E8B95A':'#5DADE2'
@@ -5601,8 +5617,38 @@ function BudgetTab({roles,setRoles,people,setPeople,projects,items,projectRoles,
         const selBreakdown=sel?(byProject.get(sel.personId)?.get(sel.key)||[]):[]
         return(
           <div>
+            <div style={{display:'flex',alignItems:'center',gap:8,marginBottom:12,flexWrap:'wrap' as const}}>
+              <span style={{fontSize:11,color:'#7A8FA6'}}>Window</span>
+              <select value={capWindow} onChange={e=>setCapWindow(e.target.value)} style={{background:'#12202F',border:'1px solid #243447',borderRadius:6,color:'#F4F6F8',fontSize:12,padding:'5px 8px'}}>
+                <option value="1">1 month</option><option value="3">3 months</option><option value="6">6 months</option><option value="9">9 months</option><option value="fy">Fiscal year</option><option value="year">Year from now</option>
+              </select>
+            </div>
+            {sel&&(
+              <div style={{background:'#12202F',border:'1px solid #C8973A',borderRadius:10,padding:'12px 16px',maxWidth:480,marginBottom:16}}>
+                <div style={{display:'flex',alignItems:'center',gap:8,marginBottom:8}}>
+                  <span style={{fontSize:12,fontWeight:700,color:'#F4F6F8'}}>{selPerson?.name} — {monthLabel(sel.key)}</span>
+                  <button onClick={()=>setCapSel(null)} style={{marginLeft:'auto',background:'none',border:'none',color:'#7A8FA6',fontSize:14,cursor:'pointer'}}>✕</button>
+                </div>
+                {selBreakdown.length===0&&<div style={{fontSize:11,color:'#7A8FA6',fontStyle:'italic'}}>No contributions found.</div>}
+                {[...selBreakdown].sort((a:any,b:any)=>b.pct-a.pct).map((b:any,ix:number)=>(
+                  <div key={ix} style={{display:'flex',alignItems:'center',gap:8,fontSize:11,padding:'4px 0',borderBottom:ix<selBreakdown.length-1?'1px solid #1A2838':'none'}}>
+                    <span style={{width:8,height:8,borderRadius:2,background:b.color||'#3A4A5E',flexShrink:0}}/>
+                    <span style={{color:'#F4F6F8',flex:1}}>{b.project}</span>
+                    <span style={{color:pctColor(Math.round(b.pct)),fontWeight:700}}>{Math.round(b.pct)}%</span>
+                    <span style={{color:'#7A8FA6',width:64,textAlign:'right' as const}}>{fmtUSD(b.cost)}</span>
+                  </div>
+                ))}
+                {selBreakdown.length>0&&(
+                  <div style={{display:'flex',fontSize:11,fontWeight:700,paddingTop:6,marginTop:2,borderTop:'1px solid #243447'}}>
+                    <span style={{color:'#F4F6F8',flex:1}}>Total</span>
+                    <span style={{color:pctColor(Math.round(selBreakdown.reduce((s:number,b:any)=>s+b.pct,0)))}}>{Math.round(selBreakdown.reduce((s:number,b:any)=>s+b.pct,0))}%</span>
+                    <span style={{color:'#7A8FA6',width:64,textAlign:'right' as const,marginLeft:8}}>{fmtUSD(selBreakdown.reduce((s:number,b:any)=>s+b.cost,0))}</span>
+                  </div>
+                )}
+              </div>
+            )}
           <div style={{overflowX:'auto'}}>
-            <div style={{fontSize:11,color:'#7A8FA6',marginBottom:12,lineHeight:1.5}}>Allocation % per person per month, summed across every project they're named on (only rows linked to a roster person count here — generic/unassigned rows aren't real capacity yet). Rolling 6-month window from today. Click any % to see which projects it's coming from.</div>
+            <div style={{fontSize:11,color:'#7A8FA6',marginBottom:12,lineHeight:1.5}}>Allocation % per person per month, summed across every project they're named on (only rows linked to a roster person count here — generic/unassigned rows aren't real capacity yet). Click any % to see which projects it's coming from.</div>
             <table style={{borderCollapse:'collapse',fontSize:11,minWidth:640}}>
               <thead><tr>
                 <th style={{textAlign:'left',padding:'6px 10px',color:'#7A8FA6',borderBottom:'1px solid #243447',position:'sticky' as const,left:0,background:'#0D1B2A'}}>Person</th>
@@ -5652,39 +5698,13 @@ function BudgetTab({roles,setRoles,people,setPeople,projects,items,projectRoles,
               </tbody>
             </table>
           </div>
-          {sel&&(
-            <div style={{marginTop:16,background:'#12202F',border:'1px solid #C8973A',borderRadius:10,padding:'12px 16px',maxWidth:480}}>
-              <div style={{display:'flex',alignItems:'center',gap:8,marginBottom:8}}>
-                <span style={{fontSize:12,fontWeight:700,color:'#F4F6F8'}}>{selPerson?.name} — {monthLabel(sel.key)}</span>
-                <button onClick={()=>setCapSel(null)} style={{marginLeft:'auto',background:'none',border:'none',color:'#7A8FA6',fontSize:14,cursor:'pointer'}}>✕</button>
-              </div>
-              {selBreakdown.length===0&&<div style={{fontSize:11,color:'#7A8FA6',fontStyle:'italic'}}>No contributions found.</div>}
-              {[...selBreakdown].sort((a:any,b:any)=>b.pct-a.pct).map((b:any,ix:number)=>(
-                <div key={ix} style={{display:'flex',alignItems:'center',gap:8,fontSize:11,padding:'4px 0',borderBottom:ix<selBreakdown.length-1?'1px solid #1A2838':'none'}}>
-                  <span style={{width:8,height:8,borderRadius:2,background:b.color||'#3A4A5E',flexShrink:0}}/>
-                  <span style={{color:'#F4F6F8',flex:1}}>{b.project}</span>
-                  <span style={{color:pctColor(Math.round(b.pct)),fontWeight:700}}>{Math.round(b.pct)}%</span>
-                  <span style={{color:'#7A8FA6',width:64,textAlign:'right' as const}}>{fmtUSD(b.cost)}</span>
-                </div>
-              ))}
-              {selBreakdown.length>0&&(
-                <div style={{display:'flex',fontSize:11,fontWeight:700,paddingTop:6,marginTop:2,borderTop:'1px solid #243447'}}>
-                  <span style={{color:'#F4F6F8',flex:1}}>Total</span>
-                  <span style={{color:pctColor(Math.round(selBreakdown.reduce((s:number,b:any)=>s+b.pct,0)))}}>{Math.round(selBreakdown.reduce((s:number,b:any)=>s+b.pct,0))}%</span>
-                  <span style={{color:'#7A8FA6',width:64,textAlign:'right' as const,marginLeft:8}}>{fmtUSD(selBreakdown.reduce((s:number,b:any)=>s+b.cost,0))}</span>
-                </div>
-              )}
-            </div>
-          )}
           </div>
         )
       })()}
 
       {view==='teamcost'&&(()=>{
         const{perPerson,byProject}=capacityByMonth(projects,projectRoles,people,roles)
-        const monthKeys:string[]=[]
-        const start=new Date();start.setDate(1)
-        for(let i=0;i<6;i++){const d=new Date(start.getFullYear(),start.getMonth()+i,1);monthKeys.push(`${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,'0')}`)}
+        const monthKeys=buildMonthKeys(tcWindow)
         const teamOrder=[...TEAMS,'']
         const peopleByTeam=teamOrder.map(t=>({team:t||'No team',people:people.filter((p:any)=>p.active&&(p.team||'')===t)})).filter(g=>g.people.length)
         const fillColor=(pct:number)=>pct>105?'#5DADE2':pct>=85?'#27AE60':pct>=50?'#E8B95A':'#E74C3C'
@@ -5695,9 +5715,44 @@ function BudgetTab({roles,setRoles,people,setPeople,projects,items,projectRoles,
         const selAllocated=selProjects.reduce((s:number,p:any)=>s+p.cost,0)
         return(
           <div>
+            <div style={{display:'flex',alignItems:'center',gap:8,marginBottom:12,flexWrap:'wrap' as const}}>
+              <span style={{fontSize:11,color:'#7A8FA6'}}>Window</span>
+              <select value={tcWindow} onChange={e=>setTcWindow(e.target.value)} style={{background:'#12202F',border:'1px solid #243447',borderRadius:6,color:'#F4F6F8',fontSize:12,padding:'5px 8px'}}>
+                <option value="1">1 month</option><option value="3">3 months</option><option value="6">6 months</option><option value="9">9 months</option><option value="fy">Fiscal year</option><option value="year">Year from now</option>
+              </select>
+            </div>
+            {sel&&(
+              <div style={{background:'#12202F',border:'1px solid #C8973A',borderRadius:10,padding:'12px 16px',maxWidth:480,marginBottom:16}}>
+                <div style={{display:'flex',alignItems:'center',gap:8,marginBottom:8}}>
+                  <span style={{fontSize:12,fontWeight:700,color:'#F4F6F8'}}>{selPerson?.name} — {monthLabel(sel.key)}</span>
+                  <button onClick={()=>setTcSel(null)} style={{marginLeft:'auto',background:'none',border:'none',color:'#7A8FA6',fontSize:14,cursor:'pointer'}}>✕</button>
+                </div>
+                <div style={{display:'flex',justifyContent:'space-between',fontSize:11,marginBottom:8,paddingBottom:8,borderBottom:'1px solid #243447'}}>
+                  <span style={{color:'#7A8FA6'}}>Full cost this month</span><span style={{color:'#F4F6F8',fontWeight:700}}>{fmtUSD(selFull)}</span>
+                </div>
+                {selProjects.length===0&&<div style={{fontSize:11,color:'#E74C3C',fontStyle:'italic'}}>Not allocated to any project this month — full cost is unfilled bench time.</div>}
+                {selProjects.map((p:any,ix:number)=>(
+                  <div key={ix} style={{display:'flex',alignItems:'center',gap:8,fontSize:11,padding:'4px 0',borderBottom:ix<selProjects.length-1?'1px solid #1A2838':'none'}}>
+                    <span style={{width:8,height:8,borderRadius:2,background:p.color||'#3A4A5E',flexShrink:0}}/>
+                    <span style={{color:'#F4F6F8',flex:1}}>{p.project}</span>
+                    <span style={{color:'#7A8FA6'}}>{fmtUSD(p.cost)}</span>
+                  </div>
+                ))}
+                {selProjects.length>0&&(
+                  <div style={{display:'flex',fontSize:11,fontWeight:700,paddingTop:6,marginTop:2,borderTop:'1px solid #243447'}}>
+                    <span style={{color:'#F4F6F8',flex:1}}>Allocated total</span>
+                    <span style={{color:'#F4F6F8'}}>{fmtUSD(selAllocated)}</span>
+                  </div>
+                )}
+                <div style={{display:'flex',fontSize:11,fontWeight:700,marginTop:4}}>
+                  <span style={{color:selFull-selAllocated>0?'#E74C3C':'#27AE60',flex:1}}>{selFull-selAllocated>0?'Unfilled (bench)':'Fully booked'}</span>
+                  <span style={{color:selFull-selAllocated>0?'#E74C3C':'#27AE60'}}>{fmtUSD(Math.max(0,selFull-selAllocated))}</span>
+                </div>
+              </div>
+            )}
           <div style={{overflowX:'auto'}}>
             <div style={{fontSize:11,color:'#7A8FA6',marginBottom:12,lineHeight:1.5}}>
-              What we'd pay each person at full utilization vs. what's actually allocated to projects — the gap is bench cost: paying for capacity that isn't booked to anything. Rolling 6-month window. Click a cell for the project breakdown.
+              What we'd pay each person at full utilization vs. what's actually allocated to projects — the gap is bench cost: paying for capacity that isn't booked to anything. Click a cell for the project breakdown.
             </div>
             <table style={{borderCollapse:'collapse',fontSize:11,minWidth:640}}>
               <thead><tr>
@@ -5749,35 +5804,6 @@ function BudgetTab({roles,setRoles,people,setPeople,projects,items,projectRoles,
               </tbody>
             </table>
           </div>
-          {sel&&(
-            <div style={{marginTop:16,background:'#12202F',border:'1px solid #C8973A',borderRadius:10,padding:'12px 16px',maxWidth:480}}>
-              <div style={{display:'flex',alignItems:'center',gap:8,marginBottom:8}}>
-                <span style={{fontSize:12,fontWeight:700,color:'#F4F6F8'}}>{selPerson?.name} — {monthLabel(sel.key)}</span>
-                <button onClick={()=>setTcSel(null)} style={{marginLeft:'auto',background:'none',border:'none',color:'#7A8FA6',fontSize:14,cursor:'pointer'}}>✕</button>
-              </div>
-              <div style={{display:'flex',justifyContent:'space-between',fontSize:11,marginBottom:8,paddingBottom:8,borderBottom:'1px solid #243447'}}>
-                <span style={{color:'#7A8FA6'}}>Full cost this month</span><span style={{color:'#F4F6F8',fontWeight:700}}>{fmtUSD(selFull)}</span>
-              </div>
-              {selProjects.length===0&&<div style={{fontSize:11,color:'#E74C3C',fontStyle:'italic'}}>Not allocated to any project this month — full cost is unfilled bench time.</div>}
-              {selProjects.map((p:any,ix:number)=>(
-                <div key={ix} style={{display:'flex',alignItems:'center',gap:8,fontSize:11,padding:'4px 0',borderBottom:ix<selProjects.length-1?'1px solid #1A2838':'none'}}>
-                  <span style={{width:8,height:8,borderRadius:2,background:p.color||'#3A4A5E',flexShrink:0}}/>
-                  <span style={{color:'#F4F6F8',flex:1}}>{p.project}</span>
-                  <span style={{color:'#7A8FA6'}}>{fmtUSD(p.cost)}</span>
-                </div>
-              ))}
-              {selProjects.length>0&&(
-                <div style={{display:'flex',fontSize:11,fontWeight:700,paddingTop:6,marginTop:2,borderTop:'1px solid #243447'}}>
-                  <span style={{color:'#F4F6F8',flex:1}}>Allocated total</span>
-                  <span style={{color:'#F4F6F8'}}>{fmtUSD(selAllocated)}</span>
-                </div>
-              )}
-              <div style={{display:'flex',fontSize:11,fontWeight:700,marginTop:4}}>
-                <span style={{color:selFull-selAllocated>0?'#E74C3C':'#27AE60',flex:1}}>{selFull-selAllocated>0?'Unfilled (bench)':'Fully booked'}</span>
-                <span style={{color:selFull-selAllocated>0?'#E74C3C':'#27AE60'}}>{fmtUSD(Math.max(0,selFull-selAllocated))}</span>
-              </div>
-            </div>
-          )}
           </div>
         )
       })()}
