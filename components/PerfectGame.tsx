@@ -5079,29 +5079,58 @@ function BudgetTab({roles,setRoles,people,setPeople,projects,items,projectRoles,
   async function exportExcel(){
     setExporting(true)
     try{
-      const XLSX=await import('xlsx')
-      const wb=XLSX.utils.book_new()
-      // Portfolio Summary
-      const sumRows=[['Project','Forecast','Actual to Date','Delta','% Timeline Elapsed','% Budget Spent']]
-      rollup.forEach(r=>sumRows.push([r.project.name,Math.round(r.fc.total),Math.round(r.ac.total),Math.round(r.ac.total-r.fc.total),r.elapsedPct==null?'—':r.elapsedPct+'%',r.spentPct==null?'—':r.spentPct+'%'] as any))
-      sumRows.push(['TOTAL',Math.round(portfolioForecast),Math.round(portfolioActual),Math.round(portfolioActual-portfolioForecast),'',''] as any)
-      const ws1=XLSX.utils.aoa_to_sheet(sumRows)
-      ws1['!cols']=[{wch:32},{wch:14},{wch:16},{wch:12},{wch:18},{wch:16}]
-      XLSX.utils.book_append_sheet(wb,ws1,'Portfolio Summary')
-      // Per-Project Detail — role-level only, no names
-      const detRows:any[]=[['Project','Layer','Role','Hours/Alloc','Rate','Cost']]
-      rollup.forEach(r=>{
-        detRows.push([r.project.name,'FORECAST','','','',''])
-        r.fc.byRole.forEach((b:any)=>detRows.push(['',' ',b.role,`${b.headcount}x @ ${b.allocation_pct}%`,fmtUSD(b.rate)+'/hr',Math.round(b.cost)]))
-        detRows.push([r.project.name,'ACTUAL','','','',''])
-        r.ac.byRole.forEach((b:any)=>detRows.push(['',' ',b.role,'','',Math.round(b.cost)]))
-        detRows.push(['','','','','',''])
-      })
-      const ws2=XLSX.utils.aoa_to_sheet(detRows)
-      ws2['!cols']=[{wch:28},{wch:10},{wch:18},{wch:16},{wch:12},{wch:12}]
-      XLSX.utils.book_append_sheet(wb,ws2,'Per-Project Detail')
+      const ExcelJS=(await import('exceljs')).default||(await import('exceljs'))
+      const wb=new ExcelJS.Workbook()
+      wb.creator='Perfect Game'
+      wb.created=new Date()
+      const NAVY='FF1F3B57',WHITE='FFFFFFFF',LIGHT='FFEAF0F6',RED='FFE74C3C',GREEN='FF27AE60'
+      const USD='"$"#,##0'
+      const PCT='0"%"'
+      // Styles every sheet in the workbook the same way — this is the whole "professional,
+      // not a bad extract" ask: real bold headers, real currency formats, frozen header row.
+      function styleSheet(ws:any,opts:{headerRow?:number,moneyCols?:number[],pctCols?:number[],boldCols?:number[],totalRow?:number}={}){
+        const hRow=opts.headerRow||1
+        ws.getRow(hRow).eachCell((cell:any)=>{
+          cell.font={bold:true,color:{argb:WHITE}}
+          cell.fill={type:'pattern',pattern:'solid',fgColor:{argb:NAVY}}
+          cell.alignment={vertical:'middle'}
+          cell.border={bottom:{style:'thin',color:{argb:'FF3A4A5E'}}}
+        })
+        ws.views=[{state:'frozen',ySplit:hRow}]
+        ws.autoFilter={from:{row:hRow,column:1},to:{row:hRow,column:ws.columnCount}}
+        for(const c of(opts.moneyCols||[]))ws.getColumn(c).numFmt=USD
+        for(const c of(opts.pctCols||[]))ws.getColumn(c).numFmt=PCT
+        if(opts.totalRow){
+          const r=ws.getRow(opts.totalRow)
+          r.eachCell((cell:any)=>{cell.font={bold:true};cell.border={top:{style:'medium',color:{argb:'FF3A4A5E'}}}})
+        }
+      }
+      const boldRow=(ws:any,rowNum:number,color?:string)=>{
+        ws.getRow(rowNum).eachCell((cell:any)=>{cell.font={bold:true,color:color?{argb:color}:undefined}})
+      }
 
-      // Budget by Period — FY / Quarter / Month, forecast (project_roles rows) vs actual (item_assignments)
+      // ── 1. Portfolio Summary (Dashboard tab) ──
+      const ws1=wb.addWorksheet('Portfolio Summary')
+      ws1.columns=[{header:'Project',key:'p',width:32},{header:'Forecast',key:'f',width:14},{header:'Actual to Date',key:'a',width:16},{header:'Delta',key:'d',width:12},{header:'% Timeline Elapsed',key:'e',width:18},{header:'% Budget Spent',key:'s',width:15}]
+      rollup.forEach((r:any)=>ws1.addRow({p:r.project.name,f:Math.round(r.fc.total),a:Math.round(r.ac.total),d:Math.round(r.ac.total-r.fc.total),e:r.elapsedPct==null?null:r.elapsedPct,s:r.spentPct==null?null:r.spentPct}))
+      const t1=ws1.addRow({p:'TOTAL',f:Math.round(portfolioForecast),a:Math.round(portfolioActual),d:Math.round(portfolioActual-portfolioForecast)})
+      styleSheet(ws1,{moneyCols:[2,3,4],pctCols:[5,6],totalRow:t1.number})
+
+      // ── 2. Per-Project Detail (Dashboard drill-down) ──
+      const ws2=wb.addWorksheet('Per-Project Detail')
+      ws2.columns=[{header:'Project',key:'p',width:28},{header:'Layer',key:'l',width:10},{header:'Role',key:'r',width:18},{header:'Hours / Alloc',key:'h',width:16},{header:'Rate',key:'ra',width:10},{header:'Cost',key:'c',width:12}]
+      rollup.forEach((r:any)=>{
+        boldRow(ws2,ws2.addRow({p:r.project.name,l:'FORECAST'}).number,'FF5DADE2')
+        r.fc.byRole.forEach((b:any)=>ws2.addRow({r:b.role,h:`${b.headcount}x @ ${b.allocation_pct}%`,ra:b.rate,c:Math.round(b.cost)}))
+        boldRow(ws2,ws2.addRow({p:r.project.name,l:'ACTUAL'}).number,'FF27AE60')
+        r.ac.byRole.forEach((b:any)=>ws2.addRow({r:b.role,c:Math.round(b.cost)}))
+        ws2.addRow({})
+      })
+      ws2.getColumn(5).numFmt=USD;ws2.getColumn(6).numFmt=USD
+      ws2.getRow(1).eachCell((cell:any)=>{cell.font={bold:true,color:{argb:WHITE}};cell.fill={type:'pattern',pattern:'solid',fgColor:{argb:NAVY}}})
+      ws2.views=[{state:'frozen',ySplit:1}]
+
+      // ── 3. Budget by Period (FY/Quarter/Month) ──
       const monthMap=new Map<string,{forecast:number,actual:number}>()
       const bump=(key:string,field:'forecast'|'actual',amt:number)=>{
         const cur=monthMap.get(key)||{forecast:0,actual:0}
@@ -5124,53 +5153,125 @@ function BudgetTab({roles,setRoles,people,setPeople,projects,items,projectRoles,
           for(const m of monthlyHoursCost(row.hours,row.rate,it.start_date,it.end_date))bump(m.key,'actual',m.cost)
         }
       }
-      const periodKeys=[...monthMap.keys()].sort()
-      const perRows:any[]=[['Month','Fiscal Year','Quarter','Forecast','Actual','Delta']]
-      periodKeys.forEach(k=>{
-        const v=monthMap.get(k)!
-        const fy=fyOf(`${k}-15`)
-        perRows.push([monthLabel(k),`FY${fy.fy}`,`Q${fy.quarter}`,Math.round(v.forecast),Math.round(v.actual),Math.round(v.actual-v.forecast)] as any)
+      const ws3=wb.addWorksheet('Budget by Period')
+      ws3.columns=[{header:'Month',key:'m',width:12},{header:'Fiscal Year',key:'fy',width:10},{header:'Quarter',key:'q',width:9},{header:'Forecast',key:'f',width:14},{header:'Actual',key:'a',width:14},{header:'Delta',key:'d',width:12}]
+      ;[...monthMap.keys()].sort().forEach(k=>{
+        const v=monthMap.get(k)!;const fy=fyOf(`${k}-15`)
+        ws3.addRow({m:monthLabel(k),fy:`FY${fy.fy}`,q:`Q${fy.quarter}`,f:Math.round(v.forecast),a:Math.round(v.actual),d:Math.round(v.actual-v.forecast)})
       })
-      const ws3=XLSX.utils.aoa_to_sheet(perRows)
-      ws3['!cols']=[{wch:12},{wch:10},{wch:8},{wch:14},{wch:14},{wch:12}]
-      XLSX.utils.book_append_sheet(wb,ws3,'Budget by Period')
+      styleSheet(ws3,{moneyCols:[4,5,6]})
 
-      // RF Budget — approved ceiling vs actual burn, by department/quarter, current FY
+      // ── 4. Capacity (Capacity tab) — uses the window currently selected in-app ──
+      const capKeys=buildMonthKeys(capWindow)
+      const{perPerson:capPerPerson}=capacityByMonth(projects,projectRoles,people,roles)
+      const ws4=wb.addWorksheet('Capacity')
+      ws4.columns=[{header:'Person',key:'n',width:20},{header:'Role',key:'r',width:16},{header:'Team',key:'t',width:20},...capKeys.map((k:string)=>({header:monthLabel(k),key:k,width:12}))]
+      const capTeamOrder=[...TEAMS,'']
+      for(const t of capTeamOrder){
+        const grp=people.filter((p:any)=>p.active&&(p.team||'')===t)
+        if(!grp.length)continue
+        boldRow(ws4,ws4.addRow({n:(t||'No Team').toUpperCase()}).number,'FF5DADE2')
+        for(const p of grp){
+          const pm=capPerPerson.get(p.id)
+          const row:any={n:p.name,r:roles.find((x:any)=>x.id===p.role_id)?.name||'—',t:p.team||''}
+          capKeys.forEach((k:string)=>{row[k]=pm?.get(k)?Math.round(pm.get(k)!.pct):null})
+          ws4.addRow(row)
+        }
+      }
+      ws4.getRow(1).eachCell((cell:any)=>{cell.font={bold:true,color:{argb:WHITE}};cell.fill={type:'pattern',pattern:'solid',fgColor:{argb:NAVY}}})
+      ws4.views=[{state:'frozen',xSplit:3,ySplit:1}]
+      capKeys.forEach((_:string,ix:number)=>ws4.getColumn(4+ix).numFmt=PCT)
+
+      // ── 5. Team Cost (Team Cost tab) — uses the window currently selected in-app ──
+      const tcKeys=buildMonthKeys(tcWindow)
+      const ws5=wb.addWorksheet('Team Cost')
+      const tcCols:any[]=[{header:'Person',key:'n',width:20},{header:'Role',key:'r',width:16},{header:'Team',key:'t',width:20}]
+      tcKeys.forEach((k:string)=>{tcCols.push({header:`${monthLabel(k)} Allocated`,key:k+'_a',width:16});tcCols.push({header:`${monthLabel(k)} Full Cost`,key:k+'_f',width:15})})
+      ws5.columns=tcCols
+      for(const t of capTeamOrder){
+        const grp=people.filter((p:any)=>p.active&&(p.team||'')===t)
+        if(!grp.length)continue
+        boldRow(ws5,ws5.addRow({n:(t||'No Team').toUpperCase()}).number,'FF5DADE2')
+        for(const p of grp){
+          const rate=rateOf(p,roles)
+          const pm=capPerPerson.get(p.id)
+          const row:any={n:p.name,r:roles.find((x:any)=>x.id===p.role_id)?.name||'—',t:p.team||''}
+          tcKeys.forEach((k:string)=>{row[k+'_a']=Math.round(pm?.get(k)?.cost||0);row[k+'_f']=Math.round(fullCostForMonth(k,rate))})
+          ws5.addRow(row)
+        }
+      }
+      ws5.getRow(1).eachCell((cell:any)=>{cell.font={bold:true,color:{argb:WHITE}};cell.fill={type:'pattern',pattern:'solid',fgColor:{argb:NAVY}}})
+      ws5.views=[{state:'frozen',xSplit:3,ySplit:1}]
+      for(let c=4;c<=tcCols.length;c++)ws5.getColumn(c).numFmt=USD
+
+      // ── 6. RF Budget + FY Summary (RF Budget tab) — current FY, all departments ──
       const curFy=fyOf(localISO(new Date())).fy
-      const qRollup=quarterlyRollup(projects,projectRoles,itemAssignments,items,people,roles).totals
+      const{totals:qRollup}=quarterlyRollup(projects,projectRoles,itemAssignments,items,people,roles)
       const depts=[...new Set(people.map((p:any)=>p.department).filter(Boolean))]
-      const rfRows:any[]=[['Department','Quarter','Label','CapEx Approved','CapEx Actual','OpEx Approved','OpEx Actual']]
+      const ws6=wb.addWorksheet(`RF Budget FY${curFy}`)
+      ws6.columns=[{header:'Department',key:'d',width:20},{header:'Quarter',key:'q',width:9},{header:'Label',key:'l',width:9},{header:'CapEx Approved',key:'ca',width:15},{header:'CapEx Actual',key:'ct',width:14},{header:'OpEx Approved',key:'oa',width:15},{header:'OpEx Actual',key:'ot',width:14}]
+      let fyAllocC=0,fyAllocO=0,fyActC=0,fyActO=0,fyCeilC=0,fyCeilO=0
       for(const dept of depts){
         for(let q=1;q<=4;q++){
           const revs=qBudgets.filter((b:any)=>b.department===dept&&b.fiscal_year===curFy&&b.quarter===q).sort((a:any,b:any)=>a.created_at<b.created_at?1:-1)
           const bud=revs[0]
-          if(!bud)continue
-          const r=qRollup.get(`${curFy}-${q}-${dept}`)||{actCapex:0,actOpex:0}
-          rfRows.push([dept,`Q${q}`,bud.label,Math.round(bud.capex_approved),Math.round(r.actCapex),Math.round(bud.opex_approved),Math.round(r.actOpex)] as any)
+          const r=qRollup.get(`${curFy}-${q}-${dept}`)||{allocCapex:0,allocOpex:0,actCapex:0,actOpex:0}
+          fyAllocC+=r.allocCapex;fyAllocO+=r.allocOpex;fyActC+=r.actCapex;fyActO+=r.actOpex
+          if(bud){fyCeilC+=bud.capex_approved;fyCeilO+=bud.opex_approved}
+          if(!bud&&r.allocCapex===0&&r.allocOpex===0&&r.actCapex===0&&r.actOpex===0)continue
+          ws6.addRow({d:dept,q:`Q${q}`,l:bud?.label||'—',ca:bud?Math.round(bud.capex_approved):null,ct:Math.round(r.actCapex),oa:bud?Math.round(bud.opex_approved):null,ot:Math.round(r.actOpex)})
         }
       }
-      const ws4=XLSX.utils.aoa_to_sheet(rfRows)
-      ws4['!cols']=[{wch:20},{wch:8},{wch:9},{wch:14},{wch:12},{wch:14},{wch:12}]
-      XLSX.utils.book_append_sheet(wb,ws4,`RF Budget FY${curFy}`)
+      const t6=ws6.addRow({d:'FY TOTAL',ca:Math.round(fyCeilC)||null,ct:Math.round(fyActC),oa:Math.round(fyCeilO)||null,ot:Math.round(fyActO)})
+      styleSheet(ws6,{moneyCols:[4,5,6,7],totalRow:t6.number})
 
-      // By Vendor — CapEx/OpEx actual spend, by quarter, current FY, with annual total
+      // ── 7. By Vendor + FY Total (Vendor tab) — current FY ──
       const vr=vendorRollup(projects,itemAssignments,items,people,roles)
       const vCell=(vendor:string,q:number)=>vr.get(vendor)?.get(`${curFy}-${q}`)||{capex:0,opex:0}
-      const vYear=(vendor:string)=>{let capex=0,opex=0;for(let q=1;q<=4;q++){const c=vCell(vendor,q);capex+=c.capex;opex+=c.opex};return{capex,opex}}
-      const vRows:any[]=[['Vendor','Q1 CapEx','Q1 OpEx','Q2 CapEx','Q2 OpEx','Q3 CapEx','Q3 OpEx','Q4 CapEx','Q4 OpEx','FY Total CapEx','FY Total OpEx','FY Total']]
-      const vSorted=[...vr.keys()].map(vendor=>({vendor,...vYear(vendor)})).sort((a,b)=>(b.capex+b.opex)-(a.capex+a.opex))
+      const ws7=wb.addWorksheet(`By Vendor FY${curFy}`)
+      ws7.columns=[{header:'Vendor',key:'v',width:18},
+        {header:'Q1 CapEx',key:'q1c',width:11},{header:'Q1 OpEx',key:'q1o',width:11},
+        {header:'Q2 CapEx',key:'q2c',width:11},{header:'Q2 OpEx',key:'q2o',width:11},
+        {header:'Q3 CapEx',key:'q3c',width:11},{header:'Q3 OpEx',key:'q3o',width:11},
+        {header:'Q4 CapEx',key:'q4c',width:11},{header:'Q4 OpEx',key:'q4o',width:11},
+        {header:'FY CapEx',key:'fc',width:13},{header:'FY OpEx',key:'fo',width:13},{header:'FY Total',key:'ft',width:13}]
+      const vSorted=[...vr.keys()].map(vendor=>{
+        let capex=0,opex=0
+        for(let q=1;q<=4;q++){const c=vCell(vendor,q);capex+=c.capex;opex+=c.opex}
+        return{vendor,capex,opex}
+      }).sort((a,b)=>(b.capex+b.opex)-(a.capex+a.opex))
       vSorted.forEach(v=>{
-        const row:any[]=[v.vendor]
-        for(let q=1;q<=4;q++){const c=vCell(v.vendor,q);row.push(Math.round(c.capex),Math.round(c.opex))}
-        row.push(Math.round(v.capex),Math.round(v.opex),Math.round(v.capex+v.opex))
-        vRows.push(row)
+        const row:any={v:v.vendor}
+        ;[1,2,3,4].forEach(q=>{const c=vCell(v.vendor,q);row[`q${q}c`]=Math.round(c.capex);row[`q${q}o`]=Math.round(c.opex)})
+        row.fc=Math.round(v.capex);row.fo=Math.round(v.opex);row.ft=Math.round(v.capex+v.opex)
+        ws7.addRow(row)
       })
-      vRows.push(['TOTAL',...Array(8).fill(0).map((_,ix)=>{const q=Math.floor(ix/2)+1;const field=ix%2===0?'capex':'opex';return Math.round(vSorted.reduce((s,v)=>s+(vCell(v.vendor,q) as any)[field],0))}),Math.round(vSorted.reduce((s,v)=>s+v.capex,0)),Math.round(vSorted.reduce((s,v)=>s+v.opex,0)),Math.round(vSorted.reduce((s,v)=>s+v.capex+v.opex,0))] as any)
-      const ws5=XLSX.utils.aoa_to_sheet(vRows)
-      ws5['!cols']=[{wch:16},{wch:10},{wch:10},{wch:10},{wch:10},{wch:10},{wch:10},{wch:10},{wch:10},{wch:13},{wch:13},{wch:12}]
-      XLSX.utils.book_append_sheet(wb,ws5,`By Vendor FY${curFy}`)
+      const t7row:any={v:'TOTAL'}
+      ;[1,2,3,4].forEach(q=>{t7row[`q${q}c`]=Math.round(vSorted.reduce((s,v)=>s+vCell(v.vendor,q).capex,0));t7row[`q${q}o`]=Math.round(vSorted.reduce((s,v)=>s+vCell(v.vendor,q).opex,0))})
+      t7row.fc=Math.round(vSorted.reduce((s,v)=>s+v.capex,0));t7row.fo=Math.round(vSorted.reduce((s,v)=>s+v.opex,0));t7row.ft=t7row.fc+t7row.fo
+      const t7=ws7.addRow(t7row)
+      styleSheet(ws7,{moneyCols:[2,3,4,5,6,7,8,9,10,11,12],totalRow:t7.number})
 
-      XLSX.writeFile(wb,`Budget Report — ${localISO(new Date())}.xlsx`)
+      // ── 8. Rate Card (Rate Card tab) ──
+      const ws8=wb.addWorksheet('Rate Card')
+      ws8.columns=[{header:'Role',key:'n',width:22},{header:'Type',key:'t',width:14},{header:'Hourly Rate',key:'r',width:14},{header:'CapEx Eligible',key:'e',width:14},{header:'CapEx / OpEx Split',key:'s',width:16}]
+      roles.forEach((r:any)=>ws8.addRow({n:r.name,t:r.type||'contractor',r:r.hourly_rate,e:(r.capex_eligible??true)?'Yes':'No',s:(r.capex_eligible??true)?`${r.capex_pct??80}% / ${100-(r.capex_pct??80)}%`:'0% / 100%'}))
+      ws8.getColumn(3).numFmt=USD
+      styleSheet(ws8,{moneyCols:[3]})
+
+      // ── 9. Roster (Roster tab) — role-level rate shown, no editorializing ──
+      const ws9=wb.addWorksheet('Roster')
+      ws9.columns=[{header:'Name',key:'n',width:20},{header:'Role',key:'r',width:18},{header:'Team',key:'t',width:20},{header:'Department',key:'d',width:18},{header:'Vendor',key:'v',width:16},{header:'Rate',key:'ra',width:12},{header:'Active',key:'a',width:9}]
+      people.forEach((p:any)=>ws9.addRow({n:p.name,r:roles.find((x:any)=>x.id===p.role_id)?.name||'—',t:p.team||'',d:p.department||'',v:p.vendor||'',ra:rateOf(p,roles),a:p.active?'Yes':'No'}))
+      styleSheet(ws9,{moneyCols:[6]})
+
+      const buf=await wb.xlsx.writeBuffer()
+      const blob=new Blob([buf],{type:'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet'})
+      const url=URL.createObjectURL(blob)
+      const a=document.createElement('a')
+      a.href=url;a.download=`Budget Report — ${localISO(new Date())}.xlsx`
+      document.body.appendChild(a);a.click();document.body.removeChild(a)
+      URL.revokeObjectURL(url)
     }catch(e:any){alert('Export failed: '+(e?.message||e))}
     setExporting(false)
   }
