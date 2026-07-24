@@ -21,6 +21,7 @@ const projectStatusesFor=(space:string)=>space==='home'?HOME_PROJECT_STATUSES:PR
 const PROJECT_STATUSES=['Queued','Planning','In Progress','Testing','On Hold','Complete','Cancelled']
 const TEAMS=['Consumer Experience','Operational Efficiency']
 const EFFORTS=['S','M','L','XL']
+const EFFORT_ALLOC:any={S:25,M:50,L:75,XL:100} // default per-person allocation % this project's size implies
 const REQUEST_TYPES=['Bug','Tech Debt','Enhancement','Strategic Initiative','Business Request','Testing']
 const MILESTONE_TYPES_G=['Milestone','Go-Live','Deadline','Review','Release','Code Freeze','UAT','Kickoff']
 const SWIMLANES=['POS','Pricing','Tax','Loyalty','WFM','Inventory','Reporting','SafeSize','Product','Clienteling','Integrations']
@@ -354,6 +355,67 @@ function vendorRollup(projects:any[],itemAssignments:any[],items:any[],people:an
   }
   return out
 }
+// Team → Department → Project waterfall. The team's cost is fixed (everyone active
+// gets paid regardless of assignment); projects only ever CLAIM a slice of it. Dollars
+// with no claiming project are Unallocated — flagged OpEx (nothing's being built), not
+// merged into a project's own OpEx. Approved vs Planned (+ Requested/Draft) both compare
+// against the same fixed ceiling so over-demand is visible before anything is committed.
+function teamBudgetRollup(projects:any[],projectRoles:any[],people:any[],roles:any[],monthKeys:string[]){
+  const totalCostOverWindow=(person:any)=>{
+    const rate=rateOf(person,roles)
+    return monthKeys.reduce((sum,k)=>sum+fullCostForMonth(k,rate),0)
+  }
+  const claimedCostOverWindow=(row:any,person:any)=>{
+    // A project_roles row's $ contribution restricted to the chosen window's months
+    const proj=projects.find((p:any)=>p.id===row.project_id)
+    if(!proj||!proj.start_date)return 0
+    const end=proj.end_date||localISO(new Date(Date.now()+365*86400000))
+    const rate=rateOf(person,roles)
+    return monthlyRowCost(row.allocation_pct,rate,proj.start_date,end)
+      .filter((m:any)=>monthKeys.includes(m.key))
+      .reduce((s:number,m:any)=>s+m.cost,0)
+  }
+  const teamOut:any={}
+  for(const team of TEAMS){
+    const teamPeople=people.filter((p:any)=>p.active&&p.team===team)
+    const depts=[...new Set(teamPeople.map((p:any)=>p.department).filter(Boolean))]
+    const deptOut:any={}
+    for(const dept of depts){
+      const deptPeople=teamPeople.filter((p:any)=>p.department===dept)
+      const deptTotal=deptPeople.reduce((s:number,p:any)=>s+totalCostOverWindow(p),0)
+      const byStatusProj=new Map<string,any>() // project.id -> {name,color,status,capex,opex}
+      for(const person of deptPeople){
+        const rows=projectRoles.filter((r:any)=>r.person_id===person.id)
+        for(const row of rows){
+          const proj=projects.find((p:any)=>p.id===row.project_id)
+          if(!proj)continue
+          const cost=claimedCostOverWindow(row,person)
+          if(cost<=0)continue
+          const role=roles.find((r:any)=>r.id===person.role_id)
+          const{capex,opex}=splitCapexOpex(cost,role,proj.budget_type)
+          const cur=byStatusProj.get(proj.id)||{name:proj.name,color:proj.color,status:proj.budget_status||'draft',capex:0,opex:0}
+          cur.capex+=capex;cur.opex+=opex
+          byStatusProj.set(proj.id,cur)
+        }
+      }
+      const allProjects=[...byStatusProj.values()]
+      const approvedProjects=allProjects.filter((p:any)=>p.status==='approved')
+      const plannedExtra=allProjects.filter((p:any)=>p.status==='requested'||p.status==='draft')
+      const sum=(rows:any[])=>rows.reduce((s,r)=>({capex:s.capex+r.capex,opex:s.opex+r.opex}),{capex:0,opex:0})
+      const approvedSum=sum(approvedProjects)
+      const plannedSum=sum(allProjects) // approved + requested + draft
+      deptOut[dept]={
+        deptTotal,
+        approvedProjects,approvedSum,
+        plannedExtra,plannedSum,
+        unallocApproved:Math.max(0,deptTotal-approvedSum.capex-approvedSum.opex),
+        unallocPlanned:deptTotal-plannedSum.capex-plannedSum.opex, // can go negative — over-demand
+      }
+    }
+    teamOut[team]={total:Object.values(deptOut).reduce((s:number,d:any)=>s+d.deptTotal,0),depts:deptOut}
+  }
+  return teamOut
+}
 function projectActual(project:any,items:any[],itemAssignments:any[],people:any[],roles:any[]){
   const projItems=items.filter(i=>i.parent_project===project.name&&i.start_date&&i.end_date)
   const rows:any[]=[]
@@ -502,21 +564,25 @@ function ProjectDetail({project,items,setItems,projects,setProjects,milestones,s
   }
   const [pdCcrExp,setPdCcrExp]=useState<any>({})
   const [pdAsgOpen,setPdAsgOpen]=useState<any>({}) // item.id -> assignment editor open
-  const [prTeam,setPrTeam]=useState('');const [prPerson,setPrPerson]=useState('');const [prRole,setPrRole]=useState('');const [prHead,setPrHead]=useState('1');const [prAlloc,setPrAlloc]=useState('100')
+  // Allocation % auto-defaults from the project's effort size (S=25/M=50/L=75/XL=100) — still
+  // freely editable per row, this just kills the "type a number from thin air" step for the common case.
+  const effortDefault=String(EFFORT_ALLOC[project.effort]??100)
+  const [prTeam,setPrTeam]=useState('');const [prPerson,setPrPerson]=useState('');const [prRole,setPrRole]=useState('');const [prHead,setPrHead]=useState('1');const [prAlloc,setPrAlloc]=useState(effortDefault)
+  useEffect(()=>{setPrAlloc(effortDefault)},[project.effort])
   async function addProjectRole(){
     // Named path: a specific roster person (their role/rate come with them — real capacity)
     if(prPerson){
       const person=people.find((p:any)=>p.id===prPerson)
       const{data,error}=await supabase.from('project_roles').insert({project_id:project.id,role_id:person?.role_id||null,person_id:prPerson,headcount:1,allocation_pct:parseFloat(prAlloc)||100}).select().single()
       if(error){alert('Failed to add: '+error.message);return}
-      if(data){setProjectRoles((prev:any[])=>[...prev,data]);setPrTeam('');setPrPerson('');setPrAlloc('100')}
+      if(data){setProjectRoles((prev:any[])=>[...prev,data]);setPrTeam('');setPrPerson('');setPrAlloc(effortDefault)}
       return
     }
     // Generic path: role-only placeholder for early-stage forecasting before staffing is known
     if(!prRole)return
     const{data,error}=await supabase.from('project_roles').insert({project_id:project.id,role_id:prRole,person_id:null,headcount:parseFloat(prHead)||1,allocation_pct:parseFloat(prAlloc)||100}).select().single()
     if(error){alert('Failed to add role: '+error.message);return}
-    if(data){setProjectRoles((prev:any[])=>[...prev,data]);setPrRole('');setPrHead('1');setPrAlloc('100')}
+    if(data){setProjectRoles((prev:any[])=>[...prev,data]);setPrRole('');setPrHead('1');setPrAlloc(effortDefault)}
   }
   async function updProjectRole(id:any,fields:any){
     setProjectRoles((prev:any[])=>prev.map(r=>r.id===id?{...r,...fields}:r))
@@ -774,7 +840,7 @@ function ProjectDetail({project,items,setItems,projects,setProjects,milestones,s
                   {roles.map((r:any)=><option key={r.id} value={r.id}>{r.name}</option>)}
                 </select>
                 {!prPerson&&<input type="number" value={prHead} onChange={e=>setPrHead(e.target.value)} title="Headcount" style={{width:38,background:'#0D1B2A',border:'1px dashed #243447',borderRadius:5,color:'#F4F6F8',fontSize:10,padding:'4px 4px'}}/>}
-                <input type="number" value={prAlloc} onChange={e=>setPrAlloc(e.target.value)} title="Allocation %" style={{width:44,background:'#0D1B2A',border:'1px dashed #243447',borderRadius:5,color:'#F4F6F8',fontSize:10,padding:'4px 4px'}}/>
+                <input type="number" value={prAlloc} onChange={e=>setPrAlloc(e.target.value)} title={`Allocation % — defaulted from this project's Effort (${project.effort||'not set'})`} style={{width:44,background:'#0D1B2A',border:'1px dashed #243447',borderRadius:5,color:'#F4F6F8',fontSize:10,padding:'4px 4px'}}/>
                 <button onClick={addProjectRole} disabled={!prPerson&&!prRole} style={{background:'#27AE60',border:'none',borderRadius:5,color:'#fff',fontSize:10,fontWeight:700,padding:'4px 9px',cursor:'pointer',opacity:(prPerson||prRole)?1:0.5}}>+</button>
               </div>
             </div>
@@ -1486,7 +1552,7 @@ function Projects({items,setItems,projects,setProjects,milestones,setMilestones,
                   style={{width:'100%',background:'#1E3048',color:'#F4F6F8',border:'1px solid #243447',borderRadius:6,padding:'8px 10px',fontSize:13,boxSizing:'border-box' as const,resize:'vertical' as const,fontFamily:'inherit'}}/>
               </div>
               <div style={{display:'grid',gridTemplateColumns:'1fr 1fr',gap:12}}>
-                {([['Priority','priority',PRIORITIES],['Status','status',projectStatusesFor(space)],['Team','team',TEAMS]] as [string,string,string[]][]).map(([label,field,opts])=>(
+                {([['Priority','priority',PRIORITIES],['Status','status',projectStatusesFor(space)],['Team','team',TEAMS],['Effort','effort',EFFORTS]] as [string,string,string[]][]).map(([label,field,opts])=>(
                   <div key={field}>
                     <div style={{fontSize:11,color:'#7A8FA6',marginBottom:4}}>{label}</div>
                     <select value={form[field]} onChange={e=>setForm(p=>({...p,[field]:e.target.value}))}
@@ -4821,6 +4887,11 @@ function Desk({items,setItems,projects,setProjects,milestones,setMilestones,task
                   {TEAMS.map(t=><option key={t} value={t}>{t}</option>)}
                 </select>
               )}
+              <select value={projView.effort||''} onChange={e=>updateProj({effort:e.target.value})} title="Effort — sets the default per-person budget allocation %"
+                style={{background:'#1E3048',border:'1px solid #243447',borderRadius:4,color:'#F4F6F8',fontSize:10,fontWeight:600,padding:'3px 6px',cursor:'pointer'}}>
+                <option value="">Effort…</option>
+                {EFFORTS.map(e=><option key={e} value={e}>{e} ({EFFORT_ALLOC[e]}%)</option>)}
+              </select>
               <input type="date" value={projView.start_date||''} onChange={e=>updateProj({start_date:e.target.value||null})} title="Start date"
                 style={{background:'#1E3048',border:'1px solid #243447',borderRadius:4,color:'#F4F6F8',fontSize:10,padding:'2px 5px'}}/>
               <span style={{color:'#7A8FA6',fontSize:10}}>→</span>
@@ -5024,6 +5095,7 @@ function BudgetTab({roles,setRoles,people,setPeople,projects,items,projectRoles,
   const [tcSel,setTcSel]=useState<any>(null) // {personId,key} — Team Cost cell drill-down
   const [capWindow,setCapWindow]=useState('6')
   const [tcWindow,setTcWindow]=useState('6')
+  const [tbWindow,setTbWindow]=useState('fy')
   const [newRoleName,setNewRoleName]=useState('')
   const [newRoleRate,setNewRoleRate]=useState('')
   const [newPersonName,setNewPersonName]=useState('')
@@ -5281,7 +5353,7 @@ function BudgetTab({roles,setRoles,people,setPeople,projects,items,projectRoles,
       <div style={{display:'flex',alignItems:'center',gap:8,marginBottom:18}}>
         <span style={{fontSize:20,fontWeight:800,color:'#F4F6F8'}}>$ Budget</span>
         <div style={{display:'flex',gap:4,marginLeft:16}}>
-          {[['dashboard','Dashboard'],['capacity','Capacity'],['teamcost','Team Cost'],['rf','RF Budget'],['vendor','Vendor'],['roster','Roster'],['rates','Rate Card']].map(([k,label])=>(
+          {[['dashboard','Dashboard'],['capacity','Capacity'],['teamcost','Team Cost'],['teambudget','Team Budget'],['rf','RF Budget'],['vendor','Vendor'],['roster','Roster'],['rates','Rate Card']].map(([k,label])=>(
             <button key={k} onClick={()=>setView(k)} style={{background:view===k?'#C8973A':'#1E3048',color:view===k?'#0D1B2A':'#7A8FA6',border:'1px solid '+(view===k?'#C8973A':'#243447'),borderRadius:6,padding:'6px 14px',fontSize:12,fontWeight:700,cursor:'pointer'}}>{label}</button>
           ))}
         </div>
@@ -5905,6 +5977,89 @@ function BudgetTab({roles,setRoles,people,setPeople,projects,items,projectRoles,
               </tbody>
             </table>
           </div>
+          </div>
+        )
+      })()}
+
+      {view==='teambudget'&&(()=>{
+        const monthKeys=buildMonthKeys(tbWindow)
+        const rollup=teamBudgetRollup(projects,projectRoles,people,roles,monthKeys)
+        const stClr=(st:string)=>st==='approved'?'#27AE60':st==='requested'?'#5DADE2':'#E8B95A'
+        const stLabel=(st:string)=>st==='approved'?'Approved':st==='requested'?'Requested':'Draft'
+        const Bar=({segments,total,label}:{segments:{color:string,amount:number,title:string}[],total:number,label:string})=>{
+          const over=segments.reduce((s,x)=>s+x.amount,0)>total
+          return(
+            <div style={{marginBottom:10}}>
+              <div style={{fontSize:9,color:'#7A8FA6',marginBottom:3}}>{label}</div>
+              <div style={{display:'flex',height:16,borderRadius:4,overflow:'hidden',background:'#0D1B2A',border:'1px solid #243447'}}>
+                {segments.map((s,ix)=>s.amount>0&&(
+                  <div key={ix} title={`${s.title}: ${fmtUSD(s.amount)}`} style={{width:`${Math.min(100,s.amount/total*100)}%`,background:s.color,flexShrink:0}}/>
+                ))}
+              </div>
+              {over&&<div style={{fontSize:9,color:'#E74C3C',fontWeight:700,marginTop:2}}>⚠ Exceeds team total by {fmtUSD(segments.reduce((s,x)=>s+x.amount,0)-total)}</div>}
+            </div>
+          )
+        }
+        return(
+          <div>
+            <div style={{display:'flex',alignItems:'center',gap:10,marginBottom:6}}>
+              <span style={{fontSize:11,color:'#7A8FA6'}}>Window</span>
+              <select value={tbWindow} onChange={e=>setTbWindow(e.target.value)} style={{background:'#12202F',border:'1px solid #243447',borderRadius:6,color:'#F4F6F8',fontSize:12,padding:'5px 8px'}}>
+                <option value="1">1 month</option><option value="3">3 months</option><option value="6">6 months</option><option value="9">9 months</option><option value="fy">Fiscal year</option><option value="year">Year from now</option>
+              </select>
+            </div>
+            <div style={{fontSize:11,color:'#7A8FA6',marginBottom:16,lineHeight:1.5}}>
+              Each team's cost is fixed — you're paying for it whether or not it's assigned to a project. <b style={{color:'#27AE60'}}>Approved</b> shows what's actually claimed today; <b style={{color:'#5DADE2'}}>Requested</b> and <b style={{color:'#E8B95A'}}>Draft</b> show what the pipeline would claim if approved. Unclaimed dollars are flagged — they're still OpEx, just not building anything yet.
+            </div>
+            {TEAMS.map(team=>{
+              const t=rollup[team]
+              if(!t||t.total<=0)return null
+              return(
+                <div key={team} style={{marginBottom:26}}>
+                  <div style={{display:'flex',alignItems:'baseline',gap:10,marginBottom:10}}>
+                    <span style={{fontSize:14,fontWeight:800,color:'#F4F6F8'}}>{team}</span>
+                    <span style={{fontSize:12,color:'#7A8FA6'}}>Team Total: <b style={{color:'#F4F6F8'}}>{fmtUSD(t.total)}</b></span>
+                  </div>
+                  <div style={{display:'flex',gap:14,flexWrap:'wrap' as const}}>
+                    {Object.keys(t.depts).map(dept=>{
+                      const d=t.depts[dept]
+                      const approvedSegs=[
+                        ...d.approvedProjects.map((p:any)=>({color:p.color||'#5DADE2',amount:p.capex+p.opex,title:p.name})),
+                        {color:'#3A4A5E',amount:d.unallocApproved,title:'Unallocated (OpEx)'},
+                      ]
+                      const plannedSegs=[
+                        ...d.approvedProjects.map((p:any)=>({color:p.color||'#5DADE2',amount:p.capex+p.opex,title:p.name})),
+                        ...d.plannedExtra.map((p:any)=>({color:stClr(p.status),amount:p.capex+p.opex,title:`${p.name} (${stLabel(p.status)})`})),
+                        {color:'#3A4A5E',amount:Math.max(0,d.unallocPlanned),title:'Unallocated (OpEx)'},
+                      ]
+                      return(
+                        <div key={dept} style={{background:'#12202F',border:'1px solid #243447',borderRadius:10,padding:'12px 16px',width:340}}>
+                          <div style={{fontSize:12,fontWeight:700,color:'#5DADE2',marginBottom:8}}>{dept} <span style={{color:'#7A8FA6',fontWeight:400}}>· {fmtUSD(d.deptTotal)}</span></div>
+                          <Bar segments={approvedSegs} total={d.deptTotal} label="Approved"/>
+                          <Bar segments={plannedSegs} total={d.deptTotal} label="Planned (Approved + Requested + Draft)"/>
+                          <div style={{fontSize:10,color:'#7A8FA6',marginTop:8,lineHeight:1.6}}>
+                            {[...d.approvedProjects,...d.plannedExtra].map((p:any,ix:number)=>(
+                              <div key={ix} style={{display:'flex',alignItems:'center',gap:6}}>
+                                <span style={{width:7,height:7,borderRadius:2,background:p.status==='approved'?(p.color||'#5DADE2'):stClr(p.status),flexShrink:0}}/>
+                                <span style={{flex:1,color:'#F4F6F8'}}>{p.name}</span>
+                                <span>{stLabel(p.status)}</span>
+                                <span style={{width:60,textAlign:'right' as const}}>{fmtUSD(p.capex+p.opex)}</span>
+                              </div>
+                            ))}
+                            <div style={{display:'flex',alignItems:'center',gap:6,marginTop:2,fontStyle:'italic'}}>
+                              <span style={{width:7,height:7,borderRadius:2,background:'#3A4A5E',flexShrink:0}}/>
+                              <span style={{flex:1}}>Unallocated (flagged OpEx)</span>
+                              <span style={{width:60,textAlign:'right' as const,color:d.unallocPlanned<0?'#E74C3C':'#7A8FA6'}}>{fmtUSD(d.unallocPlanned)}</span>
+                            </div>
+                          </div>
+                        </div>
+                      )
+                    })}
+                  </div>
+                </div>
+              )
+            })}
+            {TEAMS.every(t=>!rollup[t]||rollup[t].total<=0)&&<div style={{fontSize:12,color:'#7A8FA6',fontStyle:'italic'}}>No active roster people with a team and department set yet.</div>}
           </div>
         )
       })()}
