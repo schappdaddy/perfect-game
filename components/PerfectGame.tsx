@@ -239,6 +239,25 @@ function fullCostForMonth(monthKey:string,rate:number){
   const start=`${monthKey}-01`,end=localISO(new Date(y,m,0))
   return workingDays(start,end)*8*rate
 }
+// A person's full cost for one calendar month, respecting a termination date — prorates
+// the month they actually left in, zeroes out months entirely after, otherwise a normal
+// full month. This is the termination-aware version of fullCostForMonth; use it anywhere
+// a person's baseline "we're paying them regardless of assignment" cost is summed.
+function personMonthCost(person:any,monthKey:string,roles:any[]):number{
+  const rate=rateOf(person,roles)
+  if(!person?.termination_date)return fullCostForMonth(monthKey,rate)
+  const[y,m]=monthKey.split('-').map(Number)
+  const monthStart=`${monthKey}-01`,monthEnd=localISO(new Date(y,m,0))
+  if(person.termination_date<monthStart)return 0 // already gone before this month started
+  if(person.termination_date>=monthEnd)return fullCostForMonth(monthKey,rate) // still active the whole month
+  return workingDays(monthStart,person.termination_date)*8*rate // left mid-month — prorate to their last working day
+}
+// Clips a project/claim date range's END so nothing is counted past a person's termination —
+// use wherever a person's project_roles allocation is spread across a date range (monthlyRowCost).
+function clipEndByTermination(person:any,endISO:string):string{
+  if(person?.termination_date&&person.termination_date<endISO)return person.termination_date
+  return endISO
+}
 function capacityByMonth(projects:any[],projectRoles:any[],people:any[],roles:any[]){
   const active=projects.filter((p:any)=>!PROJECT_TERMINAL.includes(p.status)&&p.start_date&&(p.end_date||p.ongoing))
   const perPerson=new Map<string,Map<string,{cost:number,pct:number}>>() // person_id -> month -> {cost,pct}
@@ -250,7 +269,7 @@ function capacityByMonth(projects:any[],projectRoles:any[],people:any[],roles:an
     const person=people.find((p:any)=>p.id===row.person_id)
     if(!person)continue
     const rate=rateOf(person,roles)
-    const end=proj.end_date||localISO(new Date(Date.now()+180*86400000)) // ongoing: cap the view at ~6mo out
+    const end=clipEndByTermination(person,proj.end_date||localISO(new Date(Date.now()+180*86400000))) // ongoing: cap the view at ~6mo out
     const monthly=monthlyRowCost(row.allocation_pct,rate,proj.start_date,end)
     if(!perPerson.has(person.id))perPerson.set(person.id,new Map())
     if(!byProject.has(person.id))byProject.set(person.id,new Map())
@@ -304,7 +323,7 @@ function quarterlyRollup(projects:any[],projectRoles:any[],itemAssignments:any[]
     if(!person?.department)continue
     const role=roles.find((r:any)=>r.id===person.role_id)
     const rate=rateOf(person,roles)
-    const end=proj.end_date||localISO(new Date(Date.now()+365*86400000))
+    const end=clipEndByTermination(person,proj.end_date||localISO(new Date(Date.now()+365*86400000)))
     for(const m of monthlyRowCost(row.allocation_pct,rate,proj.start_date,end)){
       const{fy,quarter}=fyOf(`${m.key}-15`)
       const{capex,opex}=splitCapexOpex(m.cost,role,proj.budget_type)
@@ -377,14 +396,13 @@ function projectColorFor(proj:any){
 }
 function teamBudgetRollup(projects:any[],projectRoles:any[],people:any[],roles:any[],monthKeys:string[]){
   const totalCostOverWindow=(person:any)=>{
-    const rate=rateOf(person,roles)
-    return monthKeys.reduce((sum,k)=>sum+fullCostForMonth(k,rate),0)
+    return monthKeys.reduce((sum,k)=>sum+personMonthCost(person,k,roles),0)
   }
   const claimedCostOverWindow=(row:any,person:any)=>{
     // A project_roles row's $ contribution restricted to the chosen window's months
     const proj=projects.find((p:any)=>p.id===row.project_id)
     if(!proj||!proj.start_date)return 0
-    const end=proj.end_date||localISO(new Date(Date.now()+365*86400000))
+    const end=clipEndByTermination(person,proj.end_date||localISO(new Date(Date.now()+365*86400000)))
     const rate=rateOf(person,roles)
     return monthlyRowCost(row.allocation_pct,rate,proj.start_date,end)
       .filter((m:any)=>monthKeys.includes(m.key))
@@ -5242,9 +5260,10 @@ function BudgetTab({roles,setRoles,people,setPeople,projects,items,projectRoles,
       for(const row of projectRoles){
         const proj=activeProjects.find((p:any)=>p.id===row.project_id)
         if(!proj||!proj.start_date)continue
-        const end=proj.end_date||localISO(new Date(Date.now()+180*86400000))
+        const rowPerson=row.person_id?people.find((p:any)=>p.id===row.person_id):null
+        const end=clipEndByTermination(rowPerson,proj.end_date||localISO(new Date(Date.now()+180*86400000)))
         const role=roles.find((r:any)=>r.id===row.role_id)
-        const rate=row.person_id?rateOf(people.find((p:any)=>p.id===row.person_id),roles):(role?.hourly_rate||0)
+        const rate=row.person_id?rateOf(rowPerson,roles):(role?.hourly_rate||0)
         const mult=row.person_id?1:(row.headcount||1)
         for(const m of monthlyRowCost(row.allocation_pct,rate,proj.start_date,end))bump(m.key,'forecast',m.cost*mult)
       }
@@ -5295,10 +5314,9 @@ function BudgetTab({roles,setRoles,people,setPeople,projects,items,projectRoles,
         if(!grp.length)continue
         boldRow(ws5,ws5.addRow({n:(t||'No Team').toUpperCase()}).number,'FF5DADE2')
         for(const p of grp){
-          const rate=rateOf(p,roles)
           const pm=capPerPerson.get(p.id)
           const row:any={n:p.name,r:roles.find((x:any)=>x.id===p.role_id)?.name||'—',t:p.team||''}
-          tcKeys.forEach((k:string)=>{row[k+'_a']=Math.round(pm?.get(k)?.cost||0);row[k+'_f']=Math.round(fullCostForMonth(k,rate))})
+          tcKeys.forEach((k:string)=>{row[k+'_a']=Math.round(pm?.get(k)?.cost||0);row[k+'_f']=Math.round(personMonthCost(p,k,roles))})
           ws5.addRow(row)
         }
       }
@@ -5481,6 +5499,8 @@ function BudgetTab({roles,setRoles,people,setPeople,projects,items,projectRoles,
               <label style={{display:'flex',alignItems:'center',gap:4,fontSize:10,color:'#7A8FA6',cursor:'pointer'}}>
                 <input type="checkbox" checked={p.active} onChange={e=>updPerson(p.id,{active:e.target.checked})}/>Active
               </label>
+              <input type="date" value={p.termination_date||''} onChange={e=>updPerson(p.id,{termination_date:e.target.value||null})} title="Termination date — cost stops accruing after this date, everywhere in the app"
+                style={{background:p.termination_date?'rgba(231,76,60,0.12)':'#0D1B2A',border:'1px solid '+(p.termination_date?'#E74C3C':'#243447'),borderRadius:5,color:'#F4F6F8',fontSize:11,padding:'4px 6px'}}/>
               <button onClick={()=>deletePerson(p.id)} style={{background:'none',border:'none',color:'#3A4A5E',fontSize:13,cursor:'pointer'}}>🗑</button>
             </div>
           ))}
@@ -5519,8 +5539,7 @@ function BudgetTab({roles,setRoles,people,setPeople,projects,items,projectRoles,
         const teamCostForDeptQuarter=(dept:string,q:number)=>{
           const keys=fiscalQuarterMonthKeys(fy,q)
           return rfPeople.filter((p:any)=>p.active&&p.department===dept).reduce((sum:number,p:any)=>{
-            const rate=rateOf(p,roles)
-            return sum+keys.reduce((s:number,k:string)=>s+fullCostForMonth(k,rate),0)
+            return sum+keys.reduce((s:number,k:string)=>s+personMonthCost(p,k,roles),0)
           },0)
         }
         const latestBudget=(dept:string,q:number)=>{
@@ -5964,7 +5983,7 @@ function BudgetTab({roles,setRoles,people,setPeople,projects,items,projectRoles,
         const fillColor=(pct:number)=>pct>105?'#5DADE2':pct>=85?'#27AE60':pct>=50?'#E8B95A':'#E74C3C'
         const sel=tcSel
         const selPerson=sel?people.find((p:any)=>p.id===sel.personId):null
-        const selFull=sel?fullCostForMonth(sel.key,rateOf(selPerson,roles)):0
+        const selFull=sel?personMonthCost(selPerson,sel.key,roles):0
         const selProjects=sel?[...(byProject.get(sel.personId)?.get(sel.key)||[])].sort((a:any,b:any)=>b.cost-a.cost):[]
         const selAllocated=selProjects.reduce((s:number,p:any)=>s+p.cost,0)
         return(
@@ -6020,13 +6039,12 @@ function BudgetTab({roles,setRoles,people,setPeople,projects,items,projectRoles,
                 <Fragment key={group.team}>
                   <tr><td colSpan={monthKeys.length+1} style={{padding:'10px 10px 4px',fontSize:10,fontWeight:700,letterSpacing:1,color:'#5DADE2'}}>{group.team.toUpperCase()}</td></tr>
                   {group.people.map((p:any)=>{
-                    const rate=rateOf(p,roles)
                     const pm=perPerson.get(p.id)
                     return(
                       <tr key={p.id}>
-                        <td style={{padding:'4px 10px',color:'#F4F6F8',position:'sticky' as const,left:0,background:'#0D1B2A',whiteSpace:'nowrap' as const}}>{p.name} <span style={{color:'#7A8FA6',fontSize:9}}>· {roles.find((r:any)=>r.id===p.role_id)?.name||'—'}</span></td>
+                        <td style={{padding:'4px 10px',color:'#F4F6F8',position:'sticky' as const,left:0,background:'#0D1B2A',whiteSpace:'nowrap' as const}}>{p.name} <span style={{color:'#7A8FA6',fontSize:9}}>· {roles.find((r:any)=>r.id===p.role_id)?.name||'—'}</span>{p.termination_date&&<span style={{color:'#E74C3C',fontSize:9}}> · left {p.termination_date}</span>}</td>
                         {monthKeys.map(k=>{
-                          const full=fullCostForMonth(k,rate)
+                          const full=personMonthCost(p,k,roles)
                           const alloc=pm?.get(k)?.cost||0
                           teamFull+=full;teamAlloc+=alloc
                           const pct=full>0?Math.round(alloc/full*100):0
