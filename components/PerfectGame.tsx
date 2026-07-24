@@ -304,8 +304,10 @@ function quarterlyRollup(projects:any[],projectRoles:any[],itemAssignments:any[]
 }
 // Real spend by vendor — CapEx/OpEx, approved projects only. Billing is about what
 // actually happened, so this uses Layer 2 actuals only, never the Layer 1 forecast.
+// Real spend by vendor, bucketed by fiscal quarter — CapEx/OpEx split, approved projects only.
+// Returns vendor -> "fy-q" -> {capex,opex}; sum across quarters for an annual total.
 function vendorRollup(projects:any[],itemAssignments:any[],items:any[],people:any[],roles:any[]){
-  const out=new Map<string,{capex:number,opex:number}>()
+  const out=new Map<string,Map<string,{capex:number,opex:number}>>()
   const approved=projects.filter((p:any)=>p.budget_status==='approved')
   for(const it of items){
     const proj=approved.find((p:any)=>p.name===it.parent_project)
@@ -315,11 +317,16 @@ function vendorRollup(projects:any[],itemAssignments:any[],items:any[],people:an
       const vendor=person?.vendor||'(no vendor set)'
       const role=roles.find((r:any)=>r.id===person?.role_id)
       const rate=rateOf(person,roles)
-      const cost=(a.hours||0)*rate
-      const{capex,opex}=splitCapexOpex(cost,role,proj.budget_type)
-      const cur=out.get(vendor)||{capex:0,opex:0}
-      cur.capex+=capex;cur.opex+=opex
-      out.set(vendor,cur)
+      if(!out.has(vendor))out.set(vendor,new Map())
+      const vm=out.get(vendor)!
+      for(const m of monthlyHoursCost(a.hours||0,rate,it.start_date,it.end_date)){
+        const{fy,quarter}=fyOf(`${m.key}-15`)
+        const key=`${fy}-${quarter}`
+        const{capex,opex}=splitCapexOpex(m.cost,role,proj.budget_type)
+        const cur=vm.get(key)||{capex:0,opex:0}
+        cur.capex+=capex;cur.opex+=opex
+        vm.set(key,cur)
+      }
     }
   }
   return out
@@ -4990,6 +4997,7 @@ function BudgetTab({roles,setRoles,people,setPeople,projects,items,projectRoles,
   const [rfNewCapex,setRfNewCapex]=useState('')
   const [rfNewOpex,setRfNewOpex]=useState('')
   const [rfSel,setRfSel]=useState<any>(null) // {dept,q} — RF quarter card drill-down
+  const [vendorFy,setVendorFy]=useState<any>(null)
   const [newRoleName,setNewRoleName]=useState('')
   const [newRoleRate,setNewRoleRate]=useState('')
   const [newPersonName,setNewPersonName]=useState('')
@@ -5119,15 +5127,22 @@ function BudgetTab({roles,setRoles,people,setPeople,projects,items,projectRoles,
       ws4['!cols']=[{wch:20},{wch:8},{wch:9},{wch:14},{wch:12},{wch:14},{wch:12}]
       XLSX.utils.book_append_sheet(wb,ws4,`RF Budget FY${curFy}`)
 
-      // By Vendor — CapEx/OpEx actual spend
+      // By Vendor — CapEx/OpEx actual spend, by quarter, current FY, with annual total
       const vr=vendorRollup(projects,itemAssignments,items,people,roles)
-      const vRows:any[]=[['Vendor','CapEx','OpEx','Total']]
-      const vSorted=[...vr.entries()].map(([vendor,v]:any)=>({vendor,...v})).sort((a,b)=>(b.capex+b.opex)-(a.capex+a.opex))
-      vSorted.forEach(v=>vRows.push([v.vendor,Math.round(v.capex),Math.round(v.opex),Math.round(v.capex+v.opex)] as any))
-      vRows.push(['TOTAL',Math.round(vSorted.reduce((s,v)=>s+v.capex,0)),Math.round(vSorted.reduce((s,v)=>s+v.opex,0)),Math.round(vSorted.reduce((s,v)=>s+v.capex+v.opex,0))] as any)
+      const vCell=(vendor:string,q:number)=>vr.get(vendor)?.get(`${curFy}-${q}`)||{capex:0,opex:0}
+      const vYear=(vendor:string)=>{let capex=0,opex=0;for(let q=1;q<=4;q++){const c=vCell(vendor,q);capex+=c.capex;opex+=c.opex};return{capex,opex}}
+      const vRows:any[]=[['Vendor','Q1 CapEx','Q1 OpEx','Q2 CapEx','Q2 OpEx','Q3 CapEx','Q3 OpEx','Q4 CapEx','Q4 OpEx','FY Total CapEx','FY Total OpEx','FY Total']]
+      const vSorted=[...vr.keys()].map(vendor=>({vendor,...vYear(vendor)})).sort((a,b)=>(b.capex+b.opex)-(a.capex+a.opex))
+      vSorted.forEach(v=>{
+        const row:any[]=[v.vendor]
+        for(let q=1;q<=4;q++){const c=vCell(v.vendor,q);row.push(Math.round(c.capex),Math.round(c.opex))}
+        row.push(Math.round(v.capex),Math.round(v.opex),Math.round(v.capex+v.opex))
+        vRows.push(row)
+      })
+      vRows.push(['TOTAL',...Array(8).fill(0).map((_,ix)=>{const q=Math.floor(ix/2)+1;const field=ix%2===0?'capex':'opex';return Math.round(vSorted.reduce((s,v)=>s+(vCell(v.vendor,q) as any)[field],0))}),Math.round(vSorted.reduce((s,v)=>s+v.capex,0)),Math.round(vSorted.reduce((s,v)=>s+v.opex,0)),Math.round(vSorted.reduce((s,v)=>s+v.capex+v.opex,0))] as any)
       const ws5=XLSX.utils.aoa_to_sheet(vRows)
-      ws5['!cols']=[{wch:20},{wch:14},{wch:14},{wch:14}]
-      XLSX.utils.book_append_sheet(wb,ws5,'By Vendor')
+      ws5['!cols']=[{wch:16},{wch:10},{wch:10},{wch:10},{wch:10},{wch:10},{wch:10},{wch:10},{wch:10},{wch:13},{wch:13},{wch:12}]
+      XLSX.utils.book_append_sheet(wb,ws5,`By Vendor FY${curFy}`)
 
       XLSX.writeFile(wb,`Budget Report — ${localISO(new Date())}.xlsx`)
     }catch(e:any){alert('Export failed: '+(e?.message||e))}
@@ -5293,11 +5308,68 @@ function BudgetTab({roles,setRoles,people,setPeople,projects,items,projectRoles,
               </select>
               <span style={{fontSize:10,color:'#7A8FA6',fontStyle:'italic'}}>Q1 Apr–Jun · Q2 Jul–Sep · Q3 Oct–Dec · Q4 Jan–Mar. Checkpoints: RF1 (Jul), RF2 (Oct), RF3 (Jan).</span>
             </div>
+
+            {/* Portfolio-wide FY summary — every department's four quarters, summed */}
+            {(()=>{
+              let sAlloc={capex:0,opex:0},sAct={capex:0,opex:0},sCeil={capex:0,opex:0},anyCeil=false
+              for(const dept of deptOrder){
+                for(let q=1;q<=4;q++){
+                  const r=rollup.get(`${fy}-${q}-${dept}`)
+                  if(r){sAlloc.capex+=r.allocCapex;sAlloc.opex+=r.allocOpex;sAct.capex+=r.actCapex;sAct.opex+=r.actOpex}
+                  const b=latestBudget(dept,q)
+                  if(b){sCeil.capex+=b.capex_approved;sCeil.opex+=b.opex_approved;anyCeil=true}
+                }
+              }
+              return(
+                <div style={{background:'#12202F',border:'1px solid #3A4A5E',borderRadius:10,padding:'14px 18px',marginBottom:20}}>
+                  <div style={{fontSize:11,fontWeight:700,letterSpacing:1,color:'#F4F6F8',marginBottom:10}}>FY{fy} FULL-YEAR SUMMARY — ALL DEPARTMENTS</div>
+                  <div style={{display:'flex',gap:32,flexWrap:'wrap' as const}}>
+                    <div>
+                      <div style={{fontSize:9,color:'#7A8FA6',marginBottom:3}}>CapEx</div>
+                      <div style={{fontSize:11,color:'#7A8FA6'}}>Approved Budget <b style={{color:'#F4F6F8'}}>{fmtUSD(sAlloc.capex)}</b></div>
+                      <div style={{fontSize:11,color:'#7A8FA6'}}>Actual <b style={{color:sAct.capex>sAlloc.capex&&sAlloc.capex>0?'#E74C3C':'#27AE60'}}>{fmtUSD(sAct.capex)}</b></div>
+                      {anyCeil&&<div style={{fontSize:11,color:'#7A8FA6'}}>Finance Ceiling <b style={{color:'#F4F6F8'}}>{fmtUSD(sCeil.capex)}</b></div>}
+                    </div>
+                    <div>
+                      <div style={{fontSize:9,color:'#7A8FA6',marginBottom:3}}>OpEx</div>
+                      <div style={{fontSize:11,color:'#7A8FA6'}}>Approved Budget <b style={{color:'#F4F6F8'}}>{fmtUSD(sAlloc.opex)}</b></div>
+                      <div style={{fontSize:11,color:'#7A8FA6'}}>Actual <b style={{color:sAct.opex>sAlloc.opex&&sAlloc.opex>0?'#E74C3C':'#27AE60'}}>{fmtUSD(sAct.opex)}</b></div>
+                      {anyCeil&&<div style={{fontSize:11,color:'#7A8FA6'}}>Finance Ceiling <b style={{color:'#F4F6F8'}}>{fmtUSD(sCeil.opex)}</b></div>}
+                    </div>
+                    <div style={{borderLeft:'1px solid #243447',paddingLeft:32}}>
+                      <div style={{fontSize:9,color:'#7A8FA6',marginBottom:3}}>Combined</div>
+                      <div style={{fontSize:11,color:'#7A8FA6'}}>Approved Budget <b style={{color:'#F4F6F8'}}>{fmtUSD(sAlloc.capex+sAlloc.opex)}</b></div>
+                      <div style={{fontSize:11,color:'#7A8FA6'}}>Actual <b style={{color:'#F4F6F8'}}>{fmtUSD(sAct.capex+sAct.opex)}</b></div>
+                    </div>
+                  </div>
+                </div>
+              )
+            })()}
+
             {deptOrder.length===0&&<div style={{fontSize:12,color:'#7A8FA6',fontStyle:'italic',marginBottom:16}}>No departments set yet — add a department to people in the Roster tab.</div>}
-            {deptOrder.map(dept=>(
+            {deptOrder.map(dept=>{
+              // This department's FY total across all four quarters — its own annual card
+              let dAlloc={capex:0,opex:0},dAct={capex:0,opex:0},dCeil={capex:0,opex:0},dAnyCeil=false
+              for(let q=1;q<=4;q++){
+                const r=rollup.get(`${fy}-${q}-${dept}`)
+                if(r){dAlloc.capex+=r.allocCapex;dAlloc.opex+=r.allocOpex;dAct.capex+=r.actCapex;dAct.opex+=r.actOpex}
+                const b=latestBudget(dept,q)
+                if(b){dCeil.capex+=b.capex_approved;dCeil.opex+=b.opex_approved;dAnyCeil=true}
+              }
+              return(
               <div key={dept} style={{marginBottom:22}}>
                 <div style={{fontSize:12,fontWeight:700,color:'#5DADE2',letterSpacing:1,marginBottom:8}}>{dept.toUpperCase()}</div>
                 <div style={{display:'flex',gap:10,flexWrap:'wrap' as const}}>
+                  <div style={{background:'#0F1E2E',border:'1px solid #3A4A5E',borderRadius:10,padding:'10px 14px',width:220}}>
+                    <div style={{fontSize:11,fontWeight:700,color:'#F4F6F8',marginBottom:6}}>FY{fy} Total</div>
+                    <div style={{fontSize:9,color:'#7A8FA6'}}>CapEx</div>
+                    <div style={{fontSize:10,color:'#7A8FA6'}}>Budget <b style={{color:'#F4F6F8'}}>{fmtUSD(dAlloc.capex)}</b></div>
+                    <div style={{fontSize:10,color:'#7A8FA6',marginBottom:6}}>Actual <b style={{color:dAct.capex>dAlloc.capex&&dAlloc.capex>0?'#E74C3C':'#27AE60'}}>{fmtUSD(dAct.capex)}</b></div>
+                    <div style={{fontSize:9,color:'#7A8FA6'}}>OpEx</div>
+                    <div style={{fontSize:10,color:'#7A8FA6'}}>Budget <b style={{color:'#F4F6F8'}}>{fmtUSD(dAlloc.opex)}</b></div>
+                    <div style={{fontSize:10,color:'#7A8FA6'}}>Actual <b style={{color:dAct.opex>dAlloc.opex&&dAlloc.opex>0?'#E74C3C':'#27AE60'}}>{fmtUSD(dAct.opex)}</b></div>
+                    {dAnyCeil&&<div style={{fontSize:9,color:'#7A8FA6',marginTop:6,fontStyle:'italic'}}>Ceiling: {fmtUSD(dCeil.capex+dCeil.opex)}</div>}
+                  </div>
                   {quarters.map(q=>{
                     const bud=latestBudget(dept,q)
                     const r=rollup.get(`${fy}-${q}-${dept}`)||{allocCapex:0,allocOpex:0,actCapex:0,actOpex:0}
@@ -5357,7 +5429,8 @@ function BudgetTab({roles,setRoles,people,setPeople,projects,items,projectRoles,
                   })}
                 </div>
               </div>
-            ))}
+              )
+            })}
             {sel&&(
               <div style={{background:'#12202F',border:'1px solid #C8973A',borderRadius:10,padding:'14px 18px',marginTop:4,marginBottom:20,maxWidth:640}}>
                 <div style={{display:'flex',alignItems:'center',gap:8,marginBottom:10}}>
@@ -5439,37 +5512,66 @@ function BudgetTab({roles,setRoles,people,setPeople,projects,items,projectRoles,
       })()}
 
       {view==='vendor'&&(()=>{
+        const thisFY=fyOf(localISO(new Date())).fy
+        const vfy=vendorFy||thisFY
         const vr=vendorRollup(projects,itemAssignments,items,people,roles)
-        const rows=[...vr.entries()].map(([vendor,v])=>({vendor,...v,total:v.capex+v.opex})).sort((a,b)=>b.total-a.total)
-        const grand=rows.reduce((s,r)=>s+r.total,0)
+        const cellOf=(vendor:string,q:number)=>vr.get(vendor)?.get(`${vfy}-${q}`)||{capex:0,opex:0}
+        const yearTotal=(vendor:string)=>{
+          let capex=0,opex=0
+          for(let q=1;q<=4;q++){const c=cellOf(vendor,q);capex+=c.capex;opex+=c.opex}
+          return{capex,opex,total:capex+opex}
+        }
+        const vendors=[...vr.keys()].map(v=>({vendor:v,...yearTotal(v)})).sort((a,b)=>b.total-a.total)
+        const grand={capex:vendors.reduce((s,v)=>s+v.capex,0),opex:vendors.reduce((s,v)=>s+v.opex,0)}
         return(
-          <div style={{maxWidth:560}}>
-            <div style={{fontSize:11,color:'#7A8FA6',marginBottom:12,lineHeight:1.5}}>Real spend (actual hours × rate) on approved projects, by vendor — CapEx and OpEx split per the role/project-type rule.</div>
-            <table style={{width:'100%',borderCollapse:'collapse',fontSize:12}}>
+          <div>
+            <div style={{display:'flex',alignItems:'center',gap:10,marginBottom:12}}>
+              <span style={{fontSize:11,color:'#7A8FA6'}}>Fiscal Year</span>
+              <select value={vfy} onChange={e=>setVendorFy(parseInt(e.target.value))} style={{background:'#12202F',border:'1px solid #243447',borderRadius:6,color:'#F4F6F8',fontSize:12,padding:'5px 8px'}}>
+                {[thisFY-1,thisFY,thisFY+1].map(y=><option key={y} value={y}>FY{y}</option>)}
+              </select>
+            </div>
+            <div style={{fontSize:11,color:'#7A8FA6',marginBottom:12,lineHeight:1.5}}>Real spend (actual hours × rate) on approved projects, by vendor — CapEx/OpEx split per the role/project-type rule. Each quarter cell shows CapEx over OpEx.</div>
+            <div style={{overflowX:'auto'}}>
+            <table style={{borderCollapse:'collapse',fontSize:12,minWidth:760}}>
               <thead><tr>
                 <th style={{textAlign:'left',padding:'6px 10px',color:'#7A8FA6',borderBottom:'1px solid #243447'}}>Vendor</th>
-                <th style={{textAlign:'right',padding:'6px 10px',color:'#7A8FA6',borderBottom:'1px solid #243447'}}>CapEx</th>
-                <th style={{textAlign:'right',padding:'6px 10px',color:'#7A8FA6',borderBottom:'1px solid #243447'}}>OpEx</th>
-                <th style={{textAlign:'right',padding:'6px 10px',color:'#7A8FA6',borderBottom:'1px solid #243447'}}>Total</th>
+                {[1,2,3,4].map(q=><th key={q} style={{textAlign:'right',padding:'6px 10px',color:'#7A8FA6',borderBottom:'1px solid #243447'}}>Q{q}</th>)}
+                <th style={{textAlign:'right',padding:'6px 10px',color:'#7A8FA6',borderBottom:'1px solid #243447'}}>FY{vfy} Total</th>
               </tr></thead>
               <tbody>
-              {rows.map(r=>(
-                <tr key={r.vendor}>
-                  <td style={{padding:'6px 10px',color:'#F4F6F8',borderBottom:'1px solid #1A2838'}}>{r.vendor}</td>
-                  <td style={{textAlign:'right',padding:'6px 10px',color:'#7A8FA6',borderBottom:'1px solid #1A2838'}}>{fmtUSD(r.capex)}</td>
-                  <td style={{textAlign:'right',padding:'6px 10px',color:'#7A8FA6',borderBottom:'1px solid #1A2838'}}>{fmtUSD(r.opex)}</td>
-                  <td style={{textAlign:'right',padding:'6px 10px',color:'#F4F6F8',fontWeight:700,borderBottom:'1px solid #1A2838'}}>{fmtUSD(r.total)}</td>
+              {vendors.map(v=>(
+                <tr key={v.vendor}>
+                  <td style={{padding:'6px 10px',color:'#F4F6F8',borderBottom:'1px solid #1A2838'}}>{v.vendor}</td>
+                  {[1,2,3,4].map(q=>{
+                    const c=cellOf(v.vendor,q)
+                    return(
+                      <td key={q} style={{textAlign:'right',padding:'6px 10px',borderBottom:'1px solid #1A2838'}}>
+                        {(c.capex+c.opex)>0?<><div style={{color:'#5DADE2',fontSize:11}}>{fmtUSD(c.capex)}</div><div style={{color:'#7A8FA6',fontSize:10}}>{fmtUSD(c.opex)}</div></>:<span style={{color:'#3A4A5E'}}>—</span>}
+                      </td>
+                    )
+                  })}
+                  <td style={{textAlign:'right',padding:'6px 10px',color:'#F4F6F8',fontWeight:700,borderBottom:'1px solid #1A2838'}}>{fmtUSD(v.total)}</td>
                 </tr>
               ))}
-              {rows.length===0&&<tr><td colSpan={4} style={{padding:10,color:'#7A8FA6',fontStyle:'italic'}}>No vendor-attributed actual spend yet.</td></tr>}
+              {vendors.length===0&&<tr><td colSpan={6} style={{padding:10,color:'#7A8FA6',fontStyle:'italic'}}>No vendor-attributed actual spend in FY{vfy}.</td></tr>}
               </tbody>
-              {rows.length>0&&<tfoot><tr>
-                <td style={{padding:'8px 10px',color:'#F4F6F8',fontWeight:800,borderTop:'2px solid #243447'}}>Total</td>
-                <td style={{textAlign:'right',padding:'8px 10px',color:'#5DADE2',fontWeight:800,borderTop:'2px solid #243447'}}>{fmtUSD(rows.reduce((s,r)=>s+r.capex,0))}</td>
-                <td style={{textAlign:'right',padding:'8px 10px',color:'#5DADE2',fontWeight:800,borderTop:'2px solid #243447'}}>{fmtUSD(rows.reduce((s,r)=>s+r.opex,0))}</td>
-                <td style={{textAlign:'right',padding:'8px 10px',color:'#F4F6F8',fontWeight:800,borderTop:'2px solid #243447'}}>{fmtUSD(grand)}</td>
+              {vendors.length>0&&<tfoot><tr>
+                <td style={{padding:'8px 10px',color:'#F4F6F8',fontWeight:800,borderTop:'2px solid #243447'}}>FY{vfy} Total</td>
+                {[1,2,3,4].map(q=>{
+                  const qCapex=vendors.reduce((s,v)=>s+cellOf(v.vendor,q).capex,0)
+                  const qOpex=vendors.reduce((s,v)=>s+cellOf(v.vendor,q).opex,0)
+                  return(
+                    <td key={q} style={{textAlign:'right',padding:'8px 10px',borderTop:'2px solid #243447'}}>
+                      <div style={{color:'#5DADE2',fontSize:11,fontWeight:700}}>{fmtUSD(qCapex)}</div>
+                      <div style={{color:'#7A8FA6',fontSize:10}}>{fmtUSD(qOpex)}</div>
+                    </td>
+                  )
+                })}
+                <td style={{textAlign:'right',padding:'8px 10px',color:'#F4F6F8',fontWeight:800,borderTop:'2px solid #243447'}}>{fmtUSD(grand.capex+grand.opex)}</td>
               </tr></tfoot>}
             </table>
+            </div>
           </div>
         )
       })()}
