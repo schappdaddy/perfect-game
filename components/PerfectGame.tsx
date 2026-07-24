@@ -250,11 +250,19 @@ function splitCapexOpex(cost:number,role:any,projectBudgetType:string){
 // count — same constraint as Capacity, since department/vendor only exist on people.
 function quarterlyRollup(projects:any[],projectRoles:any[],itemAssignments:any[],items:any[],people:any[],roles:any[]){
   const out=new Map<string,{allocCapex:number,allocOpex:number,actCapex:number,actOpex:number}>()
-  const bump=(fy:number,q:number,dept:string,field:'allocCapex'|'allocOpex'|'actCapex'|'actOpex',amt:number)=>{
+  const byProj=new Map<string,Map<string,{name:string,color:string,allocCapex:number,allocOpex:number,actCapex:number,actOpex:number}>>()
+  const bump=(fy:number,q:number,dept:string,field:'allocCapex'|'allocOpex'|'actCapex'|'actOpex',amt:number,proj?:any)=>{
     const key=`${fy}-${q}-${dept}`
     const cur=out.get(key)||{allocCapex:0,allocOpex:0,actCapex:0,actOpex:0}
     cur[field]+=amt
     out.set(key,cur)
+    if(proj){
+      if(!byProj.has(key))byProj.set(key,new Map())
+      const pm=byProj.get(key)!
+      const p=pm.get(proj.id)||{name:proj.name,color:proj.color,allocCapex:0,allocOpex:0,actCapex:0,actOpex:0}
+      p[field]+=amt
+      pm.set(proj.id,p)
+    }
   }
   const approved=projects.filter((p:any)=>p.budget_status==='approved')
   // Allocated — Layer 1 roster rows, named people only
@@ -270,8 +278,8 @@ function quarterlyRollup(projects:any[],projectRoles:any[],itemAssignments:any[]
     for(const m of monthlyRowCost(row.allocation_pct,rate,proj.start_date,end)){
       const{fy,quarter}=fyOf(`${m.key}-15`)
       const{capex,opex}=splitCapexOpex(m.cost,role,proj.budget_type)
-      bump(fy,quarter,person.department,'allocCapex',capex)
-      bump(fy,quarter,person.department,'allocOpex',opex)
+      bump(fy,quarter,person.department,'allocCapex',capex,proj)
+      bump(fy,quarter,person.department,'allocOpex',opex,proj)
     }
   }
   // Actual — Layer 2 item assignments, named people only, on approved projects
@@ -287,12 +295,12 @@ function quarterlyRollup(projects:any[],projectRoles:any[],itemAssignments:any[]
       for(const m of monthlyHoursCost(a.hours||0,rate,it.start_date,it.end_date)){
         const{fy,quarter}=fyOf(`${m.key}-15`)
         const{capex,opex}=splitCapexOpex(m.cost,role,proj.budget_type)
-        bump(fy,quarter,person.department,'actCapex',capex)
-        bump(fy,quarter,person.department,'actOpex',opex)
+        bump(fy,quarter,person.department,'actCapex',capex,proj)
+        bump(fy,quarter,person.department,'actOpex',opex,proj)
       }
     }
   }
-  return out
+  return{totals:out,byProject:byProj}
 }
 // Real spend by vendor — CapEx/OpEx, approved projects only. Billing is about what
 // actually happened, so this uses Layer 2 actuals only, never the Layer 1 forecast.
@@ -4981,6 +4989,7 @@ function BudgetTab({roles,setRoles,people,setPeople,projects,items,projectRoles,
   const [rfNewLabel,setRfNewLabel]=useState('Original')
   const [rfNewCapex,setRfNewCapex]=useState('')
   const [rfNewOpex,setRfNewOpex]=useState('')
+  const [rfSel,setRfSel]=useState<any>(null) // {dept,q} — RF quarter card drill-down
   const [newRoleName,setNewRoleName]=useState('')
   const [newRoleRate,setNewRoleRate]=useState('')
   const [newPersonName,setNewPersonName]=useState('')
@@ -5094,7 +5103,7 @@ function BudgetTab({roles,setRoles,people,setPeople,projects,items,projectRoles,
 
       // RF Budget — approved ceiling vs actual burn, by department/quarter, current FY
       const curFy=fyOf(localISO(new Date())).fy
-      const qRollup=quarterlyRollup(projects,projectRoles,itemAssignments,items,people,roles)
+      const qRollup=quarterlyRollup(projects,projectRoles,itemAssignments,items,people,roles).totals
       const depts=[...new Set(people.map((p:any)=>p.department).filter(Boolean))]
       const rfRows:any[]=[['Department','Quarter','Label','CapEx Approved','CapEx Actual','OpEx Approved','OpEx Actual']]
       for(const dept of depts){
@@ -5248,7 +5257,7 @@ function BudgetTab({roles,setRoles,people,setPeople,projects,items,projectRoles,
         const thisFY=fyOf(localISO(new Date())).fy
         const[fy,setFy]=[rfFy||thisFY,setRfFy]
         const quarters=[1,2,3,4]
-        const rollup=quarterlyRollup(projects,projectRoles,itemAssignments,items,people,roles)
+        const{totals:rollup,byProject:rollupByProj}=quarterlyRollup(projects,projectRoles,itemAssignments,items,people,roles)
         const deptOrder=[...new Set([...people.map((p:any)=>p.department).filter(Boolean),...(rfNewDept?[rfNewDept]:[])])]
         const latestBudget=(dept:string,q:number)=>{
           const revs=qBudgets.filter((b:any)=>b.department===dept&&b.fiscal_year===fy&&b.quarter===q).sort((a:any,b:any)=>a.created_at<b.created_at?1:-1)
@@ -5261,7 +5270,20 @@ function BudgetTab({roles,setRoles,people,setPeople,projects,items,projectRoles,
           if(error){alert('Failed to save budget: '+error.message);return}
           if(data){setQBudgets((prev:any[])=>[...prev,data]);setRfNewCapex('');setRfNewOpex('')}
         }
+        async function updQBudget(id:any,fields:any){
+          setQBudgets((prev:any[])=>prev.map((b:any)=>b.id===id?{...b,...fields}:b))
+          await supabase.from('quarterly_budgets').update(fields).eq('id',id)
+        }
+        async function deleteQBudget(id:any){
+          if(!confirm('Delete this revision? If it was the latest one, the previous revision becomes the active ceiling.'))return
+          setQBudgets((prev:any[])=>prev.filter((b:any)=>b.id!==id))
+          await supabase.from('quarterly_budgets').delete().eq('id',id)
+        }
         const barColor=(pct:number)=>pct>100?'#E74C3C':pct>85?'#E8B95A':'#27AE60'
+        const sel=rfSel
+        const selRow=sel?rollup.get(`${fy}-${sel.q}-${sel.dept}`):null
+        const selProjects=sel?[...(rollupByProj.get(`${fy}-${sel.q}-${sel.dept}`)?.values()||[])].sort((a:any,b:any)=>(b.allocCapex+b.allocOpex)-(a.allocCapex+a.allocOpex)):[]
+        const selHist=sel?history(sel.dept,sel.q):[]
         return(
           <div>
             <div style={{display:'flex',alignItems:'center',gap:10,marginBottom:14}}>
@@ -5287,8 +5309,10 @@ function BudgetTab({roles,setRoles,people,setPeople,projects,items,projectRoles,
                     const capexCeilPct=bud?.capex_approved&&r.allocCapex?Math.min(150,Math.round(bud.capex_approved/r.allocCapex*100)):null
                     const opexCeilPct=bud?.opex_approved&&r.allocOpex?Math.min(150,Math.round(bud.opex_approved/r.allocOpex*100)):null
                     const hist=history(dept,q)
+                    const isSel=sel&&sel.dept===dept&&sel.q===q
                     return(
-                      <div key={q} style={{background:'#12202F',border:'1px solid #243447',borderRadius:10,padding:'10px 14px',width:220}}>
+                      <div key={q} onClick={()=>setRfSel(isSel?null:{dept,q})} title="Click to see contributing projects and edit the finance ceiling"
+                        style={{background:'#12202F',border:'1px solid '+(isSel?'#C8973A':'#243447'),borderRadius:10,padding:'10px 14px',width:220,cursor:'pointer'}}>
                         <div style={{display:'flex',alignItems:'center',gap:6,marginBottom:6}}>
                           <span style={{fontSize:12,fontWeight:700,color:'#F4F6F8'}}>Q{q}</span>
                           {bud&&<span style={{fontSize:8,color:'#7A8FA6',border:'1px solid #243447',borderRadius:6,padding:'0 5px'}}>{bud.label}</span>}
@@ -5334,8 +5358,64 @@ function BudgetTab({roles,setRoles,people,setPeople,projects,items,projectRoles,
                 </div>
               </div>
             ))}
+            {sel&&(
+              <div style={{background:'#12202F',border:'1px solid #C8973A',borderRadius:10,padding:'14px 18px',marginTop:4,marginBottom:20,maxWidth:640}}>
+                <div style={{display:'flex',alignItems:'center',gap:8,marginBottom:10}}>
+                  <span style={{fontSize:13,fontWeight:700,color:'#F4F6F8'}}>{sel.dept} — Q{sel.q} FY{fy}</span>
+                  <button onClick={()=>setRfSel(null)} style={{marginLeft:'auto',background:'none',border:'none',color:'#7A8FA6',fontSize:14,cursor:'pointer'}}>✕</button>
+                </div>
+
+                <div style={{fontSize:10,fontWeight:700,letterSpacing:1,color:'#5DADE2',marginBottom:6}}>CONTRIBUTING PROJECTS</div>
+                {selProjects.length===0&&<div style={{fontSize:11,color:'#7A8FA6',fontStyle:'italic',marginBottom:14}}>No approved projects touch this department/quarter yet.</div>}
+                {selProjects.length>0&&(
+                  <table style={{width:'100%',borderCollapse:'collapse',fontSize:11,marginBottom:16}}>
+                    <thead><tr>
+                      <th style={{textAlign:'left',padding:'4px 6px',color:'#7A8FA6',borderBottom:'1px solid #243447'}}>Project</th>
+                      <th style={{textAlign:'right',padding:'4px 6px',color:'#7A8FA6',borderBottom:'1px solid #243447'}}>CapEx Alloc</th>
+                      <th style={{textAlign:'right',padding:'4px 6px',color:'#7A8FA6',borderBottom:'1px solid #243447'}}>CapEx Actual</th>
+                      <th style={{textAlign:'right',padding:'4px 6px',color:'#7A8FA6',borderBottom:'1px solid #243447'}}>OpEx Alloc</th>
+                      <th style={{textAlign:'right',padding:'4px 6px',color:'#7A8FA6',borderBottom:'1px solid #243447'}}>OpEx Actual</th>
+                    </tr></thead>
+                    <tbody>
+                    {selProjects.map((p:any,ix:number)=>(
+                      <tr key={ix}>
+                        <td style={{padding:'4px 6px',color:'#F4F6F8',borderBottom:'1px solid #1A2838'}}><span style={{display:'inline-block',width:7,height:7,borderRadius:2,background:p.color||'#3A4A5E',marginRight:6}}/>{p.name}</td>
+                        <td style={{textAlign:'right',padding:'4px 6px',color:'#7A8FA6',borderBottom:'1px solid #1A2838'}}>{fmtUSD(p.allocCapex)}</td>
+                        <td style={{textAlign:'right',padding:'4px 6px',color:'#7A8FA6',borderBottom:'1px solid #1A2838'}}>{fmtUSD(p.actCapex)}</td>
+                        <td style={{textAlign:'right',padding:'4px 6px',color:'#7A8FA6',borderBottom:'1px solid #1A2838'}}>{fmtUSD(p.allocOpex)}</td>
+                        <td style={{textAlign:'right',padding:'4px 6px',color:'#7A8FA6',borderBottom:'1px solid #1A2838'}}>{fmtUSD(p.actOpex)}</td>
+                      </tr>
+                    ))}
+                    </tbody>
+                  </table>
+                )}
+
+                <div style={{fontSize:10,fontWeight:700,letterSpacing:1,color:'#5DADE2',marginBottom:6}}>FINANCE CEILING REVISIONS</div>
+                {selHist.length===0&&<div style={{fontSize:11,color:'#7A8FA6',fontStyle:'italic',marginBottom:10}}>No ceiling entered for this quarter yet — use the form below.</div>}
+                {selHist.map((b:any,ix:number)=>{
+                  const isLatest=ix===selHist.length-1
+                  return(
+                    <div key={b.id} style={{display:'flex',alignItems:'center',gap:8,fontSize:11,marginBottom:6,padding:'4px 8px',background:isLatest?'#1E3048':'transparent',borderRadius:6}}>
+                      <span style={{color:isLatest?'#27AE60':'#7A8FA6',fontWeight:700,width:56}}>{b.label}{isLatest?' ✓':''}</span>
+                      <span style={{color:'#7A8FA6',fontSize:9}}>CapEx</span>
+                      <input type="number" value={b.capex_approved} onChange={e=>updQBudget(b.id,{capex_approved:parseFloat(e.target.value)||0})} style={{width:80,background:'#0D1B2A',border:'1px solid #243447',borderRadius:4,color:'#F4F6F8',fontSize:11,padding:'3px 6px'}}/>
+                      <span style={{color:'#7A8FA6',fontSize:9}}>OpEx</span>
+                      <input type="number" value={b.opex_approved} onChange={e=>updQBudget(b.id,{opex_approved:parseFloat(e.target.value)||0})} style={{width:80,background:'#0D1B2A',border:'1px solid #243447',borderRadius:4,color:'#F4F6F8',fontSize:11,padding:'3px 6px'}}/>
+                      <span style={{color:'#3A4A5E',fontSize:9,marginLeft:'auto'}}>{new Date(b.created_at).toLocaleDateString()}</span>
+                      <button onClick={()=>deleteQBudget(b.id)} style={{background:'none',border:'none',color:'#3A4A5E',fontSize:12,cursor:'pointer'}}>🗑</button>
+                    </div>
+                  )
+                })}
+                <div style={{fontSize:10,color:'#7A8FA6',fontStyle:'italic',marginTop:6,lineHeight:1.5}}>
+                  The <b>most recent</b> revision (✓, highlighted) is the active ceiling shown on the card. Edit any row's numbers directly to correct a typo — or, at a real reforecast checkpoint (Jul/Oct/Jan), add a brand-new row below labeled RF1/RF2/RF3 so the history stays intact. Delete a row to remove it entirely; the next-most-recent one takes over.
+                </div>
+              </div>
+            )}
             <div style={{background:'#12202F',border:'1px dashed #243447',borderRadius:10,padding:'12px 16px',maxWidth:520,marginTop:6}}>
               <div style={{fontSize:11,fontWeight:700,color:'#F4F6F8',marginBottom:8}}>+ Enter a budget / reforecast</div>
+              <div style={{fontSize:10,color:'#7A8FA6',marginBottom:10,lineHeight:1.5}}>
+                Set the department's approved dollar amount for a quarter. First entry of the year → label it <b>Original</b>. If you're revising after burning through the current number → pick <b>RF1</b>, <b>RF2</b>, or <b>RF3</b> for whichever checkpoint this is (Jul/Oct/Jan) — the newest entry always becomes the active ceiling, and older ones stay visible as history (click a quarter card above to see and edit them).
+              </div>
               <div style={{display:'flex',gap:6,marginBottom:6,flexWrap:'wrap' as const}}>
                 <select value={rfNewDept} onChange={e=>setRfNewDept(e.target.value)} style={{flex:1,minWidth:120,background:'#0D1B2A',border:'1px solid #243447',borderRadius:5,color:'#F4F6F8',fontSize:11,padding:'5px 8px'}}>
                   <option value="">Department…</option>
