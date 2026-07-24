@@ -376,7 +376,8 @@ function teamBudgetRollup(projects:any[],projectRoles:any[],people:any[],roles:a
       .reduce((s:number,m:any)=>s+m.cost,0)
   }
   const teamOut:any={}
-  for(const team of TEAMS){
+  const allTeams=[...new Set([...TEAMS,...people.map((p:any)=>p.team).filter(Boolean)])]
+  for(const team of allTeams){
     const teamPeople=people.filter((p:any)=>p.active&&p.team===team)
     const depts=[...new Set(teamPeople.map((p:any)=>p.department).filter(Boolean))]
     const deptOut:any={}
@@ -832,7 +833,7 @@ function ProjectDetail({project,items,setItems,projects,setProjects,milestones,s
               <div style={{display:'flex',gap:5,marginTop:6,flexWrap:'wrap' as const}}>
                 <select value={prTeam} onChange={e=>{setPrTeam(e.target.value);setPrPerson('');setPrRole('')}} style={{background:'#0D1B2A',border:'1px dashed #243447',borderRadius:5,color:'#7A8FA6',fontSize:10,padding:'4px 6px'}}>
                   <option value="">Team…</option>
-                  {TEAMS.map(t=><option key={t} value={t}>{t}</option>)}
+                  {[...new Set([...TEAMS,...people.map((p:any)=>p.team).filter(Boolean)])].map(t=><option key={t} value={t}>{t}</option>)}
                 </select>
                 <select value={prPerson} onChange={e=>setPrPerson(e.target.value)} disabled={!prTeam}
                   style={{flex:1,minWidth:120,background:'#0D1B2A',border:'1px dashed #243447',borderRadius:5,color:'#7A8FA6',fontSize:10,padding:'4px 6px',opacity:prTeam?1:0.5}}>
@@ -5793,7 +5794,7 @@ function BudgetTab({roles,setRoles,people,setPeople,projects,items,projectRoles,
       {view==='capacity'&&(()=>{
         const{perPerson,byProject}=capacityByMonth(projects,projectRoles,people,roles)
         const monthKeys=buildMonthKeys(capWindow)
-        const teamOrder=[...TEAMS,'']
+        const teamOrder=[...new Set([...TEAMS,...people.map((p:any)=>p.team).filter(Boolean)]),'']
         const peopleByTeam=teamOrder.map(t=>({team:t||'No team',people:people.filter((p:any)=>p.active&&(p.team||'')===t)})).filter(g=>g.people.length)
         const pctColor=(pct:number)=>pct>105?'#E74C3C':pct>=85?'#27AE60':pct>=50?'#E8B95A':'#5DADE2'
         const sel=capSel
@@ -5889,7 +5890,7 @@ function BudgetTab({roles,setRoles,people,setPeople,projects,items,projectRoles,
       {view==='teamcost'&&(()=>{
         const{perPerson,byProject}=capacityByMonth(projects,projectRoles,people,roles)
         const monthKeys=buildMonthKeys(tcWindow)
-        const teamOrder=[...TEAMS,'']
+        const teamOrder=[...new Set([...TEAMS,...people.map((p:any)=>p.team).filter(Boolean)]),'']
         const peopleByTeam=teamOrder.map(t=>({team:t||'No team',people:people.filter((p:any)=>p.active&&(p.team||'')===t)})).filter(g=>g.people.length)
         const fillColor=(pct:number)=>pct>105?'#5DADE2':pct>=85?'#27AE60':pct>=50?'#E8B95A':'#E74C3C'
         const sel=tcSel
@@ -6022,7 +6023,7 @@ function BudgetTab({roles,setRoles,people,setPeople,projects,items,projectRoles,
             <div style={{fontSize:11,color:'#7A8FA6',marginBottom:16,lineHeight:1.5}}>
               Each team's cost is fixed — you're paying for it whether or not it's assigned to a project. <b style={{color:'#27AE60'}}>Approved</b> shows what's actually claimed today; <b style={{color:'#5DADE2'}}>Requested</b> and <b style={{color:'#E8B95A'}}>Draft</b> show what the pipeline would claim if approved. Unclaimed dollars are flagged — they're still OpEx, just not building anything yet.
             </div>
-            {TEAMS.map(team=>{
+            {[...new Set([...TEAMS,...people.map((p:any)=>p.team).filter(Boolean)])].map(team=>{
               const t=rollup[team]
               if(!t||t.total<=0)return null
               return(
