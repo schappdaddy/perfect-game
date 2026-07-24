@@ -5279,8 +5279,13 @@ function BudgetTab({roles,setRoles,people,setPeople,projects,items,projectRoles,
                   {quarters.map(q=>{
                     const bud=latestBudget(dept,q)
                     const r=rollup.get(`${fy}-${q}-${dept}`)||{allocCapex:0,allocOpex:0,actCapex:0,actOpex:0}
-                    const capexPct=bud?.capex_approved?Math.round(r.actCapex/bud.capex_approved*100):0
-                    const opexPct=bud?.opex_approved?Math.round(r.actOpex/bud.opex_approved*100):0
+                    // Primary comparison: Actual vs. the Approved (Proposed) Budget — the sum of
+                    // project-level approvals, which is bottom-up and always available.
+                    // The finance ceiling (if entered) overlays as a reference marker, not the gate.
+                    const capexPct=r.allocCapex?Math.round(r.actCapex/r.allocCapex*100):0
+                    const opexPct=r.allocOpex?Math.round(r.actOpex/r.allocOpex*100):0
+                    const capexCeilPct=bud?.capex_approved&&r.allocCapex?Math.min(150,Math.round(bud.capex_approved/r.allocCapex*100)):null
+                    const opexCeilPct=bud?.opex_approved&&r.allocOpex?Math.min(150,Math.round(bud.opex_approved/r.allocOpex*100)):null
                     const hist=history(dept,q)
                     return(
                       <div key={q} style={{background:'#12202F',border:'1px solid #243447',borderRadius:10,padding:'10px 14px',width:220}}>
@@ -5290,15 +5295,38 @@ function BudgetTab({roles,setRoles,people,setPeople,projects,items,projectRoles,
                         </div>
                         <>
                         <div style={{fontSize:9,color:'#7A8FA6',marginBottom:2}}>CapEx</div>
-                        <div style={{display:'flex',justifyContent:'space-between',fontSize:10,marginBottom:2}}><span style={{color:'#F4F6F8'}}>{fmtUSD(r.actCapex)}</span><span style={{color:'#7A8FA6'}}>{bud?`of ${fmtUSD(bud.capex_approved)}`:'no ceiling set'}</span></div>
-                        {bud&&<div style={{background:'#0D1B2A',borderRadius:4,height:5,overflow:'hidden',marginBottom:8}}><div style={{width:Math.min(100,capexPct)+'%',height:'100%',background:barColor(capexPct)}}/></div>}
-                        {!bud&&<div style={{marginBottom:8}}/>}
-                        <div style={{fontSize:9,color:'#7A8FA6',marginBottom:2}}>OpEx</div>
-                        <div style={{display:'flex',justifyContent:'space-between',fontSize:10,marginBottom:2}}><span style={{color:'#F4F6F8'}}>{fmtUSD(r.actOpex)}</span><span style={{color:'#7A8FA6'}}>{bud?`of ${fmtUSD(bud.opex_approved)}`:'no ceiling set'}</span></div>
-                        {bud&&<div style={{background:'#0D1B2A',borderRadius:4,height:5,overflow:'hidden'}}><div style={{width:Math.min(100,opexPct)+'%',height:'100%',background:barColor(opexPct)}}/></div>}
-                        {!bud&&r.actCapex+r.actOpex>0&&<div style={{fontSize:9,color:'#7A8FA6',fontStyle:'italic',marginTop:4}}>Real spend, no approved ceiling yet</div>}
-                        {bud&&(capexPct>90||opexPct>90)&&<div style={{fontSize:9,color:'#E74C3C',marginTop:6,fontWeight:700}}>⚠ Approaching or over ceiling — consider a reforecast</div>}
-                        {hist.length>1&&<div style={{fontSize:8,color:'#7A8FA6',marginTop:6}}>{hist.length} revisions</div>}
+                        <div style={{display:'flex',justifyContent:'space-between',fontSize:10,marginBottom:2}}>
+                          <span style={{color:'#7A8FA6'}}>Approved Budget</span><span style={{color:'#F4F6F8',fontWeight:700}}>{fmtUSD(r.allocCapex)}</span>
+                        </div>
+                        <div style={{display:'flex',justifyContent:'space-between',fontSize:10,marginBottom:2}}>
+                          <span style={{color:'#7A8FA6'}}>Actual</span><span style={{color:r.actCapex>r.allocCapex&&r.allocCapex>0?'#E74C3C':'#27AE60'}}>{fmtUSD(r.actCapex)}</span>
+                        </div>
+                        {r.allocCapex>0&&(
+                          <div style={{background:'#0D1B2A',borderRadius:4,height:5,overflow:'hidden',marginBottom:4,position:'relative' as const}}>
+                            <div style={{width:Math.min(100,capexPct)+'%',height:'100%',background:barColor(capexPct)}}/>
+                            {capexCeilPct!=null&&<div title={`Finance ceiling: ${fmtUSD(bud.capex_approved)}`} style={{position:'absolute',top:0,bottom:0,left:Math.min(100,capexCeilPct)+'%',width:2,background:'#F4F6F8'}}/>}
+                          </div>
+                        )}
+                        {bud&&<div style={{fontSize:9,color:'#7A8FA6',marginBottom:8}}>Finance ceiling: {fmtUSD(bud.capex_approved)}</div>}
+                        {!bud&&<div style={{fontSize:9,color:'#7A8FA6',fontStyle:'italic',marginBottom:8}}>No finance ceiling entered</div>}
+                        <div style={{fontSize:9,color:'#7A8FA6',marginBottom:2,marginTop:4}}>OpEx</div>
+                        <div style={{display:'flex',justifyContent:'space-between',fontSize:10,marginBottom:2}}>
+                          <span style={{color:'#7A8FA6'}}>Approved Budget</span><span style={{color:'#F4F6F8',fontWeight:700}}>{fmtUSD(r.allocOpex)}</span>
+                        </div>
+                        <div style={{display:'flex',justifyContent:'space-between',fontSize:10,marginBottom:2}}>
+                          <span style={{color:'#7A8FA6'}}>Actual</span><span style={{color:r.actOpex>r.allocOpex&&r.allocOpex>0?'#E74C3C':'#27AE60'}}>{fmtUSD(r.actOpex)}</span>
+                        </div>
+                        {r.allocOpex>0&&(
+                          <div style={{background:'#0D1B2A',borderRadius:4,height:5,overflow:'hidden',marginBottom:4,position:'relative' as const}}>
+                            <div style={{width:Math.min(100,opexPct)+'%',height:'100%',background:barColor(opexPct)}}/>
+                            {opexCeilPct!=null&&<div title={`Finance ceiling: ${fmtUSD(bud.opex_approved)}`} style={{position:'absolute',top:0,bottom:0,left:Math.min(100,opexCeilPct)+'%',width:2,background:'#F4F6F8'}}/>}
+                          </div>
+                        )}
+                        {bud&&<div style={{fontSize:9,color:'#7A8FA6'}}>Finance ceiling: {fmtUSD(bud.opex_approved)}</div>}
+                        {!bud&&<div style={{fontSize:9,color:'#7A8FA6',fontStyle:'italic'}}>No finance ceiling entered</div>}
+                        {r.allocCapex===0&&r.allocOpex===0&&(r.actCapex+r.actOpex)>0&&<div style={{fontSize:9,color:'#E8B95A',marginTop:6,fontStyle:'italic'}}>Spend logged but no approved project budget found — check project approval status.</div>}
+                        {((r.allocCapex>0&&r.actCapex>r.allocCapex)||(r.allocOpex>0&&r.actOpex>r.allocOpex))&&<div style={{fontSize:9,color:'#E74C3C',marginTop:6,fontWeight:700}}>⚠ Actual spend exceeds the approved budget</div>}
+                        {hist.length>1&&<div style={{fontSize:8,color:'#7A8FA6',marginTop:6}}>{hist.length} finance revisions</div>}
                         </>
                       </div>
                     )
