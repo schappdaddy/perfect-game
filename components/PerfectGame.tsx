@@ -209,6 +209,13 @@ function projectForecast(project:any,projectRoles:any[],roles:any[]){
 // Layer 2: actuals — named people on committed items, rolled up to the project.
 // Builds every project_roles row's monthly $ (person-linked rows only — generic/unassigned
 // rows have no one to attribute capacity to) and rolls it up by person and by team.
+// What we'd pay a person for a full month if 100% of their time were billed — the
+// "are we getting our money's worth" baseline. Same working-days basis as everything else.
+function fullCostForMonth(monthKey:string,rate:number){
+  const[y,m]=monthKey.split('-').map(Number)
+  const start=`${monthKey}-01`,end=localISO(new Date(y,m,0))
+  return workingDays(start,end)*8*rate
+}
 function capacityByMonth(projects:any[],projectRoles:any[],people:any[],roles:any[]){
   const active=projects.filter((p:any)=>!PROJECT_TERMINAL.includes(p.status)&&p.start_date&&(p.end_date||p.ongoing))
   const perPerson=new Map<string,Map<string,{cost:number,pct:number}>>() // person_id -> month -> {cost,pct}
@@ -4998,6 +5005,7 @@ function BudgetTab({roles,setRoles,people,setPeople,projects,items,projectRoles,
   const [rfNewOpex,setRfNewOpex]=useState('')
   const [rfSel,setRfSel]=useState<any>(null) // {dept,q} — RF quarter card drill-down
   const [vendorFy,setVendorFy]=useState<any>(null)
+  const [tcSel,setTcSel]=useState<any>(null) // {personId,key} — Team Cost cell drill-down
   const [newRoleName,setNewRoleName]=useState('')
   const [newRoleRate,setNewRoleRate]=useState('')
   const [newPersonName,setNewPersonName]=useState('')
@@ -5154,7 +5162,7 @@ function BudgetTab({roles,setRoles,people,setPeople,projects,items,projectRoles,
       <div style={{display:'flex',alignItems:'center',gap:8,marginBottom:18}}>
         <span style={{fontSize:20,fontWeight:800,color:'#F4F6F8'}}>$ Budget</span>
         <div style={{display:'flex',gap:4,marginLeft:16}}>
-          {[['dashboard','Dashboard'],['capacity','Capacity'],['rf','RF Budget'],['vendor','Vendor'],['roster','Roster'],['rates','Rate Card']].map(([k,label])=>(
+          {[['dashboard','Dashboard'],['capacity','Capacity'],['teamcost','Team Cost'],['rf','RF Budget'],['vendor','Vendor'],['roster','Roster'],['rates','Rate Card']].map(([k,label])=>(
             <button key={k} onClick={()=>setView(k)} style={{background:view===k?'#C8973A':'#1E3048',color:view===k?'#0D1B2A':'#7A8FA6',border:'1px solid '+(view===k?'#C8973A':'#243447'),borderRadius:6,padding:'6px 14px',fontSize:12,fontWeight:700,cursor:'pointer'}}>{label}</button>
           ))}
         </div>
@@ -5531,12 +5539,16 @@ function BudgetTab({roles,setRoles,people,setPeople,projects,items,projectRoles,
                 {[thisFY-1,thisFY,thisFY+1].map(y=><option key={y} value={y}>FY{y}</option>)}
               </select>
             </div>
-            <div style={{fontSize:11,color:'#7A8FA6',marginBottom:12,lineHeight:1.5}}>Real spend (actual hours × rate) on approved projects, by vendor — CapEx/OpEx split per the role/project-type rule. Each quarter cell shows CapEx over OpEx.</div>
+            <div style={{fontSize:11,color:'#7A8FA6',marginBottom:6,lineHeight:1.5}}>Real spend (actual hours × rate) on approved projects, by vendor — CapEx/OpEx split per the role/project-type rule.</div>
+            <div style={{display:'flex',gap:14,fontSize:10,color:'#7A8FA6',marginBottom:10}}>
+              <span><span style={{display:'inline-block',width:8,height:8,borderRadius:2,background:'#5DADE2',marginRight:5}}/>CapEx</span>
+              <span><span style={{display:'inline-block',width:8,height:8,borderRadius:2,background:'#7A8FA6',marginRight:5}}/>OpEx</span>
+            </div>
             <div style={{overflowX:'auto'}}>
             <table style={{borderCollapse:'collapse',fontSize:12,minWidth:760}}>
               <thead><tr>
                 <th style={{textAlign:'left',padding:'6px 10px',color:'#7A8FA6',borderBottom:'1px solid #243447'}}>Vendor</th>
-                {[1,2,3,4].map(q=><th key={q} style={{textAlign:'right',padding:'6px 10px',color:'#7A8FA6',borderBottom:'1px solid #243447'}}>Q{q}</th>)}
+                {[1,2,3,4].map(q=><th key={q} style={{textAlign:'right',padding:'6px 10px',color:'#7A8FA6',borderBottom:'1px solid #243447'}}>Q{q}<div style={{fontSize:8,fontWeight:400,color:'#5A6B7D'}}>CapEx / OpEx</div></th>)}
                 <th style={{textAlign:'right',padding:'6px 10px',color:'#7A8FA6',borderBottom:'1px solid #243447'}}>FY{vfy} Total</th>
               </tr></thead>
               <tbody>
@@ -5547,11 +5559,11 @@ function BudgetTab({roles,setRoles,people,setPeople,projects,items,projectRoles,
                     const c=cellOf(v.vendor,q)
                     return(
                       <td key={q} style={{textAlign:'right',padding:'6px 10px',borderBottom:'1px solid #1A2838'}}>
-                        {(c.capex+c.opex)>0?<><div style={{color:'#5DADE2',fontSize:11}}>{fmtUSD(c.capex)}</div><div style={{color:'#7A8FA6',fontSize:10}}>{fmtUSD(c.opex)}</div></>:<span style={{color:'#3A4A5E'}}>—</span>}
+                        {(c.capex+c.opex)>0?<><div style={{color:'#5DADE2',fontSize:11}}>{fmtUSD(c.capex)} <span style={{color:'#5A6B7D',fontSize:9}}>C</span></div><div style={{color:'#7A8FA6',fontSize:10}}>{fmtUSD(c.opex)} <span style={{color:'#5A6B7D',fontSize:9}}>O</span></div></>:<span style={{color:'#3A4A5E'}}>—</span>}
                       </td>
                     )
                   })}
-                  <td style={{textAlign:'right',padding:'6px 10px',color:'#F4F6F8',fontWeight:700,borderBottom:'1px solid #1A2838'}}>{fmtUSD(v.total)}</td>
+                  <td style={{textAlign:'right',padding:'6px 10px',color:'#F4F6F8',fontWeight:700,borderBottom:'1px solid #1A2838'}}>{fmtUSD(v.total)}<div style={{fontSize:9,color:'#7A8FA6',fontWeight:400}}>C {fmtUSD(v.capex)} / O {fmtUSD(v.opex)}</div></td>
                 </tr>
               ))}
               {vendors.length===0&&<tr><td colSpan={6} style={{padding:10,color:'#7A8FA6',fontStyle:'italic'}}>No vendor-attributed actual spend in FY{vfy}.</td></tr>}
@@ -5563,12 +5575,12 @@ function BudgetTab({roles,setRoles,people,setPeople,projects,items,projectRoles,
                   const qOpex=vendors.reduce((s,v)=>s+cellOf(v.vendor,q).opex,0)
                   return(
                     <td key={q} style={{textAlign:'right',padding:'8px 10px',borderTop:'2px solid #243447'}}>
-                      <div style={{color:'#5DADE2',fontSize:11,fontWeight:700}}>{fmtUSD(qCapex)}</div>
-                      <div style={{color:'#7A8FA6',fontSize:10}}>{fmtUSD(qOpex)}</div>
+                      <div style={{color:'#5DADE2',fontSize:11,fontWeight:700}}>{fmtUSD(qCapex)} <span style={{color:'#5A6B7D',fontSize:9,fontWeight:400}}>C</span></div>
+                      <div style={{color:'#7A8FA6',fontSize:10}}>{fmtUSD(qOpex)} <span style={{color:'#5A6B7D',fontSize:9}}>O</span></div>
                     </td>
                   )
                 })}
-                <td style={{textAlign:'right',padding:'8px 10px',color:'#F4F6F8',fontWeight:800,borderTop:'2px solid #243447'}}>{fmtUSD(grand.capex+grand.opex)}</td>
+                <td style={{textAlign:'right',padding:'8px 10px',color:'#F4F6F8',fontWeight:800,borderTop:'2px solid #243447'}}>{fmtUSD(grand.capex+grand.opex)}<div style={{fontSize:9,color:'#7A8FA6',fontWeight:400}}>C {fmtUSD(grand.capex)} / O {fmtUSD(grand.opex)}</div></td>
               </tr></tfoot>}
             </table>
             </div>
@@ -5662,6 +5674,108 @@ function BudgetTab({roles,setRoles,people,setPeople,projects,items,projectRoles,
                   <span style={{color:'#7A8FA6',width:64,textAlign:'right' as const,marginLeft:8}}>{fmtUSD(selBreakdown.reduce((s:number,b:any)=>s+b.cost,0))}</span>
                 </div>
               )}
+            </div>
+          )}
+          </div>
+        )
+      })()}
+
+      {view==='teamcost'&&(()=>{
+        const{perPerson,byProject}=capacityByMonth(projects,projectRoles,people,roles)
+        const monthKeys:string[]=[]
+        const start=new Date();start.setDate(1)
+        for(let i=0;i<6;i++){const d=new Date(start.getFullYear(),start.getMonth()+i,1);monthKeys.push(`${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,'0')}`)}
+        const teamOrder=[...TEAMS,'']
+        const peopleByTeam=teamOrder.map(t=>({team:t||'No team',people:people.filter((p:any)=>p.active&&(p.team||'')===t)})).filter(g=>g.people.length)
+        const fillColor=(pct:number)=>pct>105?'#5DADE2':pct>=85?'#27AE60':pct>=50?'#E8B95A':'#E74C3C'
+        const sel=tcSel
+        const selPerson=sel?people.find((p:any)=>p.id===sel.personId):null
+        const selFull=sel?fullCostForMonth(sel.key,rateOf(selPerson,roles)):0
+        const selProjects=sel?[...(byProject.get(sel.personId)?.get(sel.key)||[])].sort((a:any,b:any)=>b.cost-a.cost):[]
+        const selAllocated=selProjects.reduce((s:number,p:any)=>s+p.cost,0)
+        return(
+          <div>
+          <div style={{overflowX:'auto'}}>
+            <div style={{fontSize:11,color:'#7A8FA6',marginBottom:12,lineHeight:1.5}}>
+              What we'd pay each person at full utilization vs. what's actually allocated to projects — the gap is bench cost: paying for capacity that isn't booked to anything. Rolling 6-month window. Click a cell for the project breakdown.
+            </div>
+            <table style={{borderCollapse:'collapse',fontSize:11,minWidth:640}}>
+              <thead><tr>
+                <th style={{textAlign:'left',padding:'6px 10px',color:'#7A8FA6',borderBottom:'1px solid #243447',position:'sticky' as const,left:0,background:'#0D1B2A'}}>Person</th>
+                {monthKeys.map(k=><th key={k} style={{textAlign:'center',padding:'6px 10px',color:'#7A8FA6',borderBottom:'1px solid #243447',minWidth:100}}>{monthLabel(k)}</th>)}
+              </tr></thead>
+              <tbody>
+              {peopleByTeam.map(group=>{
+                let teamFull=0,teamAlloc=0
+                return(
+                <Fragment key={group.team}>
+                  <tr><td colSpan={monthKeys.length+1} style={{padding:'10px 10px 4px',fontSize:10,fontWeight:700,letterSpacing:1,color:'#5DADE2'}}>{group.team.toUpperCase()}</td></tr>
+                  {group.people.map((p:any)=>{
+                    const rate=rateOf(p,roles)
+                    const pm=perPerson.get(p.id)
+                    return(
+                      <tr key={p.id}>
+                        <td style={{padding:'4px 10px',color:'#F4F6F8',position:'sticky' as const,left:0,background:'#0D1B2A',whiteSpace:'nowrap' as const}}>{p.name} <span style={{color:'#7A8FA6',fontSize:9}}>· {roles.find((r:any)=>r.id===p.role_id)?.name||'—'}</span></td>
+                        {monthKeys.map(k=>{
+                          const full=fullCostForMonth(k,rate)
+                          const alloc=pm?.get(k)?.cost||0
+                          teamFull+=full;teamAlloc+=alloc
+                          const pct=full>0?Math.round(alloc/full*100):0
+                          const isSel=sel&&sel.personId===p.id&&sel.key===k
+                          return(
+                            <td key={k} style={{textAlign:'center',padding:'4px 10px'}}>
+                              {full>0?(
+                                <div onClick={()=>setTcSel(isSel?null:{personId:p.id,key:k})} title="Click for project breakdown"
+                                  style={{cursor:'pointer',borderRadius:4,padding:'2px 4px',background:isSel?'#1E3048':'transparent',border:isSel?'1px solid #C8973A':'1px solid transparent'}}>
+                                  <div style={{fontWeight:700,color:fillColor(pct)}}>{fmtUSD(alloc)}</div>
+                                  <div style={{fontSize:9,color:'#7A8FA6'}}>of {fmtUSD(full)}</div>
+                                </div>
+                              ):<span style={{color:'#3A4A5E'}}>—</span>}
+                            </td>
+                          )
+                        })}
+                      </tr>
+                    )
+                  })}
+                  <tr style={{borderTop:'1px solid #243447'}}>
+                    <td style={{padding:'4px 10px',color:'#7A8FA6',fontSize:10,fontStyle:'italic',position:'sticky' as const,left:0,background:'#0D1B2A'}}>Team fill rate</td>
+                    <td colSpan={monthKeys.length} style={{padding:'4px 10px',fontSize:10,color:'#7A8FA6'}}>
+                      {teamFull>0?<>Filling <b style={{color:fillColor(Math.round(teamAlloc/teamFull*100))}}>{Math.round(teamAlloc/teamFull*100)}%</b> of {fmtUSD(teamFull)} paid over this window — {fmtUSD(teamFull-teamAlloc)} unbooked</>:'—'}
+                    </td>
+                  </tr>
+                </Fragment>
+              )})}
+              {peopleByTeam.length===0&&<tr><td style={{padding:10,color:'#7A8FA6',fontStyle:'italic'}}>No active roster people yet.</td></tr>}
+              </tbody>
+            </table>
+          </div>
+          {sel&&(
+            <div style={{marginTop:16,background:'#12202F',border:'1px solid #C8973A',borderRadius:10,padding:'12px 16px',maxWidth:480}}>
+              <div style={{display:'flex',alignItems:'center',gap:8,marginBottom:8}}>
+                <span style={{fontSize:12,fontWeight:700,color:'#F4F6F8'}}>{selPerson?.name} — {monthLabel(sel.key)}</span>
+                <button onClick={()=>setTcSel(null)} style={{marginLeft:'auto',background:'none',border:'none',color:'#7A8FA6',fontSize:14,cursor:'pointer'}}>✕</button>
+              </div>
+              <div style={{display:'flex',justifyContent:'space-between',fontSize:11,marginBottom:8,paddingBottom:8,borderBottom:'1px solid #243447'}}>
+                <span style={{color:'#7A8FA6'}}>Full cost this month</span><span style={{color:'#F4F6F8',fontWeight:700}}>{fmtUSD(selFull)}</span>
+              </div>
+              {selProjects.length===0&&<div style={{fontSize:11,color:'#E74C3C',fontStyle:'italic'}}>Not allocated to any project this month — full cost is unfilled bench time.</div>}
+              {selProjects.map((p:any,ix:number)=>(
+                <div key={ix} style={{display:'flex',alignItems:'center',gap:8,fontSize:11,padding:'4px 0',borderBottom:ix<selProjects.length-1?'1px solid #1A2838':'none'}}>
+                  <span style={{width:8,height:8,borderRadius:2,background:p.color||'#3A4A5E',flexShrink:0}}/>
+                  <span style={{color:'#F4F6F8',flex:1}}>{p.project}</span>
+                  <span style={{color:'#7A8FA6'}}>{fmtUSD(p.cost)}</span>
+                </div>
+              ))}
+              {selProjects.length>0&&(
+                <div style={{display:'flex',fontSize:11,fontWeight:700,paddingTop:6,marginTop:2,borderTop:'1px solid #243447'}}>
+                  <span style={{color:'#F4F6F8',flex:1}}>Allocated total</span>
+                  <span style={{color:'#F4F6F8'}}>{fmtUSD(selAllocated)}</span>
+                </div>
+              )}
+              <div style={{display:'flex',fontSize:11,fontWeight:700,marginTop:4}}>
+                <span style={{color:selFull-selAllocated>0?'#E74C3C':'#27AE60',flex:1}}>{selFull-selAllocated>0?'Unfilled (bench)':'Fully booked'}</span>
+                <span style={{color:selFull-selAllocated>0?'#E74C3C':'#27AE60'}}>{fmtUSD(Math.max(0,selFull-selAllocated))}</span>
+              </div>
             </div>
           )}
           </div>
