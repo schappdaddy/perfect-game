@@ -195,6 +195,12 @@ function buildMonthKeys(window:string):string[]{
   const n=window==='1'?1:window==='3'?3:window==='9'?9:window==='year'?12:6 // default/'6'
   return keys(now.getFullYear(),now.getMonth(),n)
 }
+// Calendar months belonging to a given fiscal quarter — the reverse of fyOf().
+function fiscalQuarterMonthKeys(fy:number,quarter:number):string[]{
+  const monthsByQ:any={1:[3,4,5],2:[6,7,8],3:[9,10,11],4:[0,1,2]}
+  const calYear=quarter===4?fy:fy-1
+  return monthsByQ[quarter].map((m:number)=>`${calYear}-${String(m+1).padStart(2,'0')}`)
+}
 function monthLabel(key:string){
   const[y,m]=key.split('-').map(Number)
   return new Date(y,m-1,1).toLocaleDateString('default',{month:'short',year:'2-digit'})
@@ -5119,6 +5125,7 @@ function BudgetTab({roles,setRoles,people,setPeople,projects,items,projectRoles,
   const [tcWindow,setTcWindow]=useState('6')
   const [tbWindow,setTbWindow]=useState('fy')
   const [tbSel,setTbSel]=useState<any>(null) // {team,dept} — Team Budget drill-down
+  const [rfPeopleFilter,setRfPeopleFilter]=useState('all') // 'all' | 'contractor' | 'fte' — RF Budget roster filter
   const [newRoleName,setNewRoleName]=useState('')
   const [newRoleRate,setNewRoleRate]=useState('')
   const [newPersonName,setNewPersonName]=useState('')
@@ -5499,8 +5506,23 @@ function BudgetTab({roles,setRoles,people,setPeople,projects,items,projectRoles,
         const thisFY=fyOf(localISO(new Date())).fy
         const[fy,setFy]=[rfFy||thisFY,setRfFy]
         const quarters=[1,2,3,4]
-        const{totals:rollup,byProject:rollupByProj}=quarterlyRollup(projects,projectRoles,itemAssignments,items,people,roles)
-        const deptOrder=[...new Set([...people.map((p:any)=>p.department).filter(Boolean),...(rfNewDept?[rfNewDept]:[])])]
+        // Everyone / Contractor / FTE — filters the roster feeding BOTH Team Cost and Project Cost/Actual,
+        // so switching it gives a consistent "what if we only look at contractors" view throughout.
+        const rfPeople=people.filter((p:any)=>{
+          if(rfPeopleFilter==='all')return true
+          const role=roles.find((r:any)=>r.id===p.role_id)
+          return(role?.type||'contractor')===rfPeopleFilter
+        })
+        const{totals:rollup,byProject:rollupByProj}=quarterlyRollup(projects,projectRoles,itemAssignments,items,rfPeople,roles)
+        const deptOrder=[...new Set([...rfPeople.map((p:any)=>p.department).filter(Boolean),...(rfNewDept?[rfNewDept]:[])])]
+        // Team Cost — the department's fixed roster cost for one fiscal quarter, regardless of project assignment.
+        const teamCostForDeptQuarter=(dept:string,q:number)=>{
+          const keys=fiscalQuarterMonthKeys(fy,q)
+          return rfPeople.filter((p:any)=>p.active&&p.department===dept).reduce((sum:number,p:any)=>{
+            const rate=rateOf(p,roles)
+            return sum+keys.reduce((s:number,k:string)=>s+fullCostForMonth(k,rate),0)
+          },0)
+        }
         const latestBudget=(dept:string,q:number)=>{
           const revs=qBudgets.filter((b:any)=>b.department===dept&&b.fiscal_year===fy&&b.quarter===q).sort((a:any,b:any)=>a.created_at<b.created_at?1:-1)
           return revs[0]||null
@@ -5526,47 +5548,57 @@ function BudgetTab({roles,setRoles,people,setPeople,projects,items,projectRoles,
         const selRow=sel?rollup.get(`${fy}-${sel.q}-${sel.dept}`):null
         const selProjects=sel?[...(rollupByProj.get(`${fy}-${sel.q}-${sel.dept}`)?.values()||[])].sort((a:any,b:any)=>(b.allocCapex+b.allocOpex)-(a.allocCapex+a.allocOpex)):[]
         const selHist=sel?history(sel.dept,sel.q):[]
+        const selTeamCost=sel?teamCostForDeptQuarter(sel.dept,sel.q):0
         return(
           <div>
-            <div style={{display:'flex',alignItems:'center',gap:10,marginBottom:14}}>
+            <div style={{display:'flex',alignItems:'center',gap:10,marginBottom:6,flexWrap:'wrap' as const}}>
               <span style={{fontSize:11,color:'#7A8FA6'}}>Fiscal Year</span>
               <select value={fy} onChange={e=>setRfFy(parseInt(e.target.value))} style={{background:'#12202F',border:'1px solid #243447',borderRadius:6,color:'#F4F6F8',fontSize:12,padding:'5px 8px'}}>
                 {[thisFY-1,thisFY,thisFY+1].map(y=><option key={y} value={y}>FY{y}</option>)}
               </select>
-              <span style={{fontSize:10,color:'#7A8FA6',fontStyle:'italic'}}>Q1 Apr–Jun · Q2 Jul–Sep · Q3 Oct–Dec · Q4 Jan–Mar. Checkpoints: RF1 (Jul), RF2 (Oct), RF3 (Jan).</span>
+              <span style={{fontSize:11,color:'#7A8FA6',marginLeft:10}}>Roster</span>
+              <select value={rfPeopleFilter} onChange={e=>setRfPeopleFilter(e.target.value)} style={{background:'#12202F',border:'1px solid #243447',borderRadius:6,color:'#F4F6F8',fontSize:12,padding:'5px 8px'}}>
+                <option value="all">Everyone</option>
+                <option value="contractor">Contractors only</option>
+                <option value="fte">FTE only</option>
+              </select>
             </div>
+            <div style={{fontSize:10,color:'#7A8FA6',fontStyle:'italic',marginBottom:14}}>Q1 Apr–Jun · Q2 Jul–Sep · Q3 Oct–Dec · Q4 Jan–Mar. Checkpoints: RF1 (Jul), RF2 (Oct), RF3 (Jan).</div>
 
             {/* Portfolio-wide FY summary — every department's four quarters, summed */}
             {(()=>{
-              let sAlloc={capex:0,opex:0},sAct={capex:0,opex:0},sCeil={capex:0,opex:0},anyCeil=false
+              let sTeam=0,sAlloc={capex:0,opex:0},sAct={capex:0,opex:0},sCeil={capex:0,opex:0},anyCeil=false
               for(const dept of deptOrder){
                 for(let q=1;q<=4;q++){
+                  sTeam+=teamCostForDeptQuarter(dept,q)
                   const r=rollup.get(`${fy}-${q}-${dept}`)
                   if(r){sAlloc.capex+=r.allocCapex;sAlloc.opex+=r.allocOpex;sAct.capex+=r.actCapex;sAct.opex+=r.actOpex}
                   const b=latestBudget(dept,q)
                   if(b){sCeil.capex+=b.capex_approved;sCeil.opex+=b.opex_approved;anyCeil=true}
                 }
               }
+              const sProjectTotal=sAlloc.capex+sAlloc.opex
+              const sUnalloc=Math.max(0,sTeam-sProjectTotal)
               return(
                 <div style={{background:'#12202F',border:'1px solid #3A4A5E',borderRadius:10,padding:'14px 18px',marginBottom:20}}>
-                  <div style={{fontSize:11,fontWeight:700,letterSpacing:1,color:'#F4F6F8',marginBottom:10}}>FY{fy} FULL-YEAR SUMMARY — ALL DEPARTMENTS</div>
-                  <div style={{display:'flex',gap:32,flexWrap:'wrap' as const}}>
+                  <div style={{fontSize:11,fontWeight:700,letterSpacing:1,color:'#F4F6F8',marginBottom:10}}>FY{fy} FULL-YEAR SUMMARY — ALL DEPARTMENTS{rfPeopleFilter!=='all'&&<span style={{color:'#7A8FA6',fontWeight:400}}> · {rfPeopleFilter==='contractor'?'Contractors only':'FTE only'}</span>}</div>
+                  <div style={{display:'flex',gap:28,flexWrap:'wrap' as const}}>
                     <div>
-                      <div style={{fontSize:9,color:'#7A8FA6',marginBottom:3}}>CapEx</div>
-                      <div style={{fontSize:11,color:'#7A8FA6'}}>Approved Budget <b style={{color:'#F4F6F8'}}>{fmtUSD(sAlloc.capex)}</b></div>
-                      <div style={{fontSize:11,color:'#7A8FA6'}}>Actual <b style={{color:sAct.capex>sAlloc.capex&&sAlloc.capex>0?'#E74C3C':'#27AE60'}}>{fmtUSD(sAct.capex)}</b></div>
-                      {anyCeil&&<div style={{fontSize:11,color:'#7A8FA6'}}>Finance Ceiling <b style={{color:'#F4F6F8'}}>{fmtUSD(sCeil.capex)}</b></div>}
+                      <div style={{fontSize:9,color:'#7A8FA6',marginBottom:3}}>1 · TEAM COST</div>
+                      <div style={{fontSize:16,fontWeight:800,color:'#F4F6F8'}}>{fmtUSD(sTeam)}</div>
+                      <div style={{fontSize:9,color:'#7A8FA6'}}>fixed roster cost, all approved projects</div>
                     </div>
-                    <div>
-                      <div style={{fontSize:9,color:'#7A8FA6',marginBottom:3}}>OpEx</div>
-                      <div style={{fontSize:11,color:'#7A8FA6'}}>Approved Budget <b style={{color:'#F4F6F8'}}>{fmtUSD(sAlloc.opex)}</b></div>
-                      <div style={{fontSize:11,color:'#7A8FA6'}}>Actual <b style={{color:sAct.opex>sAlloc.opex&&sAlloc.opex>0?'#E74C3C':'#27AE60'}}>{fmtUSD(sAct.opex)}</b></div>
-                      {anyCeil&&<div style={{fontSize:11,color:'#7A8FA6'}}>Finance Ceiling <b style={{color:'#F4F6F8'}}>{fmtUSD(sCeil.opex)}</b></div>}
+                    <div style={{borderLeft:'1px solid #243447',paddingLeft:28}}>
+                      <div style={{fontSize:9,color:'#7A8FA6',marginBottom:3}}>2 · PROJECT COST</div>
+                      <div style={{fontSize:11,color:'#7A8FA6'}}>CapEx Approved <b style={{color:'#F4F6F8'}}>{fmtUSD(sAlloc.capex)}</b> · Actual <b style={{color:sAct.capex>sAlloc.capex&&sAlloc.capex>0?'#E74C3C':'#27AE60'}}>{fmtUSD(sAct.capex)}</b></div>
+                      <div style={{fontSize:11,color:'#7A8FA6'}}>OpEx Approved <b style={{color:'#F4F6F8'}}>{fmtUSD(sAlloc.opex)}</b> · Actual <b style={{color:sAct.opex>sAlloc.opex&&sAlloc.opex>0?'#E74C3C':'#27AE60'}}>{fmtUSD(sAct.opex)}</b></div>
+                      {anyCeil&&<div style={{fontSize:11,color:'#7A8FA6'}}>Finance Ceiling <b style={{color:'#F4F6F8'}}>{fmtUSD(sCeil.capex+sCeil.opex)}</b></div>}
                     </div>
-                    <div style={{borderLeft:'1px solid #243447',paddingLeft:32}}>
-                      <div style={{fontSize:9,color:'#7A8FA6',marginBottom:3}}>Combined</div>
-                      <div style={{fontSize:11,color:'#7A8FA6'}}>Approved Budget <b style={{color:'#F4F6F8'}}>{fmtUSD(sAlloc.capex+sAlloc.opex)}</b></div>
-                      <div style={{fontSize:11,color:'#7A8FA6'}}>Actual <b style={{color:'#F4F6F8'}}>{fmtUSD(sAct.capex+sAct.opex)}</b></div>
+                    <div style={{borderLeft:'1px solid #243447',paddingLeft:28}}>
+                      <div style={{fontSize:9,color:'#7A8FA6',marginBottom:3}}>3 · TOTALS</div>
+                      <div style={{fontSize:11,color:'#7A8FA6'}}>Unallocated (OpEx) <b style={{color:sUnalloc>0?'#7A8FA6':'#E74C3C'}}>{fmtUSD(sTeam-sProjectTotal)}</b></div>
+                      <div style={{fontSize:11,color:'#7A8FA6'}}>Project Total <b style={{color:'#F4F6F8'}}>{fmtUSD(sProjectTotal)}</b></div>
+                      <div style={{fontSize:11,color:'#27AE60',fontWeight:700}}>= Team Cost {fmtUSD(sTeam)}</div>
                     </div>
                   </div>
                 </div>
@@ -5576,30 +5608,37 @@ function BudgetTab({roles,setRoles,people,setPeople,projects,items,projectRoles,
             {deptOrder.length===0&&<div style={{fontSize:12,color:'#7A8FA6',fontStyle:'italic',marginBottom:16}}>No departments set yet — add a department to people in the Roster tab.</div>}
             {deptOrder.map(dept=>{
               // This department's FY total across all four quarters — its own annual card
-              let dAlloc={capex:0,opex:0},dAct={capex:0,opex:0},dCeil={capex:0,opex:0},dAnyCeil=false
+              let dTeam=0,dAlloc={capex:0,opex:0},dAct={capex:0,opex:0},dCeil={capex:0,opex:0},dAnyCeil=false
               for(let q=1;q<=4;q++){
+                dTeam+=teamCostForDeptQuarter(dept,q)
                 const r=rollup.get(`${fy}-${q}-${dept}`)
                 if(r){dAlloc.capex+=r.allocCapex;dAlloc.opex+=r.allocOpex;dAct.capex+=r.actCapex;dAct.opex+=r.actOpex}
                 const b=latestBudget(dept,q)
                 if(b){dCeil.capex+=b.capex_approved;dCeil.opex+=b.opex_approved;dAnyCeil=true}
               }
+              const dProjectTotal=dAlloc.capex+dAlloc.opex
               return(
               <div key={dept} style={{marginBottom:22}}>
                 <div style={{fontSize:12,fontWeight:700,color:'#5DADE2',letterSpacing:1,marginBottom:8}}>{dept.toUpperCase()}</div>
                 <div style={{display:'flex',gap:10,flexWrap:'wrap' as const}}>
-                  <div style={{background:'#0F1E2E',border:'1px solid #3A4A5E',borderRadius:10,padding:'10px 14px',width:220}}>
-                    <div style={{fontSize:11,fontWeight:700,color:'#F4F6F8',marginBottom:6}}>FY{fy} Total</div>
-                    <div style={{fontSize:9,color:'#7A8FA6'}}>CapEx</div>
-                    <div style={{fontSize:10,color:'#7A8FA6'}}>Budget <b style={{color:'#F4F6F8'}}>{fmtUSD(dAlloc.capex)}</b></div>
-                    <div style={{fontSize:10,color:'#7A8FA6',marginBottom:6}}>Actual <b style={{color:dAct.capex>dAlloc.capex&&dAlloc.capex>0?'#E74C3C':'#27AE60'}}>{fmtUSD(dAct.capex)}</b></div>
-                    <div style={{fontSize:9,color:'#7A8FA6'}}>OpEx</div>
-                    <div style={{fontSize:10,color:'#7A8FA6'}}>Budget <b style={{color:'#F4F6F8'}}>{fmtUSD(dAlloc.opex)}</b></div>
-                    <div style={{fontSize:10,color:'#7A8FA6'}}>Actual <b style={{color:dAct.opex>dAlloc.opex&&dAlloc.opex>0?'#E74C3C':'#27AE60'}}>{fmtUSD(dAct.opex)}</b></div>
-                    {dAnyCeil&&<div style={{fontSize:9,color:'#7A8FA6',marginTop:6,fontStyle:'italic'}}>Ceiling: {fmtUSD(dCeil.capex+dCeil.opex)}</div>}
+                  <div style={{background:'#0F1E2E',border:'1px solid #3A4A5E',borderRadius:10,padding:'10px 14px',width:240}}>
+                    <div style={{fontSize:11,fontWeight:700,color:'#F4F6F8',marginBottom:8}}>FY{fy} Total</div>
+                    <div style={{fontSize:9,color:'#7A8FA6'}}>1 · Team Cost</div>
+                    <div style={{fontSize:13,fontWeight:800,color:'#F4F6F8',marginBottom:8}}>{fmtUSD(dTeam)}</div>
+                    <div style={{fontSize:9,color:'#7A8FA6'}}>2 · Project Cost</div>
+                    <div style={{fontSize:10,color:'#7A8FA6'}}>CapEx <b style={{color:'#F4F6F8'}}>{fmtUSD(dAlloc.capex)}</b> (act <span style={{color:dAct.capex>dAlloc.capex&&dAlloc.capex>0?'#E74C3C':'#27AE60'}}>{fmtUSD(dAct.capex)}</span>)</div>
+                    <div style={{fontSize:10,color:'#7A8FA6',marginBottom:8}}>OpEx <b style={{color:'#F4F6F8'}}>{fmtUSD(dAlloc.opex)}</b> (act <span style={{color:dAct.opex>dAlloc.opex&&dAlloc.opex>0?'#E74C3C':'#27AE60'}}>{fmtUSD(dAct.opex)}</span>)</div>
+                    <div style={{fontSize:9,color:'#7A8FA6'}}>3 · Totals</div>
+                    <div style={{fontSize:10,color:'#7A8FA6'}}>Unallocated <b style={{color:dTeam-dProjectTotal<0?'#E74C3C':'#7A8FA6'}}>{fmtUSD(dTeam-dProjectTotal)}</b></div>
+                    <div style={{fontSize:10,color:'#27AE60',fontWeight:700}}>= {fmtUSD(dTeam)}</div>
+                    {dAnyCeil&&<div style={{fontSize:9,color:'#7A8FA6',marginTop:6,fontStyle:'italic'}}>Finance ceiling: {fmtUSD(dCeil.capex+dCeil.opex)}</div>}
                   </div>
                   {quarters.map(q=>{
                     const bud=latestBudget(dept,q)
                     const r=rollup.get(`${fy}-${q}-${dept}`)||{allocCapex:0,allocOpex:0,actCapex:0,actOpex:0}
+                    const teamCostQ=teamCostForDeptQuarter(dept,q)
+                    const projectTotalQ=r.allocCapex+r.allocOpex
+                    const unallocQ=teamCostQ-projectTotalQ
                     // Primary comparison: Actual vs. the Approved (Proposed) Budget — the sum of
                     // project-level approvals, which is bottom-up and always available.
                     // The finance ceiling (if entered) overlays as a reference marker, not the gate.
@@ -5611,15 +5650,19 @@ function BudgetTab({roles,setRoles,people,setPeople,projects,items,projectRoles,
                     const isSel=sel&&sel.dept===dept&&sel.q===q
                     return(
                       <div key={q} onClick={()=>setRfSel(isSel?null:{dept,q})} title="Click to see contributing projects and edit the finance ceiling"
-                        style={{background:'#12202F',border:'1px solid '+(isSel?'#C8973A':'#243447'),borderRadius:10,padding:'10px 14px',width:220,cursor:'pointer'}}>
-                        <div style={{display:'flex',alignItems:'center',gap:6,marginBottom:6}}>
+                        style={{background:'#12202F',border:'1px solid '+(isSel?'#C8973A':'#243447'),borderRadius:10,padding:'10px 14px',width:240,cursor:'pointer'}}>
+                        <div style={{display:'flex',alignItems:'center',gap:6,marginBottom:8}}>
                           <span style={{fontSize:12,fontWeight:700,color:'#F4F6F8'}}>Q{q}</span>
                           {bud&&<span style={{fontSize:8,color:'#7A8FA6',border:'1px solid #243447',borderRadius:6,padding:'0 5px'}}>{bud.label}</span>}
                         </div>
-                        <>
-                        <div style={{fontSize:9,color:'#7A8FA6',marginBottom:2}}>CapEx</div>
+
+                        <div style={{fontSize:9,color:'#7A8FA6',marginBottom:2}}>1 · TEAM COST</div>
+                        <div style={{fontSize:13,fontWeight:800,color:'#F4F6F8',marginBottom:8}}>{fmtUSD(teamCostQ)}</div>
+
+                        <div style={{fontSize:9,color:'#7A8FA6',marginBottom:2}}>2 · PROJECT COST</div>
+                        <div style={{fontSize:9,color:'#7A8FA6',marginBottom:1}}>CapEx</div>
                         <div style={{display:'flex',justifyContent:'space-between',fontSize:10,marginBottom:2}}>
-                          <span style={{color:'#7A8FA6'}}>Approved Budget</span><span style={{color:'#F4F6F8',fontWeight:700}}>{fmtUSD(r.allocCapex)}</span>
+                          <span style={{color:'#7A8FA6'}}>Approved</span><span style={{color:'#F4F6F8',fontWeight:700}}>{fmtUSD(r.allocCapex)}</span>
                         </div>
                         <div style={{display:'flex',justifyContent:'space-between',fontSize:10,marginBottom:2}}>
                           <span style={{color:'#7A8FA6'}}>Actual</span><span style={{color:r.actCapex>r.allocCapex&&r.allocCapex>0?'#E74C3C':'#27AE60'}}>{fmtUSD(r.actCapex)}</span>
@@ -5630,27 +5673,36 @@ function BudgetTab({roles,setRoles,people,setPeople,projects,items,projectRoles,
                             {capexCeilPct!=null&&<div title={`Finance ceiling: ${fmtUSD(bud.capex_approved)}`} style={{position:'absolute',top:0,bottom:0,left:Math.min(100,capexCeilPct)+'%',width:2,background:'#F4F6F8'}}/>}
                           </div>
                         )}
-                        {bud&&<div style={{fontSize:9,color:'#7A8FA6',marginBottom:8}}>Finance ceiling: {fmtUSD(bud.capex_approved)}</div>}
-                        {!bud&&<div style={{fontSize:9,color:'#7A8FA6',fontStyle:'italic',marginBottom:8}}>No finance ceiling entered</div>}
-                        <div style={{fontSize:9,color:'#7A8FA6',marginBottom:2,marginTop:4}}>OpEx</div>
+                        <div style={{fontSize:9,color:'#7A8FA6',marginBottom:1,marginTop:4}}>OpEx</div>
                         <div style={{display:'flex',justifyContent:'space-between',fontSize:10,marginBottom:2}}>
-                          <span style={{color:'#7A8FA6'}}>Approved Budget</span><span style={{color:'#F4F6F8',fontWeight:700}}>{fmtUSD(r.allocOpex)}</span>
+                          <span style={{color:'#7A8FA6'}}>Approved</span><span style={{color:'#F4F6F8',fontWeight:700}}>{fmtUSD(r.allocOpex)}</span>
                         </div>
                         <div style={{display:'flex',justifyContent:'space-between',fontSize:10,marginBottom:2}}>
                           <span style={{color:'#7A8FA6'}}>Actual</span><span style={{color:r.actOpex>r.allocOpex&&r.allocOpex>0?'#E74C3C':'#27AE60'}}>{fmtUSD(r.actOpex)}</span>
                         </div>
                         {r.allocOpex>0&&(
-                          <div style={{background:'#0D1B2A',borderRadius:4,height:5,overflow:'hidden',marginBottom:4,position:'relative' as const}}>
+                          <div style={{background:'#0D1B2A',borderRadius:4,height:5,overflow:'hidden',marginBottom:8,position:'relative' as const}}>
                             <div style={{width:Math.min(100,opexPct)+'%',height:'100%',background:barColor(opexPct)}}/>
                             {opexCeilPct!=null&&<div title={`Finance ceiling: ${fmtUSD(bud.opex_approved)}`} style={{position:'absolute',top:0,bottom:0,left:Math.min(100,opexCeilPct)+'%',width:2,background:'#F4F6F8'}}/>}
                           </div>
                         )}
-                        {bud&&<div style={{fontSize:9,color:'#7A8FA6'}}>Finance ceiling: {fmtUSD(bud.opex_approved)}</div>}
-                        {!bud&&<div style={{fontSize:9,color:'#7A8FA6',fontStyle:'italic'}}>No finance ceiling entered</div>}
+                        {bud?(
+                          <div style={{fontSize:9,color:'#7A8FA6',marginBottom:8}}>Finance ceiling: {fmtUSD(bud.capex_approved+bud.opex_approved)}</div>
+                        ):(
+                          <div style={{fontSize:9,color:'#7A8FA6',fontStyle:'italic',marginBottom:8}}>No finance ceiling entered</div>
+                        )}
+
+                        <div style={{fontSize:9,color:'#7A8FA6',marginBottom:2,borderTop:'1px solid #243447',paddingTop:6}}>3 · TOTALS</div>
+                        <div style={{display:'flex',justifyContent:'space-between',fontSize:10,marginBottom:2}}>
+                          <span style={{color:'#7A8FA6'}}>Unallocated (OpEx)</span><span style={{color:unallocQ<0?'#E74C3C':'#7A8FA6'}}>{fmtUSD(unallocQ)}</span>
+                        </div>
+                        <div style={{display:'flex',justifyContent:'space-between',fontSize:10,fontWeight:700}}>
+                          <span style={{color:'#27AE60'}}>= Team Cost</span><span style={{color:'#27AE60'}}>{fmtUSD(teamCostQ)}</span>
+                        </div>
+
                         {r.allocCapex===0&&r.allocOpex===0&&(r.actCapex+r.actOpex)>0&&<div style={{fontSize:9,color:'#E8B95A',marginTop:6,fontStyle:'italic'}}>Spend logged but no approved project budget found — check project approval status.</div>}
                         {((r.allocCapex>0&&r.actCapex>r.allocCapex)||(r.allocOpex>0&&r.actOpex>r.allocOpex))&&<div style={{fontSize:9,color:'#E74C3C',marginTop:6,fontWeight:700}}>⚠ Actual spend exceeds the approved budget</div>}
                         {hist.length>1&&<div style={{fontSize:8,color:'#7A8FA6',marginTop:6}}>{hist.length} finance revisions</div>}
-                        </>
                       </div>
                     )
                   })}
@@ -5664,9 +5716,10 @@ function BudgetTab({roles,setRoles,people,setPeople,projects,items,projectRoles,
                   <span style={{fontSize:13,fontWeight:700,color:'#F4F6F8'}}>{sel.dept} — Q{sel.q} FY{fy}</span>
                   <button onClick={()=>setRfSel(null)} style={{marginLeft:'auto',background:'none',border:'none',color:'#7A8FA6',fontSize:14,cursor:'pointer'}}>✕</button>
                 </div>
+                <div style={{fontSize:11,color:'#7A8FA6',marginBottom:12}}>Team Cost this quarter: <b style={{color:'#F4F6F8'}}>{fmtUSD(selTeamCost)}</b></div>
 
                 <div style={{fontSize:10,fontWeight:700,letterSpacing:1,color:'#5DADE2',marginBottom:6}}>CONTRIBUTING PROJECTS</div>
-                {selProjects.length===0&&<div style={{fontSize:11,color:'#7A8FA6',fontStyle:'italic',marginBottom:14}}>No approved projects touch this department/quarter yet.</div>}
+                {selProjects.length===0&&<div style={{fontSize:11,color:'#7A8FA6',fontStyle:'italic',marginBottom:14}}>No approved projects touch this department/quarter yet — the full Team Cost is unallocated.</div>}
                 {selProjects.length>0&&(
                   <table style={{width:'100%',borderCollapse:'collapse',fontSize:11,marginBottom:16}}>
                     <thead><tr>
