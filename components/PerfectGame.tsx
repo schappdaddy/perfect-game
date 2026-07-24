@@ -783,6 +783,11 @@ function ProjectDetail({project,items,setItems,projects,setProjects,milestones,s
                       style={{background:bType===k?'#1E3048':'transparent',color:bType===k?'#F4F6F8':'#7A8FA6',border:'1px solid '+(bType===k?'#3A4A5E':'#243447'),borderRadius:5,padding:'2px 8px',fontSize:9,fontWeight:700,cursor:'pointer'}}>{label}</button>
                   ))}
                 </div>
+                <select value={project.effort||''} onChange={e=>updProjectField({effort:e.target.value||null})} title="Effort — sets the default allocation % when you add roster rows below"
+                  style={{background:project.effort?'#1E3048':'rgba(231,76,60,0.12)',border:'1px solid '+(project.effort?'#3A4A5E':'#E74C3C'),borderRadius:5,color:'#F4F6F8',fontSize:9,fontWeight:700,padding:'2px 6px',cursor:'pointer'}}>
+                  <option value="">Effort not set — 100%</option>
+                  {EFFORTS.map(e=><option key={e} value={e}>{e} ({EFFORT_ALLOC[e]}%)</option>)}
+                </select>
                 <span style={{marginLeft:'auto',fontSize:9,fontWeight:700,color:stClr(bStatus),border:'1px solid '+stClr(bStatus),borderRadius:8,padding:'1px 8px'}}>{bStatus.toUpperCase()}</span>
               </div>
               <div style={{display:'flex',gap:6,marginBottom:10}}>
@@ -1204,7 +1209,7 @@ function Projects({items,setItems,projects,setProjects,milestones,setMilestones,
   const [savingMilestone,setSavingMilestone]=useState(false)
   const COLORS=['#C0392B','#D4820A','#2E86AB','#27AE60','#8E44AD','#E74C3C','#C8973A','#1ABC9C','#2C3E50','#E67E22']
   const MILESTONE_TYPES=['Milestone','Go-Live','Deadline','Review','Release','Code Freeze','UAT','Kickoff']
-  const empty={name:'',description:'',priority:'P3',status:'Planning',rag:'Green',team:'Consumer Experience',start_date:'',end_date:'',color:'#2E86AB',ongoing:false}
+  const empty={name:'',description:'',priority:'P3',status:'Planning',rag:'Green',team:'Consumer Experience',effort:'',start_date:'',end_date:'',color:'#2E86AB',ongoing:false}
   const [form,setForm]=useState({...empty})
   
 
@@ -1314,7 +1319,7 @@ function Projects({items,setItems,projects,setProjects,milestones,setMilestones,
 
   function startEdit(project) {
     setEditing(project)
-    setForm({name:project.name,description:project.description||'',priority:project.priority,status:project.status,rag:project.rag,team:project.team,start_date:project.start_date||'',end_date:project.end_date||'',color:project.color||'#2E86AB',ongoing:!!project.ongoing})
+    setForm({name:project.name,description:project.description||'',priority:project.priority,status:project.status,rag:project.rag,team:project.team,effort:project.effort||'',start_date:project.start_date||'',end_date:project.end_date||'',color:project.color||'#2E86AB',ongoing:!!project.ongoing})
     setAdding(true)
   }
 
@@ -1554,10 +1559,11 @@ function Projects({items,setItems,projects,setProjects,milestones,setMilestones,
               <div style={{display:'grid',gridTemplateColumns:'1fr 1fr',gap:12}}>
                 {([['Priority','priority',PRIORITIES],['Status','status',projectStatusesFor(space)],['Team','team',TEAMS],['Effort','effort',EFFORTS]] as [string,string,string[]][]).map(([label,field,opts])=>(
                   <div key={field}>
-                    <div style={{fontSize:11,color:'#7A8FA6',marginBottom:4}}>{label}</div>
+                    <div style={{fontSize:11,color:'#7A8FA6',marginBottom:4}}>{label}{field==='effort'&&<span style={{color:'#7A8FA6',fontWeight:400}}> — sets default budget allocation %</span>}</div>
                     <select value={form[field]} onChange={e=>setForm(p=>({...p,[field]:e.target.value}))}
                       style={{width:'100%',background:'#1E3048',color:'#F4F6F8',border:'1px solid #243447',borderRadius:6,padding:'7px 8px',fontSize:12}}>
-                      {opts.map(o=><option key={o}>{o}</option>)}
+                      {field==='effort'&&<option value="">Not set (100%)</option>}
+                      {opts.map(o=><option key={o} value={o}>{field==='effort'?`${o} (${EFFORT_ALLOC[o]}%)`:o}</option>)}
                     </select>
                   </div>
                 ))}
