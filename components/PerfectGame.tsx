@@ -566,7 +566,7 @@ function ProjectDetail({project,items,setItems,projects,setProjects,milestones,s
   const [pdAsgOpen,setPdAsgOpen]=useState<any>({}) // item.id -> assignment editor open
   // Allocation % auto-defaults from the project's effort size (S=25/M=50/L=75/XL=100) — still
   // freely editable per row, this just kills the "type a number from thin air" step for the common case.
-  const effortDefault=String(EFFORT_ALLOC[project.effort]??100)
+  const effortDefault=String(EFFORT_ALLOC[project.effort]??0)
   const [prTeam,setPrTeam]=useState('');const [prPerson,setPrPerson]=useState('');const [prRole,setPrRole]=useState('');const [prHead,setPrHead]=useState('1');const [prAlloc,setPrAlloc]=useState(effortDefault)
   useEffect(()=>{setPrAlloc(effortDefault)},[project.effort])
   async function addProjectRole(){
@@ -785,7 +785,7 @@ function ProjectDetail({project,items,setItems,projects,setProjects,milestones,s
                 </div>
                 <select value={project.effort||''} onChange={e=>updProjectField({effort:e.target.value||null})} title="Effort — sets the default allocation % when you add roster rows below"
                   style={{background:project.effort?'#1E3048':'rgba(231,76,60,0.12)',border:'1px solid '+(project.effort?'#3A4A5E':'#E74C3C'),borderRadius:5,color:'#F4F6F8',fontSize:9,fontWeight:700,padding:'2px 6px',cursor:'pointer'}}>
-                  <option value="">Effort not set — 100%</option>
+                  <option value="">Effort not set — 0%</option>
                   {EFFORTS.map(e=><option key={e} value={e}>{e} ({EFFORT_ALLOC[e]}%)</option>)}
                 </select>
                 <span style={{marginLeft:'auto',fontSize:9,fontWeight:700,color:stClr(bStatus),border:'1px solid '+stClr(bStatus),borderRadius:8,padding:'1px 8px'}}>{bStatus.toUpperCase()}</span>
@@ -1562,7 +1562,7 @@ function Projects({items,setItems,projects,setProjects,milestones,setMilestones,
                     <div style={{fontSize:11,color:'#7A8FA6',marginBottom:4}}>{label}{field==='effort'&&<span style={{color:'#7A8FA6',fontWeight:400}}> — sets default budget allocation %</span>}</div>
                     <select value={form[field]} onChange={e=>setForm(p=>({...p,[field]:e.target.value}))}
                       style={{width:'100%',background:'#1E3048',color:'#F4F6F8',border:'1px solid #243447',borderRadius:6,padding:'7px 8px',fontSize:12}}>
-                      {field==='effort'&&<option value="">Not set (100%)</option>}
+                      {field==='effort'&&<option value="">Not set (0%)</option>}
                       {opts.map(o=><option key={o} value={o}>{field==='effort'?`${o} (${EFFORT_ALLOC[o]}%)`:o}</option>)}
                     </select>
                   </div>
