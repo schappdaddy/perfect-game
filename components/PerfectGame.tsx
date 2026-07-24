@@ -5288,18 +5288,18 @@ function BudgetTab({roles,setRoles,people,setPeople,projects,items,projectRoles,
                           <span style={{fontSize:12,fontWeight:700,color:'#F4F6F8'}}>Q{q}</span>
                           {bud&&<span style={{fontSize:8,color:'#7A8FA6',border:'1px solid #243447',borderRadius:6,padding:'0 5px'}}>{bud.label}</span>}
                         </div>
-                        {!bud?<div style={{fontSize:10,color:'#7A8FA6',fontStyle:'italic'}}>No budget entered</div>:(
-                          <>
-                          <div style={{fontSize:9,color:'#7A8FA6',marginBottom:2}}>CapEx</div>
-                          <div style={{display:'flex',justifyContent:'space-between',fontSize:10,marginBottom:2}}><span style={{color:'#F4F6F8'}}>{fmtUSD(r.actCapex)}</span><span style={{color:'#7A8FA6'}}>of {fmtUSD(bud.capex_approved)}</span></div>
-                          <div style={{background:'#0D1B2A',borderRadius:4,height:5,overflow:'hidden',marginBottom:8}}><div style={{width:Math.min(100,capexPct)+'%',height:'100%',background:barColor(capexPct)}}/></div>
-                          <div style={{fontSize:9,color:'#7A8FA6',marginBottom:2}}>OpEx</div>
-                          <div style={{display:'flex',justifyContent:'space-between',fontSize:10,marginBottom:2}}><span style={{color:'#F4F6F8'}}>{fmtUSD(r.actOpex)}</span><span style={{color:'#7A8FA6'}}>of {fmtUSD(bud.opex_approved)}</span></div>
-                          <div style={{background:'#0D1B2A',borderRadius:4,height:5,overflow:'hidden'}}><div style={{width:Math.min(100,opexPct)+'%',height:'100%',background:barColor(opexPct)}}/></div>
-                          {(capexPct>90||opexPct>90)&&<div style={{fontSize:9,color:'#E74C3C',marginTop:6,fontWeight:700}}>⚠ Approaching or over ceiling — consider a reforecast</div>}
-                          {hist.length>1&&<div style={{fontSize:8,color:'#7A8FA6',marginTop:6}}>{hist.length} revisions</div>}
-                          </>
-                        )}
+                        <>
+                        <div style={{fontSize:9,color:'#7A8FA6',marginBottom:2}}>CapEx</div>
+                        <div style={{display:'flex',justifyContent:'space-between',fontSize:10,marginBottom:2}}><span style={{color:'#F4F6F8'}}>{fmtUSD(r.actCapex)}</span><span style={{color:'#7A8FA6'}}>{bud?`of ${fmtUSD(bud.capex_approved)}`:'no ceiling set'}</span></div>
+                        {bud&&<div style={{background:'#0D1B2A',borderRadius:4,height:5,overflow:'hidden',marginBottom:8}}><div style={{width:Math.min(100,capexPct)+'%',height:'100%',background:barColor(capexPct)}}/></div>}
+                        {!bud&&<div style={{marginBottom:8}}/>}
+                        <div style={{fontSize:9,color:'#7A8FA6',marginBottom:2}}>OpEx</div>
+                        <div style={{display:'flex',justifyContent:'space-between',fontSize:10,marginBottom:2}}><span style={{color:'#F4F6F8'}}>{fmtUSD(r.actOpex)}</span><span style={{color:'#7A8FA6'}}>{bud?`of ${fmtUSD(bud.opex_approved)}`:'no ceiling set'}</span></div>
+                        {bud&&<div style={{background:'#0D1B2A',borderRadius:4,height:5,overflow:'hidden'}}><div style={{width:Math.min(100,opexPct)+'%',height:'100%',background:barColor(opexPct)}}/></div>}
+                        {!bud&&r.actCapex+r.actOpex>0&&<div style={{fontSize:9,color:'#7A8FA6',fontStyle:'italic',marginTop:4}}>Real spend, no approved ceiling yet</div>}
+                        {bud&&(capexPct>90||opexPct>90)&&<div style={{fontSize:9,color:'#E74C3C',marginTop:6,fontWeight:700}}>⚠ Approaching or over ceiling — consider a reforecast</div>}
+                        {hist.length>1&&<div style={{fontSize:8,color:'#7A8FA6',marginTop:6}}>{hist.length} revisions</div>}
+                        </>
                       </div>
                     )
                   })}
