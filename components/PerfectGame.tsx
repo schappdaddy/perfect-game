@@ -5568,6 +5568,26 @@ function BudgetTab({roles,setRoles,people,setPeople,projects,items,projectRoles,
         const selProjects=sel?[...(rollupByProj.get(`${fy}-${sel.q}-${sel.dept}`)?.values()||[])].sort((a:any,b:any)=>(b.allocCapex+b.allocOpex)-(a.allocCapex+a.allocOpex)):[]
         const selHist=sel?history(sel.dept,sel.q):[]
         const selTeamCost=sel?teamCostForDeptQuarter(sel.dept,sel.q):0
+        // Per-person breakdown for the drill-down — who's driving the number, and are they over/under.
+        const selQKeys=sel?fiscalQuarterMonthKeys(fy,sel.q):[]
+        const selPeopleStats=sel?rfPeople.filter((p:any)=>p.active&&p.department===sel.dept).map((p:any)=>{
+          const totalCost=selQKeys.reduce((s:number,k:string)=>s+personMonthCost(p,k,roles),0)
+          const rate=rateOf(p,roles)
+          let allocated=0
+          for(const row of projectRoles.filter((r:any)=>r.person_id===p.id)){
+            const proj=projects.find((pr:any)=>pr.id===row.project_id)
+            if(!proj||!proj.start_date)continue
+            const end=clipEndByTermination(p,proj.end_date||localISO(new Date(Date.now()+365*86400000)))
+            allocated+=monthlyRowCost(row.allocation_pct,rate,proj.start_date,end)
+              .filter((m:any)=>selQKeys.includes(m.key))
+              .reduce((s:number,m:any)=>s+m.cost,0)
+          }
+          const unalloc=totalCost-allocated
+          const pct=totalCost>0?Math.round(allocated/totalCost*100):0
+          return{name:p.name,role:roles.find((r:any)=>r.id===p.role_id)?.name||'—',totalCost,allocated,unalloc,pct,terminated:p.termination_date}
+        }).sort((a:any,b:any)=>b.pct-a.pct):[]
+        const peopleFillColor=(pct:number)=>pct>105?'#5DADE2':pct>=85?'#27AE60':pct>=50?'#E8B95A':'#E74C3C'
+        const peopleStatusLabel=(pct:number)=>pct>105?'Over':pct>=85?'On Track':pct>=50?'Partial':'Under (bench)'
         return(
           <div>
             <div style={{display:'flex',alignItems:'center',gap:10,marginBottom:6,flexWrap:'wrap' as const}}>
@@ -5736,6 +5756,33 @@ function BudgetTab({roles,setRoles,people,setPeople,projects,items,projectRoles,
                   <button onClick={()=>setRfSel(null)} style={{marginLeft:'auto',background:'none',border:'none',color:'#7A8FA6',fontSize:14,cursor:'pointer'}}>✕</button>
                 </div>
                 <div style={{fontSize:11,color:'#7A8FA6',marginBottom:12}}>Team Cost this quarter: <b style={{color:'#F4F6F8'}}>{fmtUSD(selTeamCost)}</b></div>
+
+                <div style={{fontSize:10,fontWeight:700,letterSpacing:1,color:'#5DADE2',marginBottom:6}}>TEAM MEMBERS — WHO'S OVER, ON TRACK, OR UNDER</div>
+                {selPeopleStats.length===0&&<div style={{fontSize:11,color:'#7A8FA6',fontStyle:'italic',marginBottom:14}}>No active people in this department.</div>}
+                {selPeopleStats.length>0&&(
+                  <table style={{width:'100%',borderCollapse:'collapse',fontSize:11,marginBottom:16}}>
+                    <thead><tr>
+                      <th style={{textAlign:'left',padding:'4px 6px',color:'#7A8FA6',borderBottom:'1px solid #243447'}}>Person</th>
+                      <th style={{textAlign:'left',padding:'4px 6px',color:'#7A8FA6',borderBottom:'1px solid #243447'}}>Role</th>
+                      <th style={{textAlign:'right',padding:'4px 6px',color:'#7A8FA6',borderBottom:'1px solid #243447'}}>Total Cost</th>
+                      <th style={{textAlign:'right',padding:'4px 6px',color:'#7A8FA6',borderBottom:'1px solid #243447'}}>Planned</th>
+                      <th style={{textAlign:'right',padding:'4px 6px',color:'#7A8FA6',borderBottom:'1px solid #243447'}}>Unallocated</th>
+                      <th style={{textAlign:'right',padding:'4px 6px',color:'#7A8FA6',borderBottom:'1px solid #243447'}}>Status</th>
+                    </tr></thead>
+                    <tbody>
+                    {selPeopleStats.map((p:any,ix:number)=>(
+                      <tr key={ix}>
+                        <td style={{padding:'4px 6px',color:'#F4F6F8',borderBottom:'1px solid #1A2838'}}>{p.name}{p.terminated&&<span style={{color:'#E74C3C',fontSize:9}}> · left {p.terminated}</span>}</td>
+                        <td style={{padding:'4px 6px',color:'#7A8FA6',borderBottom:'1px solid #1A2838'}}>{p.role}</td>
+                        <td style={{textAlign:'right',padding:'4px 6px',color:'#F4F6F8',borderBottom:'1px solid #1A2838'}}>{fmtUSD(p.totalCost)}</td>
+                        <td style={{textAlign:'right',padding:'4px 6px',color:'#7A8FA6',borderBottom:'1px solid #1A2838'}}>{fmtUSD(p.allocated)}</td>
+                        <td style={{textAlign:'right',padding:'4px 6px',color:p.unalloc<0?'#E74C3C':'#7A8FA6',borderBottom:'1px solid #1A2838'}}>{fmtUSD(p.unalloc)}</td>
+                        <td style={{textAlign:'right',padding:'4px 6px',borderBottom:'1px solid #1A2838'}}><span style={{fontSize:9,fontWeight:700,color:peopleFillColor(p.pct)}}>{peopleStatusLabel(p.pct)} ({p.pct}%)</span></td>
+                      </tr>
+                    ))}
+                    </tbody>
+                  </table>
+                )}
 
                 <div style={{fontSize:10,fontWeight:700,letterSpacing:1,color:'#5DADE2',marginBottom:6}}>CONTRIBUTING PROJECTS</div>
                 {selProjects.length===0&&<div style={{fontSize:11,color:'#7A8FA6',fontStyle:'italic',marginBottom:14}}>No approved projects touch this department/quarter yet — the full Team Cost is unallocated.</div>}
