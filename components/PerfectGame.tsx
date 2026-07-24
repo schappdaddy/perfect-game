@@ -5404,6 +5404,17 @@ function BudgetTab({roles,setRoles,people,setPeople,projects,items,projectRoles,
         <div style={{maxWidth:980}}>
           <div style={{fontSize:11,color:'#7A8FA6',marginBottom:12,lineHeight:1.5}}>Named people you assign to items (Layer 2 — actuals). Leave rate blank to inherit the role's rate card price.</div>
           {(()=>{
+            const teamOptions=[...new Set([...TEAMS,...people.map((p:any)=>p.team).filter(Boolean)])]
+            const TeamSelect=({value,onChange}:any)=>(
+              <select value={teamOptions.includes(value)?value:''} onChange={e=>{
+                  if(e.target.value==='__new__'){const v=prompt('New team name:');if(v&&v.trim())onChange(v.trim())}
+                  else onChange(e.target.value||null)
+                }} style={{background:'#0D1B2A',border:'1px solid #243447',borderRadius:5,color:'#7A8FA6',fontSize:11,padding:'4px 6px'}}>
+                <option value="">No team</option>
+                {teamOptions.map(t=><option key={t} value={t}>{t}</option>)}
+                <option value="__new__">+ Add new…</option>
+              </select>
+            )
             const deptOptions=[...new Set(['OMNI Engineering','OMNI Consumer',...people.map((p:any)=>p.department).filter(Boolean)])]
             const vendorOptions=[...new Set(['Toptal','EPAM',...people.map((p:any)=>p.vendor).filter(Boolean)])]
             const DeptSelect=({value,onChange}:any)=>(
@@ -5435,10 +5446,7 @@ function BudgetTab({roles,setRoles,people,setPeople,projects,items,projectRoles,
                 <option value="">No role</option>
                 {roles.map((r:any)=><option key={r.id} value={r.id}>{r.name}</option>)}
               </select>
-              <select value={p.team||''} onChange={e=>updPerson(p.id,{team:e.target.value||null})} style={{background:'#0D1B2A',border:'1px solid #243447',borderRadius:5,color:'#7A8FA6',fontSize:11,padding:'4px 6px'}}>
-                <option value="">No team</option>
-                {TEAMS.map(t=><option key={t} value={t}>{t}</option>)}
-              </select>
+              <TeamSelect value={p.team||''} onChange={(v:any)=>updPerson(p.id,{team:v})}/>
               <DeptSelect value={p.department||''} onChange={(v:any)=>updPerson(p.id,{department:v})}/>
               <VendorSelect value={p.vendor||''} onChange={(v:any)=>updPerson(p.id,{vendor:v})}/>
               <div style={{display:'flex',alignItems:'center',gap:3}} title="Blank = inherit role's rate">
@@ -5458,10 +5466,7 @@ function BudgetTab({roles,setRoles,people,setPeople,projects,items,projectRoles,
               <option value="">No role</option>
               {roles.map((r:any)=><option key={r.id} value={r.id}>{r.name}</option>)}
             </select>
-            <select value={newPersonTeam} onChange={e=>setNewPersonTeam(e.target.value)} style={{background:'#12202F',border:'1px dashed #243447',borderRadius:6,color:'#F4F6F8',fontSize:12,padding:'7px 10px'}}>
-              <option value="">No team</option>
-              {TEAMS.map(t=><option key={t} value={t}>{t}</option>)}
-            </select>
+            <TeamSelect value={newPersonTeam} onChange={(v:any)=>setNewPersonTeam(v||'')}/>
             <DeptSelect value={newPersonDept} onChange={(v:any)=>setNewPersonDept(v||'')}/>
             <VendorSelect value={newPersonVendor} onChange={(v:any)=>setNewPersonVendor(v||'')}/>
             <input type="number" value={newPersonRate} onChange={e=>setNewPersonRate(e.target.value)} placeholder="$/hr (optional)" style={{width:110,background:'#12202F',border:'1px dashed #243447',borderRadius:6,color:'#F4F6F8',fontSize:12,padding:'7px 10px'}}/>
