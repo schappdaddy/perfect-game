@@ -218,10 +218,47 @@ function monthlyRowCost(alloc:number,rate:number,projStart:string,projEnd:string
 
 // Layer 1: forecast — generic roster rows × the project's own timeline. Static until
 // the project's dates change or a roster row is edited (never auto-drifts otherwise).
-function projectForecast(project:any,projectRoles:any[],roles:any[]){
-  if(!project?.start_date||!project?.end_date)return{total:0,byRole:[] as any[],days:0,unset:true}
-  const days=workingDays(project.start_date,project.end_date)
+// A project_roles row's monthly $ — normally spread across the project's own start→end
+// window, but for an ongoing (∞) vendor-style project (no real end date) there IS no
+// window to spread across. Instead, spread across each of the project's individually
+// COMMITTED ITEMS' own date ranges — so a deliverable scheduled Oct 1–31 claims that
+// role's allocation % for October specifically, and the forecast is built entirely from
+// real, dated work rather than a guessed timeline. Multiple overlapping items legitimately
+// stack (same over-allocation signal the rest of the app already surfaces).
+function rowMonthlyCost(row:any,rate:number,proj:any,items:any[],person?:any):{key:string,cost:number,days:number}[]{
+  if(proj?.ongoing){
+    const committed=items.filter((it:any)=>it.parent_project===proj.name&&it.start_date&&it.end_date)
+    const merged=new Map<string,{cost:number,days:number}>()
+    for(const it of committed){
+      const end=person?clipEndByTermination(person,it.end_date):it.end_date
+      for(const m of monthlyRowCost(row.allocation_pct,rate,it.start_date,end)){
+        const prev=merged.get(m.key)||{cost:0,days:0}
+        merged.set(m.key,{cost:prev.cost+m.cost,days:prev.days+m.days})
+      }
+    }
+    return[...merged.entries()].map(([key,v])=>({key,cost:v.cost,days:v.days}))
+  }
+  if(!proj?.start_date)return[]
+  const rawEnd=proj.end_date||localISO(new Date(Date.now()+365*86400000))
+  const end=person?clipEndByTermination(person,rawEnd):rawEnd
+  return monthlyRowCost(row.allocation_pct,rate,proj.start_date,end)
+}
+function projectForecast(project:any,projectRoles:any[],roles:any[],items:any[]=[]){
+  const ongoing=!!project?.ongoing
+  if(!ongoing&&(!project?.start_date||!project?.end_date))return{total:0,byRole:[] as any[],days:0,unset:true}
   const rows=projectRoles.filter(r=>r.project_id===project.id)
+  if(ongoing){
+    const committedDays=items.filter((it:any)=>it.parent_project===project.name&&it.start_date&&it.end_date)
+      .reduce((s:number,it:any)=>s+workingDays(it.start_date,it.end_date),0)
+    const byRole=rows.map(r=>{
+      const role=roles.find((x:any)=>x.id===r.role_id)
+      const rate=role?.hourly_rate||0
+      const cost=rowMonthlyCost(r,rate,project,items).reduce((s,m)=>s+m.cost,0)*(r.headcount||1)
+      return{role_id:r.role_id,role:role?.name||'(deleted role)',headcount:r.headcount,allocation_pct:r.allocation_pct,rate,cost}
+    })
+    return{total:byRole.reduce((a,r)=>a+r.cost,0),byRole,days:committedDays,unset:false}
+  }
+  const days=workingDays(project.start_date,project.end_date)
   const byRole=rows.map(r=>{
     const role=roles.find((x:any)=>x.id===r.role_id)
     const cost=days*8*(r.allocation_pct/100)*(r.headcount||1)*(role?.hourly_rate||0)
@@ -258,8 +295,8 @@ function clipEndByTermination(person:any,endISO:string):string{
   if(person?.termination_date&&person.termination_date<endISO)return person.termination_date
   return endISO
 }
-function capacityByMonth(projects:any[],projectRoles:any[],people:any[],roles:any[]){
-  const active=projects.filter((p:any)=>!PROJECT_TERMINAL.includes(p.status)&&p.start_date&&(p.end_date||p.ongoing))
+function capacityByMonth(projects:any[],projectRoles:any[],people:any[],roles:any[],items:any[]=[]){
+  const active=projects.filter((p:any)=>!PROJECT_TERMINAL.includes(p.status)&&(p.ongoing||(p.start_date&&p.end_date)))
   const perPerson=new Map<string,Map<string,{cost:number,pct:number}>>() // person_id -> month -> {cost,pct}
   const byProject=new Map<string,Map<string,any[]>>() // person_id -> month -> [{project,pct,cost}]
   for(const row of projectRoles){
@@ -269,8 +306,7 @@ function capacityByMonth(projects:any[],projectRoles:any[],people:any[],roles:an
     const person=people.find((p:any)=>p.id===row.person_id)
     if(!person)continue
     const rate=rateOf(person,roles)
-    const end=clipEndByTermination(person,proj.end_date||localISO(new Date(Date.now()+180*86400000))) // ongoing: cap the view at ~6mo out
-    const monthly=monthlyRowCost(row.allocation_pct,rate,proj.start_date,end)
+    const monthly=rowMonthlyCost(row,rate,proj,items,person)
     if(!perPerson.has(person.id))perPerson.set(person.id,new Map())
     if(!byProject.has(person.id))byProject.set(person.id,new Map())
     const pm=perPerson.get(person.id)!
@@ -318,13 +354,12 @@ function quarterlyRollup(projects:any[],projectRoles:any[],itemAssignments:any[]
   for(const row of projectRoles){
     if(!row.person_id)continue
     const proj=approved.find((p:any)=>p.id===row.project_id)
-    if(!proj||!proj.start_date)continue
+    if(!proj||(!proj.ongoing&&!proj.start_date))continue
     const person=people.find((p:any)=>p.id===row.person_id)
     if(!person?.department)continue
     const role=roles.find((r:any)=>r.id===person.role_id)
     const rate=rateOf(person,roles)
-    const end=clipEndByTermination(person,proj.end_date||localISO(new Date(Date.now()+365*86400000)))
-    for(const m of monthlyRowCost(row.allocation_pct,rate,proj.start_date,end)){
+    for(const m of rowMonthlyCost(row,rate,proj,items,person)){
       const{fy,quarter}=fyOf(`${m.key}-15`)
       const{capex,opex}=splitCapexOpex(m.cost,role,proj.budget_type)
       bump(fy,quarter,person.department,'allocCapex',capex,proj)
@@ -394,17 +429,16 @@ function projectColorFor(proj:any){
   for(let i=0;i<s.length;i++)h=(h*31+s.charCodeAt(i))>>>0
   return TEAM_BUDGET_PALETTE[h%TEAM_BUDGET_PALETTE.length]
 }
-function teamBudgetRollup(projects:any[],projectRoles:any[],people:any[],roles:any[],monthKeys:string[]){
+function teamBudgetRollup(projects:any[],projectRoles:any[],people:any[],roles:any[],monthKeys:string[],items:any[]=[]){
   const totalCostOverWindow=(person:any)=>{
     return monthKeys.reduce((sum,k)=>sum+personMonthCost(person,k,roles),0)
   }
   const claimedCostOverWindow=(row:any,person:any)=>{
     // A project_roles row's $ contribution restricted to the chosen window's months
     const proj=projects.find((p:any)=>p.id===row.project_id)
-    if(!proj||!proj.start_date)return 0
-    const end=clipEndByTermination(person,proj.end_date||localISO(new Date(Date.now()+365*86400000)))
+    if(!proj||(!proj.ongoing&&!proj.start_date))return 0
     const rate=rateOf(person,roles)
-    return monthlyRowCost(row.allocation_pct,rate,proj.start_date,end)
+    return rowMonthlyCost(row,rate,proj,items,person)
       .filter((m:any)=>monthKeys.includes(m.key))
       .reduce((s:number,m:any)=>s+m.cost,0)
   }
@@ -601,6 +635,19 @@ function ProjectDetail({project,items,setItems,projects,setProjects,milestones,s
   async function updProjectField(fields:any){
     setProjects((prev:any[])=>prev.map(p=>p.id===project.id?{...p,...fields}:p))
     await supabase.from('projects').update(fields).eq('id',project.id)
+  }
+  // Changing a project's size should carry existing roster rows along — but only ones still
+  // sitting at the OLD default. A row someone deliberately typed a custom % into is a real
+  // choice, not a placeholder, so it's left alone.
+  async function changeEffort(newEffort:string){
+    const oldDefault=EFFORT_ALLOC[project.effort]??0
+    const newDefault=EFFORT_ALLOC[newEffort]??0
+    const toUpdate=projectRoles.filter((r:any)=>r.project_id===project.id&&r.allocation_pct===oldDefault&&r.allocation_pct!==newDefault)
+    await updProjectField({effort:newEffort||null})
+    if(toUpdate.length){
+      setProjectRoles((prev:any[])=>prev.map((r:any)=>toUpdate.some((t:any)=>t.id===r.id)?{...r,allocation_pct:newDefault}:r))
+      await supabase.from('project_roles').update({allocation_pct:newDefault}).in('id',toUpdate.map((r:any)=>r.id))
+    }
   }
   const [pdCcrExp,setPdCcrExp]=useState<any>({})
   const [pdAsgOpen,setPdAsgOpen]=useState<any>({}) // item.id -> assignment editor open
@@ -804,7 +851,7 @@ function ProjectDetail({project,items,setItems,projects,setProjects,milestones,s
 
         {/* Budget */}
         {spaceOf(project)==='work'&&(()=>{
-          const fc=projectForecast(project,projectRoles,roles)
+          const fc=projectForecast(project,projectRoles,roles,items)
           const ac=projectActual(project,items,itemAssignments,people,roles)
           const projRoleRows=projectRoles.filter((r:any)=>r.project_id===project.id)
           const bStatus=project.budget_status||'draft'
@@ -823,7 +870,7 @@ function ProjectDetail({project,items,setItems,projects,setProjects,milestones,s
                       style={{background:bType===k?'#1E3048':'transparent',color:bType===k?'#F4F6F8':'#7A8FA6',border:'1px solid '+(bType===k?'#3A4A5E':'#243447'),borderRadius:5,padding:'2px 8px',fontSize:9,fontWeight:700,cursor:'pointer'}}>{label}</button>
                   ))}
                 </div>
-                <select value={project.effort||''} onChange={e=>updProjectField({effort:e.target.value||null})} title="Effort — sets the default allocation % when you add roster rows below"
+                <select value={project.effort||''} onChange={e=>changeEffort(e.target.value)} title="Effort — sets the default allocation % for roster rows below. Changing it also updates any existing row still at the old default."
                   style={{background:project.effort?'#1E3048':'rgba(231,76,60,0.12)',border:'1px solid '+(project.effort?'#3A4A5E':'#E74C3C'),borderRadius:5,color:'#F4F6F8',fontSize:9,fontWeight:700,padding:'2px 6px',cursor:'pointer'}}>
                   <option value="">Effort not set — 0%</option>
                   {EFFORTS.map(e=><option key={e} value={e}>{e} ({EFFORT_ALLOC[e]}%)</option>)}
@@ -5187,7 +5234,7 @@ function BudgetTab({roles,setRoles,people,setPeople,projects,items,projectRoles,
 
   const activeProjects=projects.filter((p:any)=>!PROJECT_TERMINAL.includes(p.status))
   const rollup=activeProjects.map((p:any)=>{
-    const fc=projectForecast(p,projectRoles,roles)
+    const fc=projectForecast(p,projectRoles,roles,items)
     const ac=projectActual(p,items,itemAssignments,people,roles)
     const elapsedPct=fc.unset?null:Math.min(100,Math.max(0,Math.round((Date.now()-(+new Date(p.start_date+'T12:00:00')))/((+new Date(p.end_date+'T12:00:00'))-(+new Date(p.start_date+'T12:00:00')))*100)))
     const spentPct=fc.total>0?Math.round(ac.total/fc.total*100):null
@@ -5259,13 +5306,12 @@ function BudgetTab({roles,setRoles,people,setPeople,projects,items,projectRoles,
       }
       for(const row of projectRoles){
         const proj=activeProjects.find((p:any)=>p.id===row.project_id)
-        if(!proj||!proj.start_date)continue
+        if(!proj||(!proj.ongoing&&!proj.start_date))continue
         const rowPerson=row.person_id?people.find((p:any)=>p.id===row.person_id):null
-        const end=clipEndByTermination(rowPerson,proj.end_date||localISO(new Date(Date.now()+180*86400000)))
         const role=roles.find((r:any)=>r.id===row.role_id)
         const rate=row.person_id?rateOf(rowPerson,roles):(role?.hourly_rate||0)
         const mult=row.person_id?1:(row.headcount||1)
-        for(const m of monthlyRowCost(row.allocation_pct,rate,proj.start_date,end))bump(m.key,'forecast',m.cost*mult)
+        for(const m of rowMonthlyCost(row,rate,proj,items,rowPerson))bump(m.key,'forecast',m.cost*mult)
       }
       for(const r of rollup){
         for(const row of r.ac.rows){
@@ -5284,7 +5330,7 @@ function BudgetTab({roles,setRoles,people,setPeople,projects,items,projectRoles,
 
       // ── 4. Capacity (Capacity tab) — uses the window currently selected in-app ──
       const capKeys=buildMonthKeys(capWindow)
-      const{perPerson:capPerPerson}=capacityByMonth(projects,projectRoles,people,roles)
+      const{perPerson:capPerPerson}=capacityByMonth(projects,projectRoles,people,roles,items)
       const ws4=wb.addWorksheet('Capacity')
       ws4.columns=[{header:'Person',key:'n',width:20},{header:'Role',key:'r',width:16},{header:'Team',key:'t',width:20},...capKeys.map((k:string)=>({header:monthLabel(k),key:k,width:12}))]
       const capTeamOrder=[...TEAMS,'']
@@ -5576,9 +5622,8 @@ function BudgetTab({roles,setRoles,people,setPeople,projects,items,projectRoles,
           let allocated=0
           for(const row of projectRoles.filter((r:any)=>r.person_id===p.id)){
             const proj=projects.find((pr:any)=>pr.id===row.project_id)
-            if(!proj||!proj.start_date)continue
-            const end=clipEndByTermination(p,proj.end_date||localISO(new Date(Date.now()+365*86400000)))
-            allocated+=monthlyRowCost(row.allocation_pct,rate,proj.start_date,end)
+            if(!proj||(!proj.ongoing&&!proj.start_date))continue
+            allocated+=rowMonthlyCost(row,rate,proj,items,p)
               .filter((m:any)=>selQKeys.includes(m.key))
               .reduce((s:number,m:any)=>s+m.cost,0)
           }
@@ -5927,7 +5972,7 @@ function BudgetTab({roles,setRoles,people,setPeople,projects,items,projectRoles,
       })()}
 
       {view==='capacity'&&(()=>{
-        const{perPerson,byProject}=capacityByMonth(projects,projectRoles,people,roles)
+        const{perPerson,byProject}=capacityByMonth(projects,projectRoles,people,roles,items)
         const monthKeys=buildMonthKeys(capWindow)
         const teamOrder=[...new Set([...TEAMS,...people.map((p:any)=>p.team).filter(Boolean)]),'']
         const peopleByTeam=teamOrder.map(t=>({team:t||'No team',people:people.filter((p:any)=>p.active&&(p.team||'')===t)})).filter(g=>g.people.length)
@@ -6023,7 +6068,7 @@ function BudgetTab({roles,setRoles,people,setPeople,projects,items,projectRoles,
       })()}
 
       {view==='teamcost'&&(()=>{
-        const{perPerson,byProject}=capacityByMonth(projects,projectRoles,people,roles)
+        const{perPerson,byProject}=capacityByMonth(projects,projectRoles,people,roles,items)
         const monthKeys=buildMonthKeys(tcWindow)
         const teamOrder=[...new Set([...TEAMS,...people.map((p:any)=>p.team).filter(Boolean)]),'']
         const peopleByTeam=teamOrder.map(t=>({team:t||'No team',people:people.filter((p:any)=>p.active&&(p.team||'')===t)})).filter(g=>g.people.length)
@@ -6129,7 +6174,7 @@ function BudgetTab({roles,setRoles,people,setPeople,projects,items,projectRoles,
 
       {view==='teambudget'&&(()=>{
         const monthKeys=buildMonthKeys(tbWindow)
-        const rollup=teamBudgetRollup(projects,projectRoles,people,roles,monthKeys)
+        const rollup=teamBudgetRollup(projects,projectRoles,people,roles,monthKeys,items)
         const stClr=(st:string)=>st==='approved'?'#27AE60':st==='requested'?'#5DADE2':'#E8B95A'
         const stLabel=(st:string)=>st==='approved'?'Approved':st==='requested'?'Requested':'Draft'
         const sel=tbSel
