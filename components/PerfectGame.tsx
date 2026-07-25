@@ -4487,7 +4487,7 @@ function Desk({items,setItems,projects,setProjects,milestones,setMilestones,task
 
   const now=new Date();now.setHours(0,0,0,0)
   const in14=+now+14*86400000, in7=+now+7*86400000
-  const upMs=milestones.filter(inDeskSpace).filter(m=>!m.completed&&+new Date(m.date+'T12:00:00')>=+now&&+new Date(m.date+'T12:00:00')<=in14)
+  const upMs=milestones.filter(inDeskSpace).filter(m=>!m.completed&&+new Date(m.date+'T12:00:00')<=in14).sort((a,b)=>a.date<b.date?-1:1) // overdue (any past date) through the next 14 days, earliest first
     .sort((a,b)=>a.date<b.date?-1:1)
   const flaggedDevL=items.filter(inDeskSpace).filter(flagDev)
   const flaggedStkL=items.filter(inDeskSpace).filter(flagStk)
@@ -4878,12 +4878,12 @@ function Desk({items,setItems,projects,setProjects,milestones,setMilestones,task
           </>}
         </div>
         <div style={railCard as any}>
-          <RailHead k="ms">📅 MILESTONES — NEXT 14 DAYS ({upMs.length})</RailHead>
+          <RailHead k="ms">📅 MILESTONES — OVERDUE & NEXT 14 DAYS ({upMs.length})</RailHead>
           {railOpen.ms&&<>
           {upMs.length===0&&<div style={{fontSize:11,color:'#7A8FA6',fontStyle:'italic'}}>None due</div>}
-          {upMs.map(m=>{const pr=projects.find(p=>p.id===m.project_id);return(
+          {upMs.map(m=>{const pr=projects.find(p=>p.id===m.project_id);const overdue=+new Date(m.date+'T12:00:00')<+now;return(
             <div key={m.id} style={{fontSize:11,marginBottom:6,lineHeight:1.4}}>
-              <span style={{color:'#C8973A',fontWeight:700}}>{fmtDt(m.date)}</span> <span style={{color:'#F4F6F8'}}>{m.name}</span>
+              <span style={{color:overdue?'#E74C3C':'#C8973A',fontWeight:700}}>{fmtDt(m.date)}{overdue?' ⚠':''}</span> <span style={{color:'#F4F6F8'}}>{m.name}</span>
               {pr&&<div style={{color:'#7A8FA6',fontSize:10}}>{pr.name}</div>}
             </div>
           )})}
