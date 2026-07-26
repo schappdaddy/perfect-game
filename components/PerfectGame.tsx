@@ -5498,6 +5498,32 @@ function SprintsTab({items,setItems,projects,projectRoles,people,setPeople,roles
     setItems((prev:any[])=>prev.map((it:any)=>it.id===itemId?{...it,end_date:newEnd}:it))
     await supabase.from('items').update({end_date:newEnd}).eq('id',itemId)
   }
+  // One-time cleanup: every item already placed in a sprint gets its end date freshly
+  // recomputed from its CURRENT assignments using the current (correct, sequential)
+  // logic — for items assigned before a date-calculation fix landed, whose stored dates
+  // never got a chance to recalculate on their own since nothing re-triggered them.
+  const[recalcBusy,setRecalcBusy]=useState(false)
+  async function recalculateAllItemDates(){
+    setRecalcBusy(true)
+    const placed=items.filter((it:any)=>it.sprint_id)
+    const updates:{id:any,end_date:string}[]=[]
+    for(const it of placed){
+      const sprint=sprints.find((s:any)=>s.id===it.sprint_id)
+      if(!sprint)continue
+      const forItem=itemAssignments.filter((a:any)=>a.item_id===it.id)
+      const newEnd=computeItemEndFromAssignments(sprint.start_date,sprint.end_date,forItem)
+      if(newEnd!==it.end_date)updates.push({id:it.id,end_date:newEnd})
+    }
+    if(updates.length){
+      setItems((prev:any[])=>prev.map((it:any)=>{
+        const u=updates.find(x=>x.id===it.id)
+        return u?{...it,end_date:u.end_date}:it
+      }))
+      for(const u of updates)await supabase.from('items').update({end_date:u.end_date}).eq('id',u.id)
+    }
+    setRecalcBusy(false)
+    alert(updates.length?`Recalculated ${updates.length} item${updates.length!==1?'s':''}.`:'Everything was already up to date.')
+  }
   async function addAssignment(itemId:any,personId:any,days:number){
     if(!personId)return
     const{data,error}=await supabase.from('item_assignments').insert({item_id:itemId,person_id:personId,hours:days*8}).select().single()
@@ -5562,6 +5588,10 @@ function SprintsTab({items,setItems,projects,projectRoles,people,setPeople,roles
 
       <div style={{fontSize:11,color:readyBacklog.length<3?'#E8B95A':'#7A8FA6',marginBottom:16}}>
         {readyBacklog.length} item{readyBacklog.length!==1?'s':''} in the backlog not yet scheduled{readyBacklog.length<3?' — runway is getting thin':''}
+        <button onClick={recalculateAllItemDates} disabled={recalcBusy} title="One-time cleanup: recompute every sprint-placed item's dates from its current assignments — useful if dates look wrong after an engine update"
+          style={{marginLeft:12,background:'none',border:'1px solid #243447',borderRadius:5,color:'#7A8FA6',fontSize:10,padding:'3px 9px',cursor:'pointer',opacity:recalcBusy?0.5:1}}>
+          {recalcBusy?'Recalculating…':'🔄 Recalculate item dates'}
+        </button>
       </div>
 
       {(()=>{
