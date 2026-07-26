@@ -148,6 +148,31 @@ function workingDays(startISO:string,endISO:string):number{
   while(d<=end){const dow=d.getDay();if(dow!==0&&dow!==6)n++;d.setDate(d.getDate()+1)}
   return n
 }
+// Advances `days` working days forward from a start date, inclusive (days=1 returns
+// the start date itself, skipped forward to the next weekday if start lands on one).
+// Used to shrink a sprint item's real end date down to however much work is actually
+// assigned, instead of it always spanning the sprint's full length.
+function advanceWorkingDays(startISO:string,days:number):string{
+  if(days<=0)return startISO
+  const d=new Date(startISO+'T12:00:00')
+  while(d.getDay()===0||d.getDay()===6)d.setDate(d.getDate()+1)
+  let count=1
+  while(count<days){
+    d.setDate(d.getDate()+1)
+    if(d.getDay()!==0&&d.getDay()!==6)count++
+  }
+  return localISO(d)
+}
+// An item's real end date given what's actually been assigned to it — the longest
+// individual assignee's day count, capped so it never runs past the sprint itself.
+// No assignments yet → falls back to the full sprint span (already flagged elsewhere
+// as "no one assigned"), since there's nothing real to size it from yet.
+function computeItemEndFromAssignments(sprintStart:string,sprintEnd:string,assignmentsForItem:any[]):string{
+  const maxDays=assignmentsForItem.length?Math.max(...assignmentsForItem.map((a:any)=>(a.hours||0)/8)):0
+  if(maxDays<=0)return sprintEnd
+  const proposed=advanceWorkingDays(sprintStart,Math.ceil(maxDays))
+  return proposed>sprintEnd?sprintEnd:proposed
+}
 const rateOf=(person:any,roles:any[])=>{
   if(person?.rate_override!=null)return person.rate_override
   const r=roles.find((x:any)=>x.id===person?.role_id)
@@ -738,7 +763,7 @@ function AssignPicker({available,onAdd}:any){
     </div>
   )
 }
-function ProjectDetail({project,items,setItems,projects,setProjects,milestones,setMilestones,tasks,setTasks,onClose,d,fmt,ccrs=[],ccrItems=[],roles=[],people=[],projectRoles=[],setProjectRoles,itemAssignments=[],setItemAssignments}:any) {
+function ProjectDetail({project,items,setItems,projects,setProjects,milestones,setMilestones,tasks,setTasks,onClose,d,fmt,ccrs=[],ccrItems=[],roles=[],people=[],projectRoles=[],setProjectRoles,itemAssignments=[],setItemAssignments,sprints=[]}:any) {
   async function updProjectField(fields:any){
     setProjects((prev:any[])=>prev.map(p=>p.id===project.id?{...p,...fields}:p))
     await supabase.from('projects').update(fields).eq('id',project.id)
@@ -786,19 +811,40 @@ function ProjectDetail({project,items,setItems,projects,setProjects,milestones,s
     setProjectRoles((prev:any[])=>prev.filter(r=>r.id!==id))
     await supabase.from('project_roles').delete().eq('id',id)
   }
+  // Same resync as Sprints — editing an assignment from the Project side must shrink/grow
+  // the item's real end date identically, since it's the same underlying record either way.
+  async function resyncItemDates(itemId:any,nextAssignments:any[]){
+    const item=items.find((it:any)=>it.id===itemId)
+    if(!item?.sprint_id)return
+    const sprint=sprints.find((s:any)=>s.id===item.sprint_id)
+    if(!sprint)return
+    const forItem=nextAssignments.filter((a:any)=>a.item_id===itemId)
+    const newEnd=computeItemEndFromAssignments(sprint.start_date,sprint.end_date,forItem)
+    if(newEnd===item.end_date)return
+    setItems((prev:any[])=>prev.map((it:any)=>it.id===itemId?{...it,end_date:newEnd}:it))
+    await supabase.from('items').update({end_date:newEnd}).eq('id',itemId)
+  }
   async function addAssignment(itemId:any,personId:any,days:number){
     if(!personId)return
     const{data,error}=await supabase.from('item_assignments').insert({item_id:itemId,person_id:personId,hours:days*8}).select().single()
     if(error){alert('Failed to assign: '+error.message);return}
-    if(data)setItemAssignments((prev:any[])=>[...prev,data])
+    if(data){
+      const next=[...itemAssignments,data]
+      setItemAssignments(next)
+      await resyncItemDates(itemId,next)
+    }
   }
-  async function updAssignment(id:any,fields:any){
-    setItemAssignments((prev:any[])=>prev.map(a=>a.id===id?{...a,...fields}:a))
+  async function updAssignment(id:any,itemId:any,fields:any){
+    const next=itemAssignments.map((a:any)=>a.id===id?{...a,...fields}:a)
+    setItemAssignments(next)
     await supabase.from('item_assignments').update(fields).eq('id',id)
+    await resyncItemDates(itemId,next)
   }
-  async function removeAssignment(id:any){
-    setItemAssignments((prev:any[])=>prev.filter(a=>a.id!==id))
+  async function removeAssignment(id:any,itemId:any){
+    const next=itemAssignments.filter((a:any)=>a.id!==id)
+    setItemAssignments(next)
     await supabase.from('item_assignments').delete().eq('id',id)
+    await resyncItemDates(itemId,next)
   }
   const mobileP=useIsMobile()
   const [pdTitle,setPdTitle]=useState('')
@@ -1237,10 +1283,10 @@ function ProjectDetail({project,items,setItems,projects,setProjects,milestones,s
                           <div key={a.id} style={{marginBottom:6}}>
                             <div style={{display:'flex',alignItems:'center',gap:6,fontSize:10}}>
                               <span style={{color:'#F4F6F8',flex:1}}>{p?.name||'(removed)'} <span style={{color:'#7A8FA6'}}>· {role?.name||'—'}</span></span>
-                              <input type="number" step="0.5" value={Math.round((a.hours||0)/8*100)/100} onChange={e=>updAssignment(a.id,{hours:(parseFloat(e.target.value)||0)*8})} style={{width:48,background:'#0D1B2A',border:'1px solid #243447',borderRadius:4,color:'#F4F6F8',padding:'2px 4px',fontSize:10}}/>
+                              <input type="number" step="0.5" value={Math.round((a.hours||0)/8*100)/100} onChange={e=>updAssignment(a.id,a.item_id,{hours:(parseFloat(e.target.value)||0)*8})} style={{width:48,background:'#0D1B2A',border:'1px solid #243447',borderRadius:4,color:'#F4F6F8',padding:'2px 4px',fontSize:10}}/>
                               <span style={{color:'#7A8FA6'}}>days</span>
                               <span style={{color:'#5DADE2',width:64,textAlign:'right' as const}}>{fmtUSD(cost)}</span>
-                              <button onClick={()=>removeAssignment(a.id)} style={{background:'none',border:'none',color:'#3A4A5E',fontSize:11,cursor:'pointer'}}>✕</button>
+                              <button onClick={()=>removeAssignment(a.id,a.item_id)} style={{background:'none',border:'none',color:'#3A4A5E',fontSize:11,cursor:'pointer'}}>✕</button>
                             </div>
                             {planHrs!=null&&(()=>{
                               const planD=planHrs/8,actualD=actualHrs/8,overD=over!=null?over/8:null
@@ -1388,7 +1434,7 @@ function ProjectDetail({project,items,setItems,projects,setProjects,milestones,s
     </div>
   )
 }
-function Projects({items,setItems,projects,setProjects,milestones,setMilestones,tasks,setTasks,space,ccrs,ccrItems,roles=[],people=[],projectRoles=[],setProjectRoles,itemAssignments=[],setItemAssignments}:{items:any[],setItems:any,projects:any[],setProjects:any,milestones:any[],setMilestones:any,tasks:any[],setTasks:any,space:string,ccrs:any[],ccrItems:any[],roles?:any[],people?:any[],projectRoles?:any[],setProjectRoles?:any,itemAssignments?:any[],setItemAssignments?:any}) {
+function Projects({items,setItems,projects,setProjects,milestones,setMilestones,tasks,setTasks,space,ccrs,ccrItems,roles=[],people=[],projectRoles=[],setProjectRoles,itemAssignments=[],setItemAssignments,sprints=[]}:{items:any[],setItems:any,projects:any[],setProjects:any,milestones:any[],setMilestones:any,tasks:any[],setTasks:any,space:string,ccrs:any[],ccrItems:any[],roles?:any[],people?:any[],projectRoles?:any[],setProjectRoles?:any,itemAssignments?:any[],setItemAssignments?:any,sprints?:any[]}) {
   const mobile=useIsMobile()
   const [adding,setAdding]=useState(false)
   const [editing,setEditing]=useState(null)
@@ -1731,6 +1777,7 @@ function Projects({items,setItems,projects,setProjects,milestones,setMilestones,
     setProjectRoles={setProjectRoles}
     itemAssignments={itemAssignments}
     setItemAssignments={setItemAssignments}
+    sprints={sprints}
   />
 )}
 
@@ -5372,15 +5419,34 @@ function SprintsTab({items,setItems,projects,projectRoles,people,roles,sprints,s
   // Assigning a person now writes directly to item_assignments — the SAME table the
   // Budget section's per-item assignment editor uses. One real record, feeding both
   // budget actuals and sprint capacity — never two numbers that can drift apart.
+  // After any assignment change, an item's real end date shrinks to reflect the actual
+  // work assigned — not the full sprint span. Keeps Roadmap honest about real timelines.
+  async function resyncItemDates(itemId:any,nextAssignments:any[]){
+    const item=items.find((it:any)=>it.id===itemId)
+    if(!item?.sprint_id)return
+    const sprint=sprints.find((s:any)=>s.id===item.sprint_id)
+    if(!sprint)return
+    const forItem=nextAssignments.filter((a:any)=>a.item_id===itemId)
+    const newEnd=computeItemEndFromAssignments(sprint.start_date,sprint.end_date,forItem)
+    if(newEnd===item.end_date)return
+    setItems((prev:any[])=>prev.map((it:any)=>it.id===itemId?{...it,end_date:newEnd}:it))
+    await supabase.from('items').update({end_date:newEnd}).eq('id',itemId)
+  }
   async function addAssignment(itemId:any,personId:any,days:number){
     if(!personId)return
     const{data,error}=await supabase.from('item_assignments').insert({item_id:itemId,person_id:personId,hours:days*8}).select().single()
     if(error){alert('Failed to assign: '+error.message);return}
-    if(data)setItemAssignments((prev:any[])=>[...prev,data])
+    if(data){
+      const next=[...itemAssignments,data]
+      setItemAssignments(next)
+      await resyncItemDates(itemId,next)
+    }
   }
-  async function removeAssignment(id:any){
-    setItemAssignments((prev:any[])=>prev.filter((a:any)=>a.id!==id))
+  async function removeAssignment(id:any,itemId:any){
+    const next=itemAssignments.filter((a:any)=>a.id!==id)
+    setItemAssignments(next)
     await supabase.from('item_assignments').delete().eq('id',id)
+    await resyncItemDates(itemId,next)
   }
 
   return(
@@ -5397,7 +5463,9 @@ function SprintsTab({items,setItems,projects,projectRoles,people,roles,sprints,s
           const lastEnd=teamSprints.length?teamSprints[teamSprints.length-1].end_date:null
           const readyBacklog=items.filter((it:any)=>it.team===team&&!it.sprint_id&&!ITEM_TERMINAL.includes(it.status))
             .sort((a:any,b:any)=>(a.committed_priority??a.sort_order??999)-(b.committed_priority??b.sort_order??999))
-          // Grouped by project — "No Project" bucket last, projects ordered alphabetically otherwise
+          // Grouped by project — ordered to MATCH the Projects tab's own order (its manual
+          // drag-order, sort_order) rather than alphabetically, so priority reads the same
+          // way here as it does there. "No Project" bucket always last.
           const groupByProject=(list:any[])=>{
             const map=new Map<string,any[]>()
             for(const it of list){
@@ -5405,10 +5473,11 @@ function SprintsTab({items,setItems,projects,projectRoles,people,roles,sprints,s
               if(!map.has(key))map.set(key,[])
               map.get(key)!.push(it)
             }
+            const projSortOrder=(name:string)=>projects.find((p:any)=>p.name===name)?.sort_order??9999
             return[...map.entries()].sort((a,b)=>{
               if(a[0]==='(No Project)')return 1
               if(b[0]==='(No Project)')return -1
-              return a[0]<b[0]?-1:1
+              return projSortOrder(a[0])-projSortOrder(b[0])
             })
           }
           const readyGroups=groupByProject(readyBacklog)
@@ -5479,7 +5548,7 @@ function SprintsTab({items,setItems,projects,projectRoles,people,roles,sprints,s
                                     <span key={a.id} title={flagged?'Not originally budgeted for this project':undefined}
                                       style={{fontSize:9,background:flagged?'rgba(232,185,90,0.15)':'#1E3048',border:'1px solid '+(flagged?'#E8B95A':'#243447'),borderRadius:10,padding:'2px 7px',color:flagged?'#E8B95A':'#F4F6F8',display:'flex',alignItems:'center',gap:4}}>
                                       {person?.name||'—'} · {((a.hours||0)/8).toFixed(1)}d{flagged?' ⚠':''}
-                                      <span onClick={()=>removeAssignment(a.id)} style={{cursor:'pointer',color:'#7A8FA6'}}>✕</span>
+                                      <span onClick={()=>removeAssignment(a.id,it.id)} style={{cursor:'pointer',color:'#7A8FA6'}}>✕</span>
                                     </span>
                                   )
                                 })}
@@ -5526,10 +5595,17 @@ function SprintsTab({items,setItems,projects,projectRoles,people,roles,sprints,s
                       <span style={{overflow:'hidden',whiteSpace:'nowrap' as const,textOverflow:'ellipsis'}}>{projName}</span>
                       <span style={{color:'#7A8FA6',fontWeight:400}}>({groupItems.length})</span>
                     </div>
-                    {groupItems.map((it:any)=>(
+                    {groupItems.map((it:any)=>{
+                      const committed=!!(it.start_date&&it.end_date)
+                      return(
                       <div key={it.id} style={{display:'flex',alignItems:'center',gap:6,fontSize:11,padding:'5px 0 5px 13px',borderBottom:'1px solid #1A2838'}}>
                         <span style={{color:'#7A8FA6',fontFamily:'monospace',fontSize:9,width:56,flexShrink:0}}>{it.item_id}</span>
                         <span style={{color:'#F4F6F8',flex:1,overflow:'hidden',whiteSpace:'nowrap' as const,textOverflow:'ellipsis'}}>{rt(it.request_type)} {it.name}</span>
+                        {committed?(
+                          <span title={`Already committed on Roadmap: ${it.start_date} – ${it.end_date}`} style={{color:'#5DADE2',fontSize:9,fontWeight:700,whiteSpace:'nowrap' as const,border:'1px solid #5DADE2',borderRadius:4,padding:'0 5px'}}>📅 Committed</span>
+                        ):(
+                          <span title="Not yet committed to any dates" style={{color:'#3A4A5E',fontSize:9,fontStyle:'italic',whiteSpace:'nowrap' as const}}>uncommitted</span>
+                        )}
                         <span style={{color:sc(it.status),fontSize:9,fontWeight:700,whiteSpace:'nowrap' as const}}>{it.status}</span>
                         <span style={{color:'#7A8FA6',fontSize:9,border:'1px solid #243447',borderRadius:4,padding:'0 5px',flexShrink:0}}>{it.effort||'M'}</span>
                         <select value="" onChange={e=>placeItem(it,e.target.value)} style={{fontSize:10,background:'#0D1B2A',border:'1px solid #243447',borderRadius:5,color:'#7A8FA6',padding:'3px 5px'}}>
@@ -5537,7 +5613,8 @@ function SprintsTab({items,setItems,projects,projectRoles,people,roles,sprints,s
                           {teamSprints.map((s:any,ix:number)=><option key={s.id} value={s.id}>Sprint {ix+1} ({s.start_date})</option>)}
                         </select>
                       </div>
-                    ))}
+                      )
+                    })}
                   </div>
                 )
               })}
@@ -7370,7 +7447,7 @@ useEffect(()=>{
       </div>
       <div style={{flex:1,overflow:'hidden'}}>
         {activeTab==='backlog'&&<Backlog items={sItems} setItems={setSItems} projects={sProjects} setProjects={setSProjects} space={space} ccrs={ccrs} ccrItems={ccrItems} setCcrItems={setCcrItems}/>}
-        {activeTab==='projects'&&<Projects items={sItems} setItems={setSItems} projects={sProjects} setProjects={setSProjects} milestones={sMilestones} setMilestones={setSMilestones} tasks={tasks} setTasks={setTasks} space={space} ccrs={ccrs} ccrItems={ccrItems} roles={roles} people={people} projectRoles={projectRoles} setProjectRoles={setProjectRoles} itemAssignments={itemAssignments} setItemAssignments={setItemAssignments}/>}
+        {activeTab==='projects'&&<Projects items={sItems} setItems={setSItems} projects={sProjects} setProjects={setSProjects} milestones={sMilestones} setMilestones={setSMilestones} tasks={tasks} setTasks={setTasks} space={space} ccrs={ccrs} ccrItems={ccrItems} roles={roles} people={people} projectRoles={projectRoles} setProjectRoles={setProjectRoles} itemAssignments={itemAssignments} setItemAssignments={setItemAssignments} sprints={sprints}/>}
 {activeTab==='roadmap'&&<Roadmap items={sItems} setItems={setSItems} projects={sProjects} setProjects={setSProjects} milestones={sMilestones} sprints={sprints} itemAssignments={itemAssignments} projectRoles={projectRoles} people={people} roles={roles}/>}
         {activeTab==='teams'&&<Teams items={sItems} projects={sProjects} milestones={sMilestones} ccrs={ccrs} ccrItems={ccrItems}/>}
         {activeTab==='desk'&&<Desk items={items} setItems={setItems} projects={projects} setProjects={setProjects} milestones={milestones} setMilestones={setMilestones} tasks={tasks} setTasks={setTasks} ccrs={ccrs} setCcrs={setCcrs} ccrItems={ccrItems} setCcrItems={setCcrItems} space={space} openAssistant={(t:string)=>{setAsstSeed(t);setAsstOpen(true)}}/>}
