@@ -336,30 +336,34 @@ function existingCommitmentDuringSprint(person:any,sprint:any,projects:any[],pro
 // Everything a sprint needs to show: demand, supply, room, and per-person alerts —
 // one function so the Sprints tab and the Roadmap drill-down never compute this
 // differently from each other.
-function sprintStats(sprint:any,items:any[],sprintAssignments:any[],projects:any[],projectRoles:any[],people:any[],roles:any[],sprintConfig:any[]){
+// Sprint math driven by REAL assignments — the same item_assignments (person + hours)
+// you already enter for budget actuals on a committed item — instead of an Effort-size
+// formula. Demand and supply are both measured in real working days, not abstract
+// sprint-equivalents, because a sprint item's true cost is whatever hours were actually
+// logged against it, not a guess from its S/M/L/XL bucket.
+function sprintStats(sprint:any,items:any[],itemAssignments:any[],projects:any[],projectRoles:any[],people:any[],roles:any[]){
   const sprintItems=items.filter((it:any)=>it.sprint_id===sprint.id)
-  const demand=sprintItems.reduce((s:number,it:any)=>s+sizeToSprintEq(it.effort,sprintConfig),0)
-  const asg=sprintAssignments.filter((a:any)=>a.sprint_id===sprint.id)
-  const splitMode=sprintCfgVal(sprintConfig,'split_mode',0)===1
-  // Per person: existing project commitment + whatever sprint items they're assigned to.
+  const sprintDays=workingDays(sprint.start_date,sprint.end_date)
+  const asg=itemAssignments.filter((a:any)=>sprintItems.some((it:any)=>it.id===a.item_id))
+  // An item placed in a sprint with nobody assigned contributes nothing measurable —
+  // flag it so it's visibly NOT baked into demand, rather than silently invisible.
+  const unassignedItems=sprintItems.filter((it:any)=>!itemAssignments.some((a:any)=>a.item_id===it.id))
+  const demand=asg.reduce((s:number,a:any)=>s+(a.hours||0)/8,0)
+  // Per person: existing project commitment (converted to days) + real assigned days this sprint.
   const peopleInSprint=[...new Set(asg.map((a:any)=>a.person_id))].map((pid:any)=>people.find((p:any)=>p.id===pid)).filter(Boolean)
   const perPerson=peopleInSprint.map((person:any)=>{
-    const existing=existingCommitmentDuringSprint(person,sprint,projects,projectRoles,items,roles)
-    const myAsg=asg.filter((a:any)=>a.person_id===person.id)
-    let sprintClaim=0
-    for(const a of myAsg){
-      const it=items.find((i:any)=>i.id===a.item_id)
-      if(!it)continue
-      const eq=sizeToSprintEq(it.effort,sprintConfig)
-      const coAssignees=asg.filter((x:any)=>x.item_id===it.id).length||1
-      sprintClaim+=splitMode?eq/coAssignees:eq
-    }
-    const total=existing+sprintClaim
-    return{person,existing,sprintClaim,total,over:total>1.001}
+    const existingFrac=existingCommitmentDuringSprint(person,sprint,projects,projectRoles,items,roles)
+    const existingDays=existingFrac*sprintDays
+    const assignedDays=asg.filter((a:any)=>a.person_id===person.id).reduce((s:number,a:any)=>s+(a.hours||0)/8,0)
+    const totalDays=existingDays+assignedDays
+    return{person,existingDays,assignedDays,totalDays,sprintDays,over:totalDays>sprintDays+0.05,pct:sprintDays>0?totalDays/sprintDays:0}
   })
-  const supply=peopleInSprint.reduce((s:number,person:any)=>{
-    const existing=existingCommitmentDuringSprint(person,sprint,projects,projectRoles,items,roles)
-    return s+Math.max(0,1-existing)
+  // Supply is every active team member's free days — not just the ones already assigned —
+  // so Room reflects real remaining capacity, not just what's already spoken for.
+  const teamMembers=people.filter((p:any)=>p.active&&p.team===sprint.team)
+  const supply=teamMembers.reduce((s:number,person:any)=>{
+    const existingFrac=existingCommitmentDuringSprint(person,sprint,projects,projectRoles,items,roles)
+    return s+Math.max(0,sprintDays-existingFrac*sprintDays)
   },0)
   // "Not originally budgeted" — assigned to an item's project with no project_roles link.
   const notBudgeted=asg.filter((a:any)=>{
@@ -369,7 +373,7 @@ function sprintStats(sprint:any,items:any[],sprintAssignments:any[],projects:any
     if(!proj)return false
     return!projectRoles.some((r:any)=>r.project_id===proj.id&&r.person_id===a.person_id)
   })
-  return{sprintItems,demand,supply,room:supply-demand,perPerson,notBudgeted,assignments:asg}
+  return{sprintItems,sprintDays,demand,supply,room:supply-demand,perPerson,unassignedItems,notBudgeted,assignments:asg}
 }
 function capacityByMonth(projects:any[],projectRoles:any[],people:any[],roles:any[],items:any[]=[]){
   const active=projects.filter((p:any)=>!PROJECT_TERMINAL.includes(p.status)&&(p.ongoing||(p.start_date&&p.end_date)))
@@ -2625,7 +2629,7 @@ const sorted=items.filter(i=>!isItemDone(i)).sort((a,b)=>{
 }
 
 // ── ROADMAP ───────────────────────────────────────────────────────────────
-function Roadmap({items,setItems,projects,setProjects,milestones,sprints=[],sprintAssignments=[],projectRoles=[],people=[],roles=[],sprintConfig=[]}:{items:any[],projects:any[],setItems:any,setProjects:any,milestones:any[],sprints?:any[],sprintAssignments?:any[],projectRoles?:any[],people?:any[],roles?:any[],sprintConfig?:any[]}) {
+function Roadmap({items,setItems,projects,setProjects,milestones,sprints=[],itemAssignments=[],projectRoles=[],people=[],roles=[]}:{items:any[],projects:any[],setItems:any,setProjects:any,milestones:any[],sprints?:any[],itemAssignments?:any[],projectRoles?:any[],people?:any[],roles?:any[]}) {
   const [showSprints,setShowSprints]=useState(false)
   const [sprintPopover,setSprintPopover]=useState<any>(null) // {start_date,end_date} of clicked band
   const [view,setView]=useState('quarter')
@@ -3141,7 +3145,7 @@ function Roadmap({items,setItems,projects,setProjects,milestones,sprints=[],spri
                     <button onClick={()=>setSprintPopover(null)} style={{marginLeft:'auto',background:'none',border:'none',color:'#7A8FA6',fontSize:14,cursor:'pointer'}}>✕</button>
                   </div>
                   {relevant.map((sp:any)=>{
-                    const stats=sprintStats(sp,items,sprintAssignments,projects,projectRoles,people,roles,sprintConfig)
+                    const stats=sprintStats(sp,items,itemAssignments,projects,projectRoles,people,roles)
                     const teamSprintsSameTeam=sprints.filter((s:any)=>s.team===sp.team).sort((a:any,b:any)=>a.start_date<b.start_date?-1:1)
                     const ord=teamSprintsSameTeam.findIndex((s:any)=>s.id===sp.id)+1
                     return(
@@ -5304,24 +5308,13 @@ function Desk({items,setItems,projects,setProjects,milestones,setMilestones,task
 
 
 // ── DONE — history of completed projects and items ───────────────────────
-function SprintsTab({items,setItems,projects,projectRoles,people,roles,sprints,setSprints,sprintAssignments,setSprintAssignments,sprintConfig,setSprintConfig}:any){
-  const [showSettings,setShowSettings]=useState(false)
+function SprintsTab({items,setItems,projects,projectRoles,people,roles,sprints,setSprints,itemAssignments,setItemAssignments}:any){
   const [newSprintStart,setNewSprintStart]=useState<any>({})   // team -> date string, the "start a new sprint" input per column
-  const [assignOpen,setAssignOpen]=useState<any>(null)          // item.id currently showing its "+ assign person" picker
-  // "Ready backlog" = everything not yet closed out — the point is showing the team's
-  // full remaining runway, not gatekeeping on a specific grooming status.
+  const [assignOpen,setAssignOpen]=useState<any>(null)          // item.id currently showing its "+ assign person" mini-form
+  const [assignPerson,setAssignPerson]=useState('')
+  const [assignDays,setAssignDays]=useState('1')
 
   const allTeams=[...new Set([...TEAMS,...people.map((p:any)=>p.team).filter(Boolean)])]
-
-  async function updCfg(key:string,value:number){
-    const row=sprintConfig.find((c:any)=>c.key===key)
-    setSprintConfig((prev:any[])=>{
-      const exists=prev.some((c:any)=>c.key===key)
-      return exists?prev.map((c:any)=>c.key===key?{...c,value}:c):[...prev,{key,value}]
-    })
-    if(row)await supabase.from('sprint_config').update({value}).eq('key',key)
-    else await supabase.from('sprint_config').insert({key,value})
-  }
 
   async function createSprint(team:string,start:string){
     if(!start)return
@@ -5336,7 +5329,6 @@ function SprintsTab({items,setItems,projects,projectRoles,people,roles,sprints,s
     setItems((prev:any[])=>prev.map((it:any)=>it.sprint_id===sprint.id?{...it,sprint_id:null,start_date:null,end_date:null}:it))
     if(inSprint.length)await supabase.from('items').update({sprint_id:null,start_date:null,end_date:null}).eq('sprint_id',sprint.id)
     setSprints((prev:any[])=>prev.filter((s:any)=>s.id!==sprint.id))
-    setSprintAssignments((prev:any[])=>prev.filter((a:any)=>a.sprint_id!==sprint.id))
     await supabase.from('sprints').delete().eq('id',sprint.id)
   }
   // Placing an item in a sprint sets its REAL dates to the sprint's — this is what lets
@@ -5346,54 +5338,50 @@ function SprintsTab({items,setItems,projects,projectRoles,people,roles,sprints,s
     const fields=sprintId?{sprint_id:sprintId,start_date:sprint.start_date,end_date:sprint.end_date}:{sprint_id:null,start_date:null,end_date:null}
     setItems((prev:any[])=>prev.map((it:any)=>it.id===item.id?{...it,...fields}:it))
     await supabase.from('items').update(fields).eq('id',item.id)
-    if(!sprintId)await supabase.from('sprint_assignments').delete().eq('item_id',item.id)
-    if(!sprintId)setSprintAssignments((prev:any[])=>prev.filter((a:any)=>a.item_id!==item.id))
   }
-  async function assignPerson(sprintId:any,itemId:any,personId:any){
-    if(!personId||sprintAssignments.some((a:any)=>a.sprint_id===sprintId&&a.item_id===itemId&&a.person_id===personId))return
-    const{data,error}=await supabase.from('sprint_assignments').insert({sprint_id:sprintId,item_id:itemId,person_id:personId}).select().single()
+  // Assigning a person now writes directly to item_assignments — the SAME table the
+  // Budget section's per-item assignment editor uses. One real record, feeding both
+  // budget actuals and sprint capacity — never two numbers that can drift apart.
+  async function addAssignment(itemId:any,personId:any,days:number){
+    if(!personId)return
+    const{data,error}=await supabase.from('item_assignments').insert({item_id:itemId,person_id:personId,hours:days*8}).select().single()
     if(error){alert('Failed to assign: '+error.message);return}
-    if(data)setSprintAssignments((prev:any[])=>[...prev,data])
+    if(data)setItemAssignments((prev:any[])=>[...prev,data])
   }
-  async function unassignPerson(id:any){
-    setSprintAssignments((prev:any[])=>prev.filter((a:any)=>a.id!==id))
-    await supabase.from('sprint_assignments').delete().eq('id',id)
+  async function removeAssignment(id:any){
+    setItemAssignments((prev:any[])=>prev.filter((a:any)=>a.id!==id))
+    await supabase.from('item_assignments').delete().eq('id',id)
   }
 
   return(
     <div style={{height:'100%',overflowY:'auto',padding:'20px 28px'}}>
       <div style={{display:'flex',alignItems:'center',gap:10,marginBottom:6}}>
         <span style={{fontSize:20,fontWeight:800,color:'#F4F6F8'}}>⚡ Sprints</span>
-        <button onClick={()=>setShowSettings(s=>!s)} style={{marginLeft:'auto',background:'none',border:'1px solid #243447',borderRadius:6,color:'#7A8FA6',fontSize:11,padding:'5px 10px',cursor:'pointer'}}>⚙ Settings</button>
       </div>
       <div style={{fontSize:11,color:'#7A8FA6',marginBottom:16,lineHeight:1.5}}>
-        Placing an item in a sprint sets its real dates — Roadmap and timeline checks pick it up automatically. Demand is the sum of item sizes (in sprint-equivalents); Supply is each assigned person's free time after their existing project commitments during this sprint's window.
+        Placing an item in a sprint sets its real dates — Roadmap and timeline checks pick it up automatically. Demand and Supply are both real working days: Demand comes from actual hours assigned to each item (the same assignments you enter for budget actuals); Supply is each team member's free days after their existing project commitments during this sprint's window. An item with no one assigned doesn't count toward anything yet — it's flagged so that's never silent.
       </div>
-      {showSettings&&(
-        <div style={{background:'#12202F',border:'1px solid #243447',borderRadius:10,padding:'14px 18px',marginBottom:20,maxWidth:520}}>
-          <div style={{fontSize:11,fontWeight:700,color:'#F4F6F8',marginBottom:10}}>Sprint-equivalent sizing (editable)</div>
-          <div style={{display:'flex',gap:14,marginBottom:12,flexWrap:'wrap' as const}}>
-            {(['S','M','L','XL'] as string[]).map(sz=>(
-              <div key={sz}>
-                <div style={{fontSize:10,color:'#7A8FA6',marginBottom:3}}>{sz}</div>
-                <input type="number" step="0.5" value={sprintCfgVal(sprintConfig,`size_${sz}`,sz==='S'?0.5:sz==='M'?1:sz==='L'?2:3)}
-                  onChange={e=>updCfg(`size_${sz}`,parseFloat(e.target.value)||0)}
-                  style={{width:56,background:'#0D1B2A',border:'1px solid #243447',borderRadius:5,color:'#F4F6F8',fontSize:12,padding:'4px 6px'}}/>
-              </div>
-            ))}
-          </div>
-          <label style={{display:'flex',alignItems:'center',gap:6,fontSize:11,color:'#7A8FA6',cursor:'pointer'}}>
-            <input type="checkbox" checked={sprintCfgVal(sprintConfig,'split_mode',0)===1} onChange={e=>updCfg('split_mode',e.target.checked?1:0)}/>
-            Split an item's size evenly across co-assignees (default: each assignee claims the full size)
-          </label>
-        </div>
-      )}
       <div style={{display:'flex',gap:20,alignItems:'flex-start'}}>
         {allTeams.map(team=>{
           const teamSprints=sprints.filter((s:any)=>s.team===team).sort((a:any,b:any)=>a.start_date<b.start_date?-1:1)
           const lastEnd=teamSprints.length?teamSprints[teamSprints.length-1].end_date:null
           const readyBacklog=items.filter((it:any)=>it.team===team&&!it.sprint_id&&!ITEM_TERMINAL.includes(it.status))
             .sort((a:any,b:any)=>(a.committed_priority??a.sort_order??999)-(b.committed_priority??b.sort_order??999))
+          // Grouped by project — "No Project" bucket last, projects ordered alphabetically otherwise
+          const groupByProject=(list:any[])=>{
+            const map=new Map<string,any[]>()
+            for(const it of list){
+              const key=it.parent_project||'(No Project)'
+              if(!map.has(key))map.set(key,[])
+              map.get(key)!.push(it)
+            }
+            return[...map.entries()].sort((a,b)=>{
+              if(a[0]==='(No Project)')return 1
+              if(b[0]==='(No Project)')return -1
+              return a[0]<b[0]?-1:1
+            })
+          }
+          const readyGroups=groupByProject(readyBacklog)
           return(
             <div key={team} style={{flex:1,minWidth:380}}>
               <div style={{fontSize:14,fontWeight:800,color:'#F4F6F8',marginBottom:4}}>{team}</div>
@@ -5402,60 +5390,77 @@ function SprintsTab({items,setItems,projects,projectRoles,people,roles,sprints,s
               </div>
 
               {teamSprints.map((sprint:any,ix:number)=>{
-                const stats=sprintStats(sprint,items,sprintAssignments,projects,projectRoles,people,roles,sprintConfig)
-                const overRoom=stats.room<-0.001
+                const stats=sprintStats(sprint,items,itemAssignments,projects,projectRoles,people,roles)
+                const overRoom=stats.room<-0.05
+                const itemGroups=groupByProject(stats.sprintItems)
                 return(
                   <div key={sprint.id} style={{background:'#12202F',border:'1px solid '+(overRoom?'rgba(231,76,60,0.5)':'#243447'),borderRadius:10,padding:'12px 16px',marginBottom:14}}>
                     <div style={{display:'flex',alignItems:'center',gap:8,marginBottom:6}}>
                       <span style={{fontSize:13,fontWeight:700,color:'#F4F6F8'}}>Sprint {ix+1}</span>
-                      <span style={{fontSize:11,color:'#7A8FA6'}}>{sprint.start_date} – {sprint.end_date}</span>
+                      <span style={{fontSize:11,color:'#7A8FA6'}}>{sprint.start_date} – {sprint.end_date} ({stats.sprintDays}d)</span>
                       <button onClick={()=>deleteSprint(sprint)} style={{marginLeft:'auto',background:'none',border:'none',color:'#3A4A5E',fontSize:12,cursor:'pointer'}}>🗑</button>
                     </div>
                     <div style={{display:'flex',gap:16,fontSize:11,marginBottom:10}}>
-                      <span style={{color:'#7A8FA6'}}>Demand <b style={{color:'#F4F6F8'}}>{stats.demand.toFixed(1)}</b></span>
-                      <span style={{color:'#7A8FA6'}}>Supply <b style={{color:'#F4F6F8'}}>{stats.supply.toFixed(1)}</b></span>
-                      <span style={{color:overRoom?'#E74C3C':'#27AE60',fontWeight:700}}>{overRoom?'':'+'}{stats.room.toFixed(1)} room</span>
+                      <span style={{color:'#7A8FA6'}}>Demand <b style={{color:'#F4F6F8'}}>{stats.demand.toFixed(1)}d</b></span>
+                      <span style={{color:'#7A8FA6'}}>Supply <b style={{color:'#F4F6F8'}}>{stats.supply.toFixed(1)}d</b></span>
+                      <span style={{color:overRoom?'#E74C3C':'#27AE60',fontWeight:700}}>{stats.room>=0?'+':''}{stats.room.toFixed(1)}d room</span>
                     </div>
                     {stats.perPerson.filter((p:any)=>p.over).map((p:any,ix2:number)=>(
-                      <div key={ix2} style={{fontSize:10,color:'#E74C3C',fontWeight:700,marginBottom:4}}>⚠ {p.person.name} is at {Math.round(p.total*100)}% capacity this sprint</div>
+                      <div key={ix2} style={{fontSize:10,color:'#E74C3C',fontWeight:700,marginBottom:4}}>⚠ {p.person.name} is at {Math.round(p.pct*100)}% capacity this sprint ({p.totalDays.toFixed(1)}d of {p.sprintDays}d)</div>
                     ))}
-                    {stats.sprintItems.length===0&&<div style={{fontSize:11,color:'#7A8FA6',fontStyle:'italic',marginBottom:6}}>No items placed yet.</div>}
-                    {stats.sprintItems.map((it:any)=>{
-                      const myAsg=stats.assignments.filter((a:any)=>a.item_id===it.id)
-                      const available=people.filter((p:any)=>p.active&&!myAsg.some((a:any)=>a.person_id===p.id))
-                      return(
-                        <div key={it.id} style={{borderTop:'1px solid #1A2838',paddingTop:6,marginTop:6}}>
-                          <div style={{display:'flex',alignItems:'center',gap:6,fontSize:11}}>
-                            <span style={{color:'#7A8FA6',fontFamily:'monospace',fontSize:9}}>{it.item_id}</span>
-                            <span style={{color:'#F4F6F8',flex:1,overflow:'hidden',whiteSpace:'nowrap' as const,textOverflow:'ellipsis'}}>{rt(it.request_type)} {it.name}</span>
-                            <span style={{color:'#7A8FA6',fontSize:9,border:'1px solid #243447',borderRadius:4,padding:'0 5px'}}>{it.effort||'M'} · {sizeToSprintEq(it.effort,sprintConfig)}</span>
-                            <button onClick={()=>placeItem(it,null)} title="Remove from sprint" style={{background:'none',border:'none',color:'#3A4A5E',fontSize:11,cursor:'pointer'}}>✕</button>
-                          </div>
-                          <div style={{display:'flex',gap:5,flexWrap:'wrap' as const,marginTop:4,alignItems:'center'}}>
-                            {myAsg.map((a:any)=>{
-                              const person=people.find((p:any)=>p.id===a.person_id)
-                              const flagged=stats.notBudgeted.some((n:any)=>n.id===a.id)
-                              return(
-                                <span key={a.id} title={flagged?'Not originally budgeted for this project':undefined}
-                                  style={{fontSize:9,background:flagged?'rgba(232,185,90,0.15)':'#1E3048',border:'1px solid '+(flagged?'#E8B95A':'#243447'),borderRadius:10,padding:'2px 7px',color:flagged?'#E8B95A':'#F4F6F8',display:'flex',alignItems:'center',gap:4}}>
-                                  {person?.name||'—'}{flagged?' ⚠':''}
-                                  <span onClick={()=>unassignPerson(a.id)} style={{cursor:'pointer',color:'#7A8FA6'}}>✕</span>
-                                </span>
-                              )
-                            })}
-                            {assignOpen===it.id?(
-                              <select autoFocus onBlur={()=>setAssignOpen(null)} onChange={e=>{assignPerson(sprint.id,it.id,e.target.value);setAssignOpen(null)}}
-                                style={{fontSize:9,background:'#0D1B2A',border:'1px dashed #243447',borderRadius:5,color:'#7A8FA6',padding:'2px 4px'}}>
-                                <option value="">+ Assign…</option>
-                                {available.map((p:any)=><option key={p.id} value={p.id}>{p.name}</option>)}
-                              </select>
-                            ):(
-                              <button onClick={()=>setAssignOpen(it.id)} style={{fontSize:9,background:'none',border:'1px dashed #243447',borderRadius:10,color:'#7A8FA6',padding:'2px 8px',cursor:'pointer'}}>+ Assign</button>
-                            )}
-                          </div>
-                        </div>
-                      )
-                    })}
+                    {stats.unassignedItems.length>0&&(
+                      <div style={{fontSize:10,color:'#E8B95A',fontWeight:700,marginBottom:4}}>⚠ {stats.unassignedItems.length} item{stats.unassignedItems.length!==1?'s have':' has'} no one assigned — not counted toward demand</div>
+                    )}
+                    {itemGroups.length===0&&<div style={{fontSize:11,color:'#7A8FA6',fontStyle:'italic',marginBottom:6}}>No items placed yet.</div>}
+                    {itemGroups.map(([projName,groupItems])=>(
+                      <div key={projName} style={{marginTop:6}}>
+                        <div style={{fontSize:9,fontWeight:700,color:'#5DADE2',letterSpacing:0.5,marginBottom:3}}>{projName} ({groupItems.length})</div>
+                        {groupItems.map((it:any)=>{
+                          const myAsg=itemAssignments.filter((a:any)=>a.item_id===it.id)
+                          const available=people.filter((p:any)=>p.active&&!myAsg.some((a:any)=>a.person_id===p.id))
+                          const hasNoOne=myAsg.length===0
+                          return(
+                            <div key={it.id} style={{borderTop:'1px solid #1A2838',paddingTop:6,marginTop:6}}>
+                              <div style={{display:'flex',alignItems:'center',gap:6,fontSize:11}}>
+                                <span style={{color:'#7A8FA6',fontFamily:'monospace',fontSize:9}}>{it.item_id}</span>
+                                <span style={{color:'#F4F6F8',flex:1,overflow:'hidden',whiteSpace:'nowrap' as const,textOverflow:'ellipsis'}}>{rt(it.request_type)} {it.name}</span>
+                                <span style={{color:sc(it.status),fontSize:9,fontWeight:700}}>{it.status}</span>
+                                <span style={{color:'#7A8FA6',fontSize:9,border:'1px solid #243447',borderRadius:4,padding:'0 5px'}}>{it.effort||'M'}</span>
+                                <button onClick={()=>placeItem(it,null)} title="Remove from sprint" style={{background:'none',border:'none',color:'#3A4A5E',fontSize:11,cursor:'pointer'}}>✕</button>
+                              </div>
+                              {hasNoOne&&<div style={{fontSize:9,color:'#E8B95A',marginTop:2}}>⚠ No one assigned — not counted toward demand</div>}
+                              <div style={{display:'flex',gap:5,flexWrap:'wrap' as const,marginTop:4,alignItems:'center'}}>
+                                {myAsg.map((a:any)=>{
+                                  const person=people.find((p:any)=>p.id===a.person_id)
+                                  const flagged=stats.notBudgeted.some((n:any)=>n.id===a.id)
+                                  return(
+                                    <span key={a.id} title={flagged?'Not originally budgeted for this project':undefined}
+                                      style={{fontSize:9,background:flagged?'rgba(232,185,90,0.15)':'#1E3048',border:'1px solid '+(flagged?'#E8B95A':'#243447'),borderRadius:10,padding:'2px 7px',color:flagged?'#E8B95A':'#F4F6F8',display:'flex',alignItems:'center',gap:4}}>
+                                      {person?.name||'—'} · {((a.hours||0)/8).toFixed(1)}d{flagged?' ⚠':''}
+                                      <span onClick={()=>removeAssignment(a.id)} style={{cursor:'pointer',color:'#7A8FA6'}}>✕</span>
+                                    </span>
+                                  )
+                                })}
+                                {assignOpen===it.id?(
+                                  <div style={{display:'flex',gap:4,alignItems:'center'}}>
+                                    <select value={assignPerson} onChange={e=>setAssignPerson(e.target.value)} style={{fontSize:9,background:'#0D1B2A',border:'1px solid #243447',borderRadius:5,color:'#F4F6F8',padding:'2px 4px'}}>
+                                      <option value="">Person…</option>
+                                      {available.map((p:any)=><option key={p.id} value={p.id}>{p.name}</option>)}
+                                    </select>
+                                    <input type="number" step="0.5" value={assignDays} onChange={e=>setAssignDays(e.target.value)} title="Days" style={{width:40,fontSize:9,background:'#0D1B2A',border:'1px solid #243447',borderRadius:5,color:'#F4F6F8',padding:'2px 4px'}}/>
+                                    <button onClick={()=>{if(assignPerson){addAssignment(it.id,assignPerson,parseFloat(assignDays)||1);setAssignOpen(null);setAssignPerson('');setAssignDays('1')}}}
+                                      style={{fontSize:9,background:'#27AE60',border:'none',borderRadius:5,color:'#fff',fontWeight:700,padding:'2px 8px',cursor:'pointer'}}>+</button>
+                                    <button onClick={()=>setAssignOpen(null)} style={{fontSize:9,background:'none',border:'none',color:'#7A8FA6',cursor:'pointer'}}>✕</button>
+                                  </div>
+                                ):(
+                                  <button onClick={()=>{setAssignOpen(it.id);setAssignPerson('');setAssignDays('1')}} style={{fontSize:9,background:'none',border:'1px dashed #243447',borderRadius:10,color:'#7A8FA6',padding:'2px 8px',cursor:'pointer'}}>+ Assign</button>
+                                )}
+                              </div>
+                            </div>
+                          )
+                        })}
+                      </div>
+                    ))}
                   </div>
                 )
               })}
@@ -5468,20 +5473,32 @@ function SprintsTab({items,setItems,projects,projectRoles,people,roles,sprints,s
                   style={{background:'#27AE60',border:'none',borderRadius:6,color:'#fff',fontSize:11,fontWeight:700,padding:'6px 14px',cursor:'pointer',opacity:newSprintStart[team]?1:0.5}}>+ New Sprint</button>
               </div>
 
-              <div style={{fontSize:11,fontWeight:700,color:'#5DADE2',letterSpacing:1,marginBottom:8}}>READY BACKLOG</div>
+              <div style={{fontSize:11,fontWeight:700,color:'#5DADE2',letterSpacing:1,marginBottom:8}}>READY BACKLOG — BY PROJECT</div>
               {readyBacklog.length===0&&<div style={{fontSize:11,color:'#7A8FA6',fontStyle:'italic'}}>Nothing left in the backlog right now.</div>}
-              {readyBacklog.map((it:any)=>(
-                <div key={it.id} style={{display:'flex',alignItems:'center',gap:6,fontSize:11,padding:'5px 0',borderBottom:'1px solid #1A2838'}}>
-                  <span style={{color:'#7A8FA6',fontFamily:'monospace',fontSize:9,width:56,flexShrink:0}}>{it.item_id}</span>
-                  <span style={{color:'#F4F6F8',flex:1,overflow:'hidden',whiteSpace:'nowrap' as const,textOverflow:'ellipsis'}}>{rt(it.request_type)} {it.name}</span>
-                  <span style={{color:sc(it.status),fontSize:9,fontWeight:700,whiteSpace:'nowrap' as const}}>{it.status}</span>
-                  <span style={{color:'#7A8FA6',fontSize:9,border:'1px solid #243447',borderRadius:4,padding:'0 5px',flexShrink:0}}>{it.effort||'M'}</span>
-                  <select value="" onChange={e=>placeItem(it,e.target.value)} style={{fontSize:10,background:'#0D1B2A',border:'1px solid #243447',borderRadius:5,color:'#7A8FA6',padding:'3px 5px'}}>
-                    <option value="">+ Add to sprint…</option>
-                    {teamSprints.map((s:any,ix:number)=><option key={s.id} value={s.id}>Sprint {ix+1} ({s.start_date})</option>)}
-                  </select>
-                </div>
-              ))}
+              {readyGroups.map(([projName,groupItems])=>{
+                const proj=projects.find((p:any)=>p.name===projName)
+                return(
+                  <div key={projName} style={{marginBottom:12}}>
+                    <div style={{display:'flex',alignItems:'center',gap:6,fontSize:10,fontWeight:700,color:'#F4F6F8',marginBottom:4}}>
+                      {proj?<span style={{width:7,height:7,borderRadius:2,background:proj.color||'#3A4A5E',flexShrink:0}}/>:<span style={{width:7,height:7,borderRadius:2,background:'#3A4A5E',flexShrink:0,opacity:0.4}}/>}
+                      <span style={{overflow:'hidden',whiteSpace:'nowrap' as const,textOverflow:'ellipsis'}}>{projName}</span>
+                      <span style={{color:'#7A8FA6',fontWeight:400}}>({groupItems.length})</span>
+                    </div>
+                    {groupItems.map((it:any)=>(
+                      <div key={it.id} style={{display:'flex',alignItems:'center',gap:6,fontSize:11,padding:'5px 0 5px 13px',borderBottom:'1px solid #1A2838'}}>
+                        <span style={{color:'#7A8FA6',fontFamily:'monospace',fontSize:9,width:56,flexShrink:0}}>{it.item_id}</span>
+                        <span style={{color:'#F4F6F8',flex:1,overflow:'hidden',whiteSpace:'nowrap' as const,textOverflow:'ellipsis'}}>{rt(it.request_type)} {it.name}</span>
+                        <span style={{color:sc(it.status),fontSize:9,fontWeight:700,whiteSpace:'nowrap' as const}}>{it.status}</span>
+                        <span style={{color:'#7A8FA6',fontSize:9,border:'1px solid #243447',borderRadius:4,padding:'0 5px',flexShrink:0}}>{it.effort||'M'}</span>
+                        <select value="" onChange={e=>placeItem(it,e.target.value)} style={{fontSize:10,background:'#0D1B2A',border:'1px solid #243447',borderRadius:5,color:'#7A8FA6',padding:'3px 5px'}}>
+                          <option value="">+ Add to sprint…</option>
+                          {teamSprints.map((s:any,ix:number)=><option key={s.id} value={s.id}>Sprint {ix+1} ({s.start_date})</option>)}
+                        </select>
+                      </div>
+                    ))}
+                  </div>
+                )
+              })}
             </div>
           )
         })}
@@ -7312,14 +7329,14 @@ useEffect(()=>{
       <div style={{flex:1,overflow:'hidden'}}>
         {activeTab==='backlog'&&<Backlog items={sItems} setItems={setSItems} projects={sProjects} setProjects={setSProjects} space={space} ccrs={ccrs} ccrItems={ccrItems} setCcrItems={setCcrItems}/>}
         {activeTab==='projects'&&<Projects items={sItems} setItems={setSItems} projects={sProjects} setProjects={setSProjects} milestones={sMilestones} setMilestones={setSMilestones} tasks={tasks} setTasks={setTasks} space={space} ccrs={ccrs} ccrItems={ccrItems} roles={roles} people={people} projectRoles={projectRoles} setProjectRoles={setProjectRoles} itemAssignments={itemAssignments} setItemAssignments={setItemAssignments}/>}
-{activeTab==='roadmap'&&<Roadmap items={sItems} setItems={setSItems} projects={sProjects} setProjects={setSProjects} milestones={sMilestones} sprints={sprints} sprintAssignments={sprintAssignments} projectRoles={projectRoles} people={people} roles={roles} sprintConfig={sprintConfig}/>}
+{activeTab==='roadmap'&&<Roadmap items={sItems} setItems={setSItems} projects={sProjects} setProjects={setSProjects} milestones={sMilestones} sprints={sprints} itemAssignments={itemAssignments} projectRoles={projectRoles} people={people} roles={roles}/>}
         {activeTab==='teams'&&<Teams items={sItems} projects={sProjects} milestones={sMilestones} ccrs={ccrs} ccrItems={ccrItems}/>}
         {activeTab==='desk'&&<Desk items={items} setItems={setItems} projects={projects} setProjects={setProjects} milestones={milestones} setMilestones={setMilestones} tasks={tasks} setTasks={setTasks} ccrs={ccrs} setCcrs={setCcrs} ccrItems={ccrItems} setCcrItems={setCcrItems} space={space} openAssistant={(t:string)=>{setAsstSeed(t);setAsstOpen(true)}}/>}
         <Assistant open={asstOpen} setOpen={setAsstOpen} seed={asstSeed} setSeed={setAsstSeed} items={items} setItems={setItems} projects={projects} setProjects={setProjects} milestones={milestones} tasks={tasks} setTasks={setTasks} ccrs={ccrs} setCcrs={setCcrs} ccrItems={ccrItems} setCcrItems={setCcrItems} space={space}/>
         {activeTab==='stakeholder'&&<Stakeholder items={sItems} projects={sProjects} milestones={sMilestones}/>}
         {activeTab==='done'&&<DoneTab items={sItems} setItems={setSItems} projects={sProjects} setProjects={setSProjects} ccrs={ccrs} ccrItems={ccrItems} space={space}/>}
         {activeTab==='budget'&&<BudgetTab roles={roles} setRoles={setRoles} people={people} setPeople={setPeople} projects={sProjects} items={sItems} projectRoles={projectRoles} itemAssignments={itemAssignments} qBudgets={qBudgets} setQBudgets={setQBudgets}/>}
-        {activeTab==='sprints'&&<SprintsTab items={sItems} setItems={setSItems} projects={sProjects} projectRoles={projectRoles} people={people} roles={roles} sprints={sprints} setSprints={setSprints} sprintAssignments={sprintAssignments} setSprintAssignments={setSprintAssignments} sprintConfig={sprintConfig} setSprintConfig={setSprintConfig}/>}
+        {activeTab==='sprints'&&<SprintsTab items={sItems} setItems={setSItems} projects={sProjects} projectRoles={projectRoles} people={people} roles={roles} sprints={sprints} setSprints={setSprints} itemAssignments={itemAssignments} setItemAssignments={setItemAssignments}/>}
       </div>
     </div>
   )
