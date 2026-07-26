@@ -163,34 +163,44 @@ function advanceWorkingDays(startISO:string,days:number):string{
   }
   return localISO(d)
 }
-// An item's real end date given what's actually been assigned to it — the longest
-// individual assignee's day count, counted forward from the placement sprint's start.
-// Deliberately NOT capped to that sprint's own end — if the real work genuinely takes
-// longer than one sprint, the item's true dates should say so, and it'll show up in
-// every sprint its real span touches (see sprintItemsOverlapping below), not just the
-// one it was originally placed into. No assignments yet → falls back to the full
-// sprint span (already flagged elsewhere as "no one assigned").
+// Assignments on one item are SEQUENTIAL hand-offs, not parallel work — one person
+// at 3 days takes 3 days; two people at 3 days each takes 6, because the second
+// person's clock starts when the first one's ends (dev finishes, then QA starts, etc.).
+// Ordered by created_at (who was assigned first), each assignment gets its own real
+// {start,end} span, back to back, starting from the item's own start date.
+function itemAssignmentSpans(itemStart:string,assignmentsForItem:any[]):Map<string,{start:string,end:string,days:number}>{
+  const ordered=[...assignmentsForItem].sort((a:any,b:any)=>(a.created_at||'')<(b.created_at||'')?-1:1)
+  const spans=new Map<string,{start:string,end:string,days:number}>()
+  let cursor=itemStart
+  for(const a of ordered){
+    const days=(a.hours||0)/8
+    if(days<=0){spans.set(a.id,{start:cursor,end:cursor,days:0});continue}
+    const end=advanceWorkingDays(cursor,Math.ceil(days))
+    spans.set(a.id,{start:cursor,end,days})
+    cursor=advanceWorkingDays(end,2) // the next working day after this one ends
+  }
+  return spans
+}
+// An item's real end date — the sum of every assignee's days, counted forward
+// sequentially from the placement sprint's start (deliberately not capped to that
+// sprint's own end — if the real work runs longer than one sprint, the item's true
+// dates should say so, and it'll show up in every sprint it touches, tagged carried-
+// over). No assignments yet → falls back to the full sprint span (already flagged
+// elsewhere as "no one assigned").
 function computeItemEndFromAssignments(sprintStart:string,sprintEnd:string,assignmentsForItem:any[]):string{
-  const maxDays=assignmentsForItem.length?Math.max(...assignmentsForItem.map((a:any)=>(a.hours||0)/8)):0
-  if(maxDays<=0)return sprintEnd
-  return advanceWorkingDays(sprintStart,Math.ceil(maxDays))
+  const totalDays=assignmentsForItem.reduce((s:number,a:any)=>s+(a.hours||0)/8,0)
+  if(totalDays<=0)return sprintEnd
+  return advanceWorkingDays(sprintStart,Math.ceil(totalDays))
 }
-// A single assignment's own real working-day span, starting from the item's actual
-// start date — used to split demand correctly across sprints when different assignees
-// on the same item have different durations (e.g. a 15-day lead spanning two sprints
-// while a 3-day reviewer on the same item fits entirely in the first one).
-function assignmentDaySpan(itemStart:string,assignmentDays:number):{start:string,end:string}{
-  return{start:itemStart,end:advanceWorkingDays(itemStart,Math.max(1,Math.ceil(assignmentDays)))}
-}
-// How many of an assignment's real days fall inside a given sprint's window — the
-// actual demand contribution for THAT sprint specifically, so a multi-sprint item
-// splits its days across each sprint it touches instead of double-counting.
-function assignmentDaysInSprint(itemStart:string,assignmentDays:number,sprint:any):number{
-  const{start,end}=assignmentDaySpan(itemStart,assignmentDays)
-  const ovStart=start>sprint.start_date?start:sprint.start_date
-  const ovEnd=end<sprint.end_date?end:sprint.end_date
+// How many of one specific assignment's (sequential) real days fall inside a given
+// sprint's window — so a hand-off spanning two sprints splits its days correctly
+// between them instead of double-counting either the whole thing or the wrong share.
+function assignmentDaysInSprint(span:{start:string,end:string,days:number},sprint:any):number{
+  if(span.days<=0)return 0
+  const ovStart=span.start>sprint.start_date?span.start:sprint.start_date
+  const ovEnd=span.end<sprint.end_date?span.end:sprint.end_date
   const ovDays=workingDays(ovStart,ovEnd)
-  return Math.max(0,Math.min(assignmentDays,ovDays))
+  return Math.max(0,Math.min(span.days,ovDays))
 }
 const rateOf=(person:any,roles:any[])=>{
   if(person?.rate_override!=null)return person.rate_override
@@ -410,13 +420,15 @@ function sprintStats(sprint:any,items:any[],itemAssignments:any[],projects:any[]
   // An item placed in a sprint with nobody assigned contributes nothing measurable —
   // flag it so it's visibly NOT baked into demand, rather than silently invisible.
   const unassignedItems=sprintItems.filter((it:any)=>!itemAssignments.some((a:any)=>a.item_id===it.id))
-  // Demand splits correctly across sprints — each assignment's own real day-span is
-  // intersected with THIS sprint's window, so a 15-day assignment spanning two sprints
-  // contributes its true remainder to each one rather than double-counting the full amount.
+  // Each item's assignments are sequential hand-offs — compute every item's spans once,
+  // reused for both demand and the per-person check below, so they can never disagree.
+  const spansByItem=new Map<string,Map<string,{start:string,end:string,days:number}>>()
+  for(const it of sprintItems){
+    spansByItem.set(it.id,itemAssignmentSpans(it.start_date,itemAssignments.filter((a:any)=>a.item_id===it.id)))
+  }
   const demand=asg.reduce((s:number,a:any)=>{
-    const it=sprintItems.find((x:any)=>x.id===a.item_id)
-    if(!it)return s
-    return s+assignmentDaysInSprint(it.start_date,(a.hours||0)/8,sprint)
+    const span=spansByItem.get(a.item_id)?.get(a.id)
+    return span?s+assignmentDaysInSprint(span,sprint):s
   },0)
   const teamMembers=people.filter((p:any)=>p.active&&p.team===sprint.team)
   // 1. Team-level: raw headcount days, no pre-subtraction for other project work.
@@ -426,8 +438,8 @@ function sprintStats(sprint:any,items:any[],itemAssignments:any[],projects:any[]
   // implied days vs. their raw sprint days.
   const perPerson=teamMembers.map((person:any)=>{
     const assignedDays=asg.filter((a:any)=>a.person_id===person.id).reduce((s:number,a:any)=>{
-      const it=sprintItems.find((x:any)=>x.id===a.item_id)
-      return it?s+assignmentDaysInSprint(it.start_date,(a.hours||0)/8,sprint):s
+      const span=spansByItem.get(a.item_id)?.get(a.id)
+      return span?s+assignmentDaysInSprint(span,sprint):s
     },0)
     const otherDays=existingCommitmentDuringSprint(person,sprint,projects,projectRoles,items)*sprintDays
     const totalDays=assignedDays+otherDays
