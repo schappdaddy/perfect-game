@@ -431,8 +431,19 @@ function sprintStats(sprint:any,items:any[],itemAssignments:any[],projects:any[]
     return span?s+assignmentDaysInSprint(span,sprint):s
   },0)
   const teamMembers=people.filter((p:any)=>p.active&&p.team===sprint.team)
+  // Supply only counts people explicitly marked as delivery capacity — a PO or PM sitting
+  // on the roster with "free" days isn't necessarily real delivery bandwidth, so this is
+  // deliberately a SEPARATE, smaller set than "everyone on the team" (which perPerson below
+  // still checks in full, since anyone can still be overcommitted regardless of this flag).
+  const capacityRoster=teamMembers.filter((p:any)=>p.counts_toward_capacity!==false)
   // 1. Team-level: raw headcount days, no pre-subtraction for other project work.
-  const supply=teamMembers.length*sprintDays
+  const supply=capacityRoster.length*sprintDays
+  // Per-person free-days breakdown — the "who actually makes up this Room number" answer.
+  const supplyBreakdown=capacityRoster.map((person:any)=>{
+    const existingFrac=existingCommitmentDuringSprint(person,sprint,projects,projectRoles,items)
+    const existingDays=existingFrac*sprintDays
+    return{person,freeDays:Math.max(0,sprintDays-existingDays),existingDays,sprintDays}
+  }).sort((a:any,b:any)=>b.freeDays-a.freeDays)
 
   // 2. Per-person: sprint-assigned days (properly split across sprints) + other-project-
   // implied days vs. their raw sprint days.
@@ -474,7 +485,7 @@ function sprintStats(sprint:any,items:any[],itemAssignments:any[],projects:any[]
     if(!proj)return false
     return!projectRoles.some((r:any)=>r.project_id===proj.id&&r.person_id===a.person_id)
   })
-  return{sprintItems,sprintDays,demand,supply,room:supply-demand,perPerson,projectRisks,atRiskItems,unassignedItems,notBudgeted,assignments:asg}
+  return{sprintItems,sprintDays,demand,supply,room:supply-demand,perPerson,supplyBreakdown,projectRisks,atRiskItems,unassignedItems,notBudgeted,assignments:asg}
 }
 
 function capacityByMonth(projects:any[],projectRoles:any[],people:any[],roles:any[],items:any[]=[]){
@@ -5435,7 +5446,7 @@ function Desk({items,setItems,projects,setProjects,milestones,setMilestones,task
 
 
 // ── DONE — history of completed projects and items ───────────────────────
-function SprintsTab({items,setItems,projects,projectRoles,people,roles,sprints,setSprints,itemAssignments,setItemAssignments}:any){
+function SprintsTab({items,setItems,projects,projectRoles,people,setPeople,roles,sprints,setSprints,itemAssignments,setItemAssignments}:any){
   const [newSprintStart,setNewSprintStart]=useState<any>({})   // team -> date string, the "start a new sprint" input per column
   const [assignOpen,setAssignOpen]=useState<any>(null)          // item.id currently showing its "+ assign person" mini-form
   const [assignPerson,setAssignPerson]=useState('')
@@ -5500,6 +5511,8 @@ function SprintsTab({items,setItems,projects,projectRoles,people,roles,sprints,s
   }
 
   const [selectedTeam,setSelectedTeam]=useState<any>(null) // null → default to first team
+  const [roomDrill,setRoomDrill]=useState<any>(null) // sprint.id currently showing its Room breakdown
+  const [showCapRoster,setShowCapRoster]=useState(false)
   const allTeamsSorted=allTeams
   const team=selectedTeam&&allTeamsSorted.includes(selectedTeam)?selectedTeam:allTeamsSorted[0]
 
@@ -5546,6 +5559,30 @@ function SprintsTab({items,setItems,projects,projectRoles,people,roles,sprints,s
         {readyBacklog.length} item{readyBacklog.length!==1?'s':''} in the backlog not yet scheduled{readyBacklog.length<3?' — runway is getting thin':''}
       </div>
 
+      {(()=>{
+        const teamPeople=people.filter((p:any)=>p.active&&p.team===team)
+        async function toggleCap(personId:any,val:boolean){
+          setPeople((prev:any[])=>prev.map((p:any)=>p.id===personId?{...p,counts_toward_capacity:val}:p))
+          await supabase.from('people').update({counts_toward_capacity:val}).eq('id',personId)
+        }
+        return(
+          <div style={{marginBottom:16}}>
+            <button onClick={()=>setShowCapRoster((s:boolean)=>!s)} style={{background:'none',border:'1px solid #243447',borderRadius:6,color:'#7A8FA6',fontSize:11,padding:'5px 10px',cursor:'pointer'}}>⚙ Who counts toward Supply ({teamPeople.filter((p:any)=>p.counts_toward_capacity!==false).length}/{teamPeople.length})</button>
+            {showCapRoster&&(
+              <div style={{background:'#12202F',border:'1px solid #243447',borderRadius:8,padding:'10px 14px',marginTop:8,maxWidth:420}}>
+                <div style={{fontSize:10,color:'#7A8FA6',marginBottom:8,lineHeight:1.4}}>Uncheck anyone whose "free" time isn't real delivery capacity — a PO or PM with room on paper doesn't necessarily mean the team can absorb more work. This only affects the Supply number; Demand and overcommitment alerts still cover everyone.</div>
+                {teamPeople.map((p:any)=>(
+                  <label key={p.id} style={{display:'flex',alignItems:'center',gap:8,fontSize:11,color:'#F4F6F8',padding:'3px 0',cursor:'pointer'}}>
+                    <input type="checkbox" checked={p.counts_toward_capacity!==false} onChange={e=>toggleCap(p.id,e.target.checked)}/>
+                    {p.name} <span style={{color:'#7A8FA6',fontSize:10}}>· {roles.find((r:any)=>r.id===p.role_id)?.name||'—'}</span>
+                  </label>
+                ))}
+              </div>
+            )}
+          </div>
+        )
+      })()}
+
       <div style={{display:'flex',gap:24,alignItems:'flex-start'}}>
         {/* LEFT — pure planning: sprint cards + backlog, no alert noise mixed in */}
         <div style={{flex:'1 1 auto',minWidth:0}}>
@@ -5559,13 +5596,28 @@ function SprintsTab({items,setItems,projects,projectRoles,people,roles,sprints,s
                   <span style={{fontSize:11,color:'#7A8FA6'}}>{sprint.start_date} – {sprint.end_date} ({stats.sprintDays}d)</span>
                   <button onClick={()=>deleteSprint(sprint)} style={{marginLeft:'auto',background:'none',border:'none',color:'#3A4A5E',fontSize:12,cursor:'pointer'}}>🗑</button>
                 </div>
-                <div style={{display:'flex',gap:16,fontSize:11,marginBottom:10}}>
+                <div style={{display:'flex',gap:16,fontSize:11,marginBottom:6,alignItems:'center'}}>
                   <span style={{color:'#7A8FA6'}}>Demand <b style={{color:'#F4F6F8'}}>{stats.demand.toFixed(1)}d</b></span>
                   <span style={{color:'#7A8FA6'}}>Supply <b style={{color:'#F4F6F8'}}>{stats.supply.toFixed(1)}d</b></span>
-                  <span style={{color:overRoom?'#E74C3C':'#27AE60',fontWeight:700}}>{stats.room>=0?'+':''}{stats.room.toFixed(1)}d room</span>
+                  <span onClick={()=>setRoomDrill(roomDrill===sprint.id?null:sprint.id)} title="Click to see who makes up this Room number"
+                    style={{color:overRoom?'#E74C3C':'#27AE60',fontWeight:700,cursor:'pointer',textDecoration:'underline dotted'}}>
+                    {stats.room>=0?'+':''}{stats.room.toFixed(1)}d room
+                  </span>
                   {(stats.projectRisks.length>0||stats.perPerson.some((p:any)=>p.over))&&
                     <span title="See Alerts panel" style={{marginLeft:'auto',fontSize:9,color:'#E74C3C',fontWeight:700,border:'1px solid #E74C3C',borderRadius:8,padding:'1px 7px'}}>⚠ see alerts</span>}
                 </div>
+                {roomDrill===sprint.id&&(
+                  <div style={{background:'#0D1B2A',border:'1px solid #243447',borderRadius:6,padding:'8px 10px',marginBottom:10}}>
+                    <div style={{fontSize:9,fontWeight:700,color:'#7A8FA6',marginBottom:4}}>WHO MAKES UP THIS ROOM</div>
+                    {stats.supplyBreakdown.length===0&&<div style={{fontSize:10,color:'#7A8FA6',fontStyle:'italic'}}>No one is on this team's capacity roster — see ⚙ below.</div>}
+                    {stats.supplyBreakdown.map((b:any,ix4:number)=>(
+                      <div key={ix4} style={{display:'flex',justifyContent:'space-between',fontSize:10,marginBottom:2}}>
+                        <span style={{color:'#F4F6F8'}}>{b.person.name} <span style={{color:'#7A8FA6'}}>· {roles.find((r:any)=>r.id===b.person.role_id)?.name||'—'}</span></span>
+                        <span style={{color:b.freeDays<=0.05?'#3A4A5E':'#27AE60'}}>{b.freeDays.toFixed(1)}d free</span>
+                      </div>
+                    ))}
+                  </div>
+                )}
                 {itemGroups.length===0&&<div style={{fontSize:11,color:'#7A8FA6',fontStyle:'italic',marginBottom:6}}>No items placed yet.</div>}
                 {itemGroups.map(([projName,groupItems]:any)=>(
                   <div key={projName} style={{marginTop:6}}>
@@ -7527,7 +7579,7 @@ useEffect(()=>{
         {activeTab==='stakeholder'&&<Stakeholder items={sItems} projects={sProjects} milestones={sMilestones}/>}
         {activeTab==='done'&&<DoneTab items={sItems} setItems={setSItems} projects={sProjects} setProjects={setSProjects} ccrs={ccrs} ccrItems={ccrItems} space={space}/>}
         {activeTab==='budget'&&<BudgetTab roles={roles} setRoles={setRoles} people={people} setPeople={setPeople} projects={sProjects} items={sItems} projectRoles={projectRoles} itemAssignments={itemAssignments} qBudgets={qBudgets} setQBudgets={setQBudgets}/>}
-        {activeTab==='sprints'&&<SprintsTab items={sItems} setItems={setSItems} projects={sProjects} projectRoles={projectRoles} people={people} roles={roles} sprints={sprints} setSprints={setSprints} itemAssignments={itemAssignments} setItemAssignments={setItemAssignments}/>}
+        {activeTab==='sprints'&&<SprintsTab items={sItems} setItems={setSItems} projects={sProjects} projectRoles={projectRoles} people={people} setPeople={setPeople} roles={roles} sprints={sprints} setSprints={setSprints} itemAssignments={itemAssignments} setItemAssignments={setItemAssignments}/>}
       </div>
     </div>
   )
