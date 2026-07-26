@@ -413,6 +413,11 @@ function sprintStats(sprint:any,items:any[],itemAssignments:any[],projects:any[]
   // longer than one sprint shows up in every sprint it actually touches, tagged as
   // carried-over wherever it isn't the sprint it was originally placed into.
   const sprintItems=items.filter((it:any)=>
+    it.sprint_id&& // must have actually been placed in SOME sprint — pure date overlap alone
+                   // isn't enough, or an item that just happens to have Roadmap dates in
+                   // this window (never touched by sprint planning) would wrongly show up
+                   // here as if already planned, instead of correctly surfacing as an
+                   // unscheduled risk in the Alerts panel.
     it.team===sprint.team&&it.start_date&&it.end_date&&!ITEM_TERMINAL.includes(it.status)&&
     it.start_date<=sprint.end_date&&it.end_date>=sprint.start_date
   ).map((it:any)=>({...it,carriedOver:it.sprint_id!==sprint.id}))
