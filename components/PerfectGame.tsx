@@ -311,36 +311,47 @@ function sizeToSprintEq(size:string,sprintConfig:any[]):number{
 // the sprint (0–1+) — the same working-day-overlap logic Capacity uses for a calendar
 // month, just windowed to the sprint's actual 14 days instead. This is the "supply
 // already spoken for" side of the sprint capacity equation.
-function existingCommitmentDuringSprint(person:any,sprint:any,projects:any[],projectRoles:any[],items:any[],roles:any[]):number{
+// A single project_roles row's overlap fraction with a sprint's window — the plan's
+// implied claim on this person's time, for this one project specifically. Broken out
+// as its own function (rather than folded into a person-wide sum) because the project-
+// risk check below needs to know the number PER PROJECT, not just a person's total.
+function rowSprintOverlapFraction(row:any,person:any,sprint:any,projects:any[],items:any[]):number{
   const sprintDays=workingDays(sprint.start_date,sprint.end_date)
   if(sprintDays<=0)return 0
-  const rows=projectRoles.filter((r:any)=>r.person_id===person.id)
+  const proj=projects.find((p:any)=>p.id===row.project_id)
+  if(!proj||PROJECT_TERMINAL.includes(proj.status))return 0
+  // Ranges this row is actually "live" during — the project's own window, or (for ∞
+  // projects) each committed item's window — intersected with the sprint's dates.
+  const ranges:{start:string,end:string}[]=proj.ongoing
+    ?items.filter((it:any)=>it.parent_project===proj.name&&it.start_date&&it.end_date).map((it:any)=>({start:it.start_date,end:clipEndByTermination(person,it.end_date)}))
+    :(proj.start_date?[{start:proj.start_date,end:clipEndByTermination(person,proj.end_date||sprint.end_date)}]:[])
   let claimed=0
-  for(const row of rows){
-    const proj=projects.find((p:any)=>p.id===row.project_id)
-    if(!proj||PROJECT_TERMINAL.includes(proj.status))continue
-    // Ranges this row is actually "live" during — the project's own window, or (for ∞
-    // projects) each committed item's window — intersected with the sprint's dates.
-    const ranges:{start:string,end:string}[]=proj.ongoing
-      ?items.filter((it:any)=>it.parent_project===proj.name&&it.start_date&&it.end_date).map((it:any)=>({start:it.start_date,end:clipEndByTermination(person,it.end_date)}))
-      :(proj.start_date?[{start:proj.start_date,end:clipEndByTermination(person,proj.end_date||sprint.end_date)}]:[])
-    for(const r of ranges){
-      const ovStart=r.start>sprint.start_date?r.start:sprint.start_date
-      const ovEnd=r.end<sprint.end_date?r.end:sprint.end_date
-      const ovDays=workingDays(ovStart,ovEnd)
-      if(ovDays>0)claimed+=(ovDays/sprintDays)*(row.allocation_pct/100)
-    }
+  for(const r of ranges){
+    const ovStart=r.start>sprint.start_date?r.start:sprint.start_date
+    const ovEnd=r.end<sprint.end_date?r.end:sprint.end_date
+    const ovDays=workingDays(ovStart,ovEnd)
+    if(ovDays>0)claimed+=(ovDays/sprintDays)*(row.allocation_pct/100)
   }
   return claimed
 }
-// Everything a sprint needs to show: demand, supply, room, and per-person alerts —
-// one function so the Sprints tab and the Roadmap drill-down never compute this
-// differently from each other.
-// Sprint math driven by REAL assignments — the same item_assignments (person + hours)
-// you already enter for budget actuals on a committed item — instead of an Effort-size
-// formula. Demand and supply are both measured in real working days, not abstract
-// sprint-equivalents, because a sprint item's true cost is whatever hours were actually
-// logged against it, not a guess from its S/M/L/XL bucket.
+function existingCommitmentDuringSprint(person:any,sprint:any,projects:any[],projectRoles:any[],items:any[]):number{
+  const rows=projectRoles.filter((r:any)=>r.person_id===person.id)
+  return rows.reduce((s:number,row:any)=>s+rowSprintOverlapFraction(row,person,sprint,projects,items),0)
+}
+// Everything a sprint needs to show — one function so the Sprints tab and the Roadmap
+// drill-down never compute this differently from each other. Three distinct signals,
+// deliberately kept separate rather than folded into one number:
+//   1. Team Supply/Demand/Room — RAW headcount capacity vs. what's actually scheduled
+//      this sprint, regardless of any project's plan. Answers "are we overloading the
+//      team with real, scheduled work."
+//   2. Per-person overcommitment — sprint-assigned days + other-project-implied days,
+//      against their raw sprint days. Answers "is this specific person stretched thin
+//      across everything they're on, sprint work included."
+//   3. Project execution risk — for a project whose BUDGET PLAN implies real time this
+//      sprint (via project_roles), how much of that implied time is actually showing up
+//      as scheduled sprint work. A gap here means the plan and reality have diverged —
+//      the project is quietly not getting the time its own budget assumes, which is
+//      exactly the "at risk of missing dates" signal, surfaced instead of hidden.
 function sprintStats(sprint:any,items:any[],itemAssignments:any[],projects:any[],projectRoles:any[],people:any[],roles:any[]){
   const sprintItems=items.filter((it:any)=>it.sprint_id===sprint.id)
   const sprintDays=workingDays(sprint.start_date,sprint.end_date)
@@ -349,22 +360,37 @@ function sprintStats(sprint:any,items:any[],itemAssignments:any[],projects:any[]
   // flag it so it's visibly NOT baked into demand, rather than silently invisible.
   const unassignedItems=sprintItems.filter((it:any)=>!itemAssignments.some((a:any)=>a.item_id===it.id))
   const demand=asg.reduce((s:number,a:any)=>s+(a.hours||0)/8,0)
-  // Per person: existing project commitment (converted to days) + real assigned days this sprint.
-  const peopleInSprint=[...new Set(asg.map((a:any)=>a.person_id))].map((pid:any)=>people.find((p:any)=>p.id===pid)).filter(Boolean)
-  const perPerson=peopleInSprint.map((person:any)=>{
-    const existingFrac=existingCommitmentDuringSprint(person,sprint,projects,projectRoles,items,roles)
-    const existingDays=existingFrac*sprintDays
-    const assignedDays=asg.filter((a:any)=>a.person_id===person.id).reduce((s:number,a:any)=>s+(a.hours||0)/8,0)
-    const totalDays=existingDays+assignedDays
-    return{person,existingDays,assignedDays,totalDays,sprintDays,over:totalDays>sprintDays+0.05,pct:sprintDays>0?totalDays/sprintDays:0}
-  })
-  // Supply is every active team member's free days — not just the ones already assigned —
-  // so Room reflects real remaining capacity, not just what's already spoken for.
   const teamMembers=people.filter((p:any)=>p.active&&p.team===sprint.team)
-  const supply=teamMembers.reduce((s:number,person:any)=>{
-    const existingFrac=existingCommitmentDuringSprint(person,sprint,projects,projectRoles,items,roles)
-    return s+Math.max(0,sprintDays-existingFrac*sprintDays)
-  },0)
+  // 1. Team-level: raw headcount days, no pre-subtraction for other project work.
+  const supply=teamMembers.length*sprintDays
+
+  // 2. Per-person: sprint-assigned days + other-project-implied days vs. their raw sprint days.
+  const perPerson=teamMembers.map((person:any)=>{
+    const assignedDays=asg.filter((a:any)=>a.person_id===person.id).reduce((s:number,a:any)=>s+(a.hours||0)/8,0)
+    const otherDays=existingCommitmentDuringSprint(person,sprint,projects,projectRoles,items)*sprintDays
+    const totalDays=assignedDays+otherDays
+    return{person,assignedDays,otherDays,totalDays,sprintDays,over:totalDays>sprintDays+0.05,pct:sprintDays>0?totalDays/sprintDays:0}
+  }).filter((p:any)=>p.assignedDays>0||p.otherDays>0) // only show people with some real involvement
+
+  // 3. Project execution risk: does what's actually scheduled match what the project's
+  // own budget plan assumed would happen this sprint?
+  const projectRisks:any[]=[]
+  for(const row of projectRoles){
+    const person=teamMembers.find((p:any)=>p.id===row.person_id)
+    if(!person)continue
+    const proj=projects.find((p:any)=>p.id===row.project_id)
+    if(!proj)continue
+    const frac=rowSprintOverlapFraction(row,person,sprint,projects,items)
+    if(frac<=0.01)continue // this project's plan doesn't even touch this sprint window
+    const plannedDays=frac*sprintDays
+    const actualDays=asg.filter((a:any)=>a.person_id===person.id).reduce((s:number,a:any)=>{
+      const it=items.find((i:any)=>i.id===a.item_id)
+      return it&&it.parent_project===proj.name?s+(a.hours||0)/8:s
+    },0)
+    const gap=plannedDays-actualDays
+    if(gap>0.5)projectRisks.push({project:proj,person,plannedDays,actualDays,gap})
+  }
+
   // "Not originally budgeted" — assigned to an item's project with no project_roles link.
   const notBudgeted=asg.filter((a:any)=>{
     const it=items.find((i:any)=>i.id===a.item_id)
@@ -373,8 +399,9 @@ function sprintStats(sprint:any,items:any[],itemAssignments:any[],projects:any[]
     if(!proj)return false
     return!projectRoles.some((r:any)=>r.project_id===proj.id&&r.person_id===a.person_id)
   })
-  return{sprintItems,sprintDays,demand,supply,room:supply-demand,perPerson,unassignedItems,notBudgeted,assignments:asg}
+  return{sprintItems,sprintDays,demand,supply,room:supply-demand,perPerson,projectRisks,unassignedItems,notBudgeted,assignments:asg}
 }
+
 function capacityByMonth(projects:any[],projectRoles:any[],people:any[],roles:any[],items:any[]=[]){
   const active=projects.filter((p:any)=>!PROJECT_TERMINAL.includes(p.status)&&(p.ongoing||(p.start_date&&p.end_date)))
   const perPerson=new Map<string,Map<string,{cost:number,pct:number}>>() // person_id -> month -> {cost,pct}
@@ -3151,7 +3178,10 @@ function Roadmap({items,setItems,projects,setProjects,milestones,sprints=[],item
                     return(
                       <div key={sp.id} style={{marginBottom:8,paddingBottom:8,borderBottom:'1px solid #243447'}}>
                         <div style={{fontSize:11,fontWeight:700,color:'#5DADE2',marginBottom:3}}>{sp.team} — Sprint {ord}</div>
-                        <div style={{fontSize:11,color:'#7A8FA6'}}>Demand <b style={{color:'#F4F6F8'}}>{stats.demand.toFixed(1)}</b> · Supply <b style={{color:'#F4F6F8'}}>{stats.supply.toFixed(1)}</b> · <span style={{color:stats.room<0?'#E74C3C':'#27AE60',fontWeight:700}}>{stats.room>=0?'+':''}{stats.room.toFixed(1)} room</span></div>
+                        <div style={{fontSize:11,color:'#7A8FA6'}}>Demand <b style={{color:'#F4F6F8'}}>{stats.demand.toFixed(1)}d</b> · Supply <b style={{color:'#F4F6F8'}}>{stats.supply.toFixed(1)}d</b> · <span style={{color:stats.room<0?'#E74C3C':'#27AE60',fontWeight:700}}>{stats.room>=0?'+':''}{stats.room.toFixed(1)}d room</span></div>
+                        {stats.projectRisks.length>0&&(
+                          <div style={{fontSize:10,color:'#E74C3C',marginTop:3}}>⚠ {stats.projectRisks.length} project{stats.projectRisks.length!==1?'s':''} at risk — planned time isn't fully scheduled</div>
+                        )}
                       </div>
                     )
                   })}
@@ -5405,8 +5435,18 @@ function SprintsTab({items,setItems,projects,projectRoles,people,roles,sprints,s
                       <span style={{color:'#7A8FA6'}}>Supply <b style={{color:'#F4F6F8'}}>{stats.supply.toFixed(1)}d</b></span>
                       <span style={{color:overRoom?'#E74C3C':'#27AE60',fontWeight:700}}>{stats.room>=0?'+':''}{stats.room.toFixed(1)}d room</span>
                     </div>
+                    {stats.projectRisks.length>0&&(
+                      <div style={{background:'rgba(231,76,60,0.08)',border:'1px solid rgba(231,76,60,0.4)',borderRadius:6,padding:'6px 8px',marginBottom:8}}>
+                        <div style={{fontSize:9,fontWeight:700,color:'#E74C3C',marginBottom:3}}>⚠ AT RISK OF MISSING DATES</div>
+                        {stats.projectRisks.map((r:any,ix3:number)=>(
+                          <div key={ix3} style={{fontSize:10,color:'#F4F6F8',marginBottom:2}}>
+                            <b>{r.project.name}</b> planned {r.person.name} for {r.plannedDays.toFixed(1)}d this sprint, but only {r.actualDays.toFixed(1)}d is actually scheduled — {r.gap.toFixed(1)}d of planned work isn't happening
+                          </div>
+                        ))}
+                      </div>
+                    )}
                     {stats.perPerson.filter((p:any)=>p.over).map((p:any,ix2:number)=>(
-                      <div key={ix2} style={{fontSize:10,color:'#E74C3C',fontWeight:700,marginBottom:4}}>⚠ {p.person.name} is at {Math.round(p.pct*100)}% capacity this sprint ({p.totalDays.toFixed(1)}d of {p.sprintDays}d)</div>
+                      <div key={ix2} style={{fontSize:10,color:'#E74C3C',fontWeight:700,marginBottom:4}}>⚠ {p.person.name} is stretched to {Math.round(p.pct*100)}% this sprint — {p.assignedDays.toFixed(1)}d sprint work + {p.otherDays.toFixed(1)}d other projects = {p.totalDays.toFixed(1)}d of {p.sprintDays}d</div>
                     ))}
                     {stats.unassignedItems.length>0&&(
                       <div style={{fontSize:10,color:'#E8B95A',fontWeight:700,marginBottom:4}}>⚠ {stats.unassignedItems.length} item{stats.unassignedItems.length!==1?'s have':' has'} no one assigned — not counted toward demand</div>
