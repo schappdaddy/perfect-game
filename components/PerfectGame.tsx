@@ -164,14 +164,33 @@ function advanceWorkingDays(startISO:string,days:number):string{
   return localISO(d)
 }
 // An item's real end date given what's actually been assigned to it — the longest
-// individual assignee's day count, capped so it never runs past the sprint itself.
-// No assignments yet → falls back to the full sprint span (already flagged elsewhere
-// as "no one assigned"), since there's nothing real to size it from yet.
+// individual assignee's day count, counted forward from the placement sprint's start.
+// Deliberately NOT capped to that sprint's own end — if the real work genuinely takes
+// longer than one sprint, the item's true dates should say so, and it'll show up in
+// every sprint its real span touches (see sprintItemsOverlapping below), not just the
+// one it was originally placed into. No assignments yet → falls back to the full
+// sprint span (already flagged elsewhere as "no one assigned").
 function computeItemEndFromAssignments(sprintStart:string,sprintEnd:string,assignmentsForItem:any[]):string{
   const maxDays=assignmentsForItem.length?Math.max(...assignmentsForItem.map((a:any)=>(a.hours||0)/8)):0
   if(maxDays<=0)return sprintEnd
-  const proposed=advanceWorkingDays(sprintStart,Math.ceil(maxDays))
-  return proposed>sprintEnd?sprintEnd:proposed
+  return advanceWorkingDays(sprintStart,Math.ceil(maxDays))
+}
+// A single assignment's own real working-day span, starting from the item's actual
+// start date — used to split demand correctly across sprints when different assignees
+// on the same item have different durations (e.g. a 15-day lead spanning two sprints
+// while a 3-day reviewer on the same item fits entirely in the first one).
+function assignmentDaySpan(itemStart:string,assignmentDays:number):{start:string,end:string}{
+  return{start:itemStart,end:advanceWorkingDays(itemStart,Math.max(1,Math.ceil(assignmentDays)))}
+}
+// How many of an assignment's real days fall inside a given sprint's window — the
+// actual demand contribution for THAT sprint specifically, so a multi-sprint item
+// splits its days across each sprint it touches instead of double-counting.
+function assignmentDaysInSprint(itemStart:string,assignmentDays:number,sprint:any):number{
+  const{start,end}=assignmentDaySpan(itemStart,assignmentDays)
+  const ovStart=start>sprint.start_date?start:sprint.start_date
+  const ovEnd=end<sprint.end_date?end:sprint.end_date
+  const ovDays=workingDays(ovStart,ovEnd)
+  return Math.max(0,Math.min(assignmentDays,ovDays))
 }
 const rateOf=(person:any,roles:any[])=>{
   if(person?.rate_override!=null)return person.rate_override
@@ -378,34 +397,53 @@ function existingCommitmentDuringSprint(person:any,sprint:any,projects:any[],pro
 //      the project is quietly not getting the time its own budget assumes, which is
 //      exactly the "at risk of missing dates" signal, surfaced instead of hidden.
 function sprintStats(sprint:any,items:any[],itemAssignments:any[],projects:any[],projectRoles:any[],people:any[],roles:any[]){
-  const sprintItems=items.filter((it:any)=>it.sprint_id===sprint.id)
   const sprintDays=workingDays(sprint.start_date,sprint.end_date)
+  // "In this sprint" now means the item's REAL committed dates overlap this sprint's
+  // window — not just "placed here" — so an item whose assigned work genuinely runs
+  // longer than one sprint shows up in every sprint it actually touches, tagged as
+  // carried-over wherever it isn't the sprint it was originally placed into.
+  const sprintItems=items.filter((it:any)=>
+    it.team===sprint.team&&it.start_date&&it.end_date&&!ITEM_TERMINAL.includes(it.status)&&
+    it.start_date<=sprint.end_date&&it.end_date>=sprint.start_date
+  ).map((it:any)=>({...it,carriedOver:it.sprint_id!==sprint.id}))
   const asg=itemAssignments.filter((a:any)=>sprintItems.some((it:any)=>it.id===a.item_id))
   // An item placed in a sprint with nobody assigned contributes nothing measurable —
   // flag it so it's visibly NOT baked into demand, rather than silently invisible.
   const unassignedItems=sprintItems.filter((it:any)=>!itemAssignments.some((a:any)=>a.item_id===it.id))
-  const demand=asg.reduce((s:number,a:any)=>s+(a.hours||0)/8,0)
+  // Demand splits correctly across sprints — each assignment's own real day-span is
+  // intersected with THIS sprint's window, so a 15-day assignment spanning two sprints
+  // contributes its true remainder to each one rather than double-counting the full amount.
+  const demand=asg.reduce((s:number,a:any)=>{
+    const it=sprintItems.find((x:any)=>x.id===a.item_id)
+    if(!it)return s
+    return s+assignmentDaysInSprint(it.start_date,(a.hours||0)/8,sprint)
+  },0)
   const teamMembers=people.filter((p:any)=>p.active&&p.team===sprint.team)
   // 1. Team-level: raw headcount days, no pre-subtraction for other project work.
   const supply=teamMembers.length*sprintDays
 
-  // 2. Per-person: sprint-assigned days + other-project-implied days vs. their raw sprint days.
+  // 2. Per-person: sprint-assigned days (properly split across sprints) + other-project-
+  // implied days vs. their raw sprint days.
   const perPerson=teamMembers.map((person:any)=>{
-    const assignedDays=asg.filter((a:any)=>a.person_id===person.id).reduce((s:number,a:any)=>s+(a.hours||0)/8,0)
+    const assignedDays=asg.filter((a:any)=>a.person_id===person.id).reduce((s:number,a:any)=>{
+      const it=sprintItems.find((x:any)=>x.id===a.item_id)
+      return it?s+assignmentDaysInSprint(it.start_date,(a.hours||0)/8,sprint):s
+    },0)
     const otherDays=existingCommitmentDuringSprint(person,sprint,projects,projectRoles,items)*sprintDays
     const totalDays=assignedDays+otherDays
     return{person,assignedDays,otherDays,totalDays,sprintDays,over:totalDays>sprintDays+0.05,pct:sprintDays>0?totalDays/sprintDays:0}
   }).filter((p:any)=>p.assignedDays>0||p.otherDays>0) // only show people with some real involvement
 
-  // 3. Project execution risk: committed items (not in this sprint) whose dates fall
-  // inside or before this sprint's window — meaning they SHOULD be getting done now
-  // but haven't been pulled into the sprint plan. Pure delivery risk, nothing to do
-  // with Layer 1 budget projections.
+  // 3. Project execution risk: committed items overlapping this sprint's window that
+  // have NEVER been placed in any sprint at all — meaning they SHOULD be getting done
+  // now but haven't been pulled into the plan. (An item already carried over from
+  // another sprint is accounted for above, not a risk.) Pure delivery risk, nothing to
+  // do with Layer 1 budget projections.
   const atRiskItems=items.filter((it:any)=>{
-    if(it.sprint_id===sprint.id)return false // already in this sprint, fine
+    if(it.sprint_id)return false // already placed somewhere — covered by sprintItems if relevant
+    if(it.team!==sprint.team)return false
     if(!it.start_date||!it.end_date)return false // uncommitted, not a risk yet
-    if(ITEM_TERMINAL.includes(it.status))return false // already done
-    // Item's window overlaps or starts before the sprint ends
+    if(ITEM_TERMINAL.includes(it.status))return false
     return it.start_date<=sprint.end_date&&it.end_date>=sprint.start_date
   })
   // Group by project for a readable summary, not a line-per-person wall
@@ -5449,178 +5487,200 @@ function SprintsTab({items,setItems,projects,projectRoles,people,roles,sprints,s
     await resyncItemDates(itemId,next)
   }
 
+  const [selectedTeam,setSelectedTeam]=useState<any>(null) // null → default to first team
+  const allTeamsSorted=allTeams
+  const team=selectedTeam&&allTeamsSorted.includes(selectedTeam)?selectedTeam:allTeamsSorted[0]
+
+  const teamSprints=sprints.filter((s:any)=>s.team===team).sort((a:any,b:any)=>a.start_date<b.start_date?-1:1)
+  const lastEnd=teamSprints.length?teamSprints[teamSprints.length-1].end_date:null
+  const readyBacklog=items.filter((it:any)=>it.team===team&&!it.sprint_id&&!ITEM_TERMINAL.includes(it.status))
+    .sort((a:any,b:any)=>(a.committed_priority??a.sort_order??999)-(b.committed_priority??b.sort_order??999))
+  const groupByProject=(list:any[])=>{
+    const map=new Map<string,any[]>()
+    for(const it of list){
+      const key=it.parent_project||'(No Project)'
+      if(!map.has(key))map.set(key,[])
+      map.get(key)!.push(it)
+    }
+    const projSortOrder=(name:string)=>projects.find((p:any)=>p.name===name)?.sort_order??9999
+    return[...map.entries()].sort((a,b)=>{
+      if(a[0]==='(No Project)')return 1
+      if(b[0]==='(No Project)')return -1
+      return projSortOrder(a[0])-projSortOrder(b[0])
+    })
+  }
+  const readyGroups=groupByProject(readyBacklog)
+  const allStats=teamSprints.map((sp:any,ix:number)=>({sprint:sp,ix,stats:sprintStats(sp,items,itemAssignments,projects,projectRoles,people,roles)}))
+
   return(
     <div style={{height:'100%',overflowY:'auto',padding:'20px 28px'}}>
       <div style={{display:'flex',alignItems:'center',gap:10,marginBottom:6}}>
         <span style={{fontSize:20,fontWeight:800,color:'#F4F6F8'}}>⚡ Sprints</span>
       </div>
-      <div style={{fontSize:11,color:'#7A8FA6',marginBottom:16,lineHeight:1.5}}>
-        Placing an item in a sprint sets its real dates — Roadmap and timeline checks pick it up automatically. Demand and Supply are both real working days: Demand comes from actual hours assigned to each item (the same assignments you enter for budget actuals); Supply is each team member's free days after their existing project commitments during this sprint's window. An item with no one assigned doesn't count toward anything yet — it's flagged so that's never silent.
+      <div style={{fontSize:11,color:'#7A8FA6',marginBottom:14,lineHeight:1.5}}>
+        Placing an item in a sprint sets its real dates — Roadmap and timeline checks pick it up automatically. An item whose real assigned work runs longer than one sprint shows up in every sprint it touches, marked <i>carried over</i>. Demand comes from actual assigned days, split correctly across whichever sprints those days fall in.
       </div>
-      <div style={{display:'flex',gap:20,alignItems:'flex-start'}}>
-        {allTeams.map(team=>{
-          const teamSprints=sprints.filter((s:any)=>s.team===team).sort((a:any,b:any)=>a.start_date<b.start_date?-1:1)
-          const lastEnd=teamSprints.length?teamSprints[teamSprints.length-1].end_date:null
-          const readyBacklog=items.filter((it:any)=>it.team===team&&!it.sprint_id&&!ITEM_TERMINAL.includes(it.status))
-            .sort((a:any,b:any)=>(a.committed_priority??a.sort_order??999)-(b.committed_priority??b.sort_order??999))
-          // Grouped by project — ordered to MATCH the Projects tab's own order (its manual
-          // drag-order, sort_order) rather than alphabetically, so priority reads the same
-          // way here as it does there. "No Project" bucket always last.
-          const groupByProject=(list:any[])=>{
-            const map=new Map<string,any[]>()
-            for(const it of list){
-              const key=it.parent_project||'(No Project)'
-              if(!map.has(key))map.set(key,[])
-              map.get(key)!.push(it)
-            }
-            const projSortOrder=(name:string)=>projects.find((p:any)=>p.name===name)?.sort_order??9999
-            return[...map.entries()].sort((a,b)=>{
-              if(a[0]==='(No Project)')return 1
-              if(b[0]==='(No Project)')return -1
-              return projSortOrder(a[0])-projSortOrder(b[0])
-            })
-          }
-          const readyGroups=groupByProject(readyBacklog)
-          return(
-            <div key={team} style={{flex:1,minWidth:380}}>
-              <div style={{fontSize:14,fontWeight:800,color:'#F4F6F8',marginBottom:4}}>{team}</div>
-              <div style={{fontSize:11,color:readyBacklog.length<3?'#E8B95A':'#7A8FA6',marginBottom:12}}>
-                {readyBacklog.length} item{readyBacklog.length!==1?'s':''} in the backlog not yet scheduled{readyBacklog.length<3?' — runway is getting thin':''}
-              </div>
 
-              {teamSprints.map((sprint:any,ix:number)=>{
-                const stats=sprintStats(sprint,items,itemAssignments,projects,projectRoles,people,roles)
-                const overRoom=stats.room<-0.05
-                const itemGroups=groupByProject(stats.sprintItems)
-                return(
-                  <div key={sprint.id} style={{background:'#12202F',border:'1px solid '+(overRoom?'rgba(231,76,60,0.5)':'#243447'),borderRadius:10,padding:'12px 16px',marginBottom:14}}>
-                    <div style={{display:'flex',alignItems:'center',gap:8,marginBottom:6}}>
-                      <span style={{fontSize:13,fontWeight:700,color:'#F4F6F8'}}>Sprint {ix+1}</span>
-                      <span style={{fontSize:11,color:'#7A8FA6'}}>{sprint.start_date} – {sprint.end_date} ({stats.sprintDays}d)</span>
-                      <button onClick={()=>deleteSprint(sprint)} style={{marginLeft:'auto',background:'none',border:'none',color:'#3A4A5E',fontSize:12,cursor:'pointer'}}>🗑</button>
-                    </div>
-                    <div style={{display:'flex',gap:16,fontSize:11,marginBottom:10}}>
-                      <span style={{color:'#7A8FA6'}}>Demand <b style={{color:'#F4F6F8'}}>{stats.demand.toFixed(1)}d</b></span>
-                      <span style={{color:'#7A8FA6'}}>Supply <b style={{color:'#F4F6F8'}}>{stats.supply.toFixed(1)}d</b></span>
-                      <span style={{color:overRoom?'#E74C3C':'#27AE60',fontWeight:700}}>{stats.room>=0?'+':''}{stats.room.toFixed(1)}d room</span>
-                    </div>
-                    {stats.projectRisks.length>0&&(
-                      <div style={{background:'rgba(231,76,60,0.08)',border:'1px solid rgba(231,76,60,0.4)',borderRadius:6,padding:'6px 10px',marginBottom:8}}>
-                        <div style={{fontSize:9,fontWeight:700,color:'#E74C3C',marginBottom:4}}>⚠ COMMITTED ITEMS DUE THIS SPRINT — NOT YET SCHEDULED</div>
-                        {stats.projectRisks.map((r:any,ix3:number)=>(
-                          <div key={ix3} style={{display:'flex',alignItems:'center',gap:6,fontSize:10,marginBottom:2}}>
-                            <span style={{color:'#F4F6F8',fontWeight:700}}>{r.project}</span>
-                            <span style={{color:'#7A8FA6'}}>—</span>
-                            <span style={{color:'#E74C3C'}}>{r.count} item{r.count!==1?'s':''} overlap this sprint window but aren't in the plan</span>
-                          </div>
-                        ))}
-                      </div>
-                    )}
-                    {stats.perPerson.filter((p:any)=>p.over).map((p:any,ix2:number)=>(
-                      <div key={ix2} style={{fontSize:10,color:'#E74C3C',fontWeight:700,marginBottom:4}}>⚠ {p.person.name} is stretched to {Math.round(p.pct*100)}% this sprint — {p.assignedDays.toFixed(1)}d sprint work + {p.otherDays.toFixed(1)}d other projects = {p.totalDays.toFixed(1)}d of {p.sprintDays}d</div>
-                    ))}
-                    {stats.unassignedItems.length>0&&(
-                      <div style={{fontSize:10,color:'#E8B95A',fontWeight:700,marginBottom:4}}>⚠ {stats.unassignedItems.length} item{stats.unassignedItems.length!==1?'s have':' has'} no one assigned — not counted toward demand</div>
-                    )}
-                    {itemGroups.length===0&&<div style={{fontSize:11,color:'#7A8FA6',fontStyle:'italic',marginBottom:6}}>No items placed yet.</div>}
-                    {itemGroups.map(([projName,groupItems])=>(
-                      <div key={projName} style={{marginTop:6}}>
-                        <div style={{fontSize:9,fontWeight:700,color:'#5DADE2',letterSpacing:0.5,marginBottom:3}}>{projName} ({groupItems.length})</div>
-                        {groupItems.map((it:any)=>{
-                          const myAsg=itemAssignments.filter((a:any)=>a.item_id===it.id)
-                          const available=people.filter((p:any)=>p.active&&!myAsg.some((a:any)=>a.person_id===p.id))
-                          const hasNoOne=myAsg.length===0
-                          return(
-                            <div key={it.id} style={{borderTop:'1px solid #1A2838',paddingTop:6,marginTop:6}}>
-                              <div style={{display:'flex',alignItems:'center',gap:6,fontSize:11}}>
-                                <span style={{color:'#7A8FA6',fontFamily:'monospace',fontSize:9}}>{it.item_id}</span>
-                                <span style={{color:'#F4F6F8',flex:1,overflow:'hidden',whiteSpace:'nowrap' as const,textOverflow:'ellipsis'}}>{rt(it.request_type)} {it.name}</span>
-                                <span style={{color:sc(it.status),fontSize:9,fontWeight:700}}>{it.status}</span>
-                                <span style={{color:'#7A8FA6',fontSize:9,border:'1px solid #243447',borderRadius:4,padding:'0 5px'}}>{it.effort||'M'}</span>
-                                <button onClick={()=>placeItem(it,null)} title="Remove from sprint" style={{background:'none',border:'none',color:'#3A4A5E',fontSize:11,cursor:'pointer'}}>✕</button>
-                              </div>
-                              {hasNoOne&&<div style={{fontSize:9,color:'#E8B95A',marginTop:2}}>⚠ No one assigned — not counted toward demand</div>}
-                              <div style={{display:'flex',gap:5,flexWrap:'wrap' as const,marginTop:4,alignItems:'center'}}>
-                                {myAsg.map((a:any)=>{
-                                  const person=people.find((p:any)=>p.id===a.person_id)
-                                  const flagged=stats.notBudgeted.some((n:any)=>n.id===a.id)
-                                  return(
-                                    <span key={a.id} title={flagged?'Not originally budgeted for this project':undefined}
-                                      style={{fontSize:9,background:flagged?'rgba(232,185,90,0.15)':'#1E3048',border:'1px solid '+(flagged?'#E8B95A':'#243447'),borderRadius:10,padding:'2px 7px',color:flagged?'#E8B95A':'#F4F6F8',display:'flex',alignItems:'center',gap:4}}>
-                                      {person?.name||'—'} · {((a.hours||0)/8).toFixed(1)}d{flagged?' ⚠':''}
-                                      <span onClick={()=>removeAssignment(a.id,it.id)} style={{cursor:'pointer',color:'#7A8FA6'}}>✕</span>
-                                    </span>
-                                  )
-                                })}
-                                {assignOpen===it.id?(
-                                  <div style={{display:'flex',gap:4,alignItems:'center'}}>
-                                    <select value={assignPerson} onChange={e=>setAssignPerson(e.target.value)} style={{fontSize:9,background:'#0D1B2A',border:'1px solid #243447',borderRadius:5,color:'#F4F6F8',padding:'2px 4px'}}>
-                                      <option value="">Person…</option>
-                                      {available.map((p:any)=><option key={p.id} value={p.id}>{p.name}</option>)}
-                                    </select>
-                                    <input type="number" step="0.5" value={assignDays} onChange={e=>setAssignDays(e.target.value)} title="Days" style={{width:40,fontSize:9,background:'#0D1B2A',border:'1px solid #243447',borderRadius:5,color:'#F4F6F8',padding:'2px 4px'}}/>
-                                    <button onClick={()=>{if(assignPerson){addAssignment(it.id,assignPerson,parseFloat(assignDays)||1);setAssignOpen(null);setAssignPerson('');setAssignDays('1')}}}
-                                      style={{fontSize:9,background:'#27AE60',border:'none',borderRadius:5,color:'#fff',fontWeight:700,padding:'2px 8px',cursor:'pointer'}}>+</button>
-                                    <button onClick={()=>setAssignOpen(null)} style={{fontSize:9,background:'none',border:'none',color:'#7A8FA6',cursor:'pointer'}}>✕</button>
-                                  </div>
-                                ):(
-                                  <button onClick={()=>{setAssignOpen(it.id);setAssignPerson('');setAssignDays('1')}} style={{fontSize:9,background:'none',border:'1px dashed #243447',borderRadius:10,color:'#7A8FA6',padding:'2px 8px',cursor:'pointer'}}>+ Assign</button>
-                                )}
-                              </div>
-                            </div>
-                          )
-                        })}
-                      </div>
-                    ))}
-                  </div>
-                )
-              })}
+      <div style={{display:'flex',gap:6,marginBottom:20,borderBottom:'1px solid #243447',paddingBottom:2}}>
+        {allTeamsSorted.map((t:string)=>(
+          <button key={t} onClick={()=>setSelectedTeam(t)}
+            style={{background:t===team?'#1E3048':'transparent',color:t===team?'#F4F6F8':'#7A8FA6',border:'none',borderBottom:'2px solid '+(t===team?'#C8973A':'transparent'),borderRadius:'6px 6px 0 0',padding:'8px 16px',fontSize:13,fontWeight:700,cursor:'pointer'}}>
+            {t}
+          </button>
+        ))}
+      </div>
 
-              <div style={{display:'flex',gap:6,marginBottom:20}}>
-                <input type="date" value={newSprintStart[team]||''} onChange={e=>setNewSprintStart((p:any)=>({...p,[team]:e.target.value}))}
-                  title={lastEnd?`Last sprint ended ${lastEnd}`:undefined}
-                  style={{background:'#12202F',border:'1px dashed #243447',borderRadius:6,color:'#F4F6F8',fontSize:11,padding:'6px 8px'}}/>
-                <button onClick={()=>createSprint(team,newSprintStart[team])} disabled={!newSprintStart[team]}
-                  style={{background:'#27AE60',border:'none',borderRadius:6,color:'#fff',fontSize:11,fontWeight:700,padding:'6px 14px',cursor:'pointer',opacity:newSprintStart[team]?1:0.5}}>+ New Sprint</button>
-              </div>
+      <div style={{fontSize:11,color:readyBacklog.length<3?'#E8B95A':'#7A8FA6',marginBottom:16}}>
+        {readyBacklog.length} item{readyBacklog.length!==1?'s':''} in the backlog not yet scheduled{readyBacklog.length<3?' — runway is getting thin':''}
+      </div>
 
-              <div style={{fontSize:11,fontWeight:700,color:'#5DADE2',letterSpacing:1,marginBottom:8}}>READY BACKLOG — BY PROJECT</div>
-              {readyBacklog.length===0&&<div style={{fontSize:11,color:'#7A8FA6',fontStyle:'italic'}}>Nothing left in the backlog right now.</div>}
-              {readyGroups.map(([projName,groupItems])=>{
-                const proj=projects.find((p:any)=>p.name===projName)
-                return(
-                  <div key={projName} style={{marginBottom:12}}>
-                    <div style={{display:'flex',alignItems:'center',gap:6,fontSize:10,fontWeight:700,color:'#F4F6F8',marginBottom:4}}>
-                      {proj?<span style={{width:7,height:7,borderRadius:2,background:proj.color||'#3A4A5E',flexShrink:0}}/>:<span style={{width:7,height:7,borderRadius:2,background:'#3A4A5E',flexShrink:0,opacity:0.4}}/>}
-                      <span style={{overflow:'hidden',whiteSpace:'nowrap' as const,textOverflow:'ellipsis'}}>{projName}</span>
-                      <span style={{color:'#7A8FA6',fontWeight:400}}>({groupItems.length})</span>
-                    </div>
+      <div style={{display:'flex',gap:24,alignItems:'flex-start'}}>
+        {/* LEFT — pure planning: sprint cards + backlog, no alert noise mixed in */}
+        <div style={{flex:'1 1 auto',minWidth:0}}>
+          {allStats.map(({sprint,ix,stats}:any)=>{
+            const overRoom=stats.room<-0.05
+            const itemGroups=groupByProject(stats.sprintItems)
+            return(
+              <div key={sprint.id} style={{background:'#12202F',border:'1px solid '+(overRoom?'rgba(231,76,60,0.5)':'#243447'),borderRadius:10,padding:'12px 16px',marginBottom:14}}>
+                <div style={{display:'flex',alignItems:'center',gap:8,marginBottom:6}}>
+                  <span style={{fontSize:13,fontWeight:700,color:'#F4F6F8'}}>Sprint {ix+1}</span>
+                  <span style={{fontSize:11,color:'#7A8FA6'}}>{sprint.start_date} – {sprint.end_date} ({stats.sprintDays}d)</span>
+                  <button onClick={()=>deleteSprint(sprint)} style={{marginLeft:'auto',background:'none',border:'none',color:'#3A4A5E',fontSize:12,cursor:'pointer'}}>🗑</button>
+                </div>
+                <div style={{display:'flex',gap:16,fontSize:11,marginBottom:10}}>
+                  <span style={{color:'#7A8FA6'}}>Demand <b style={{color:'#F4F6F8'}}>{stats.demand.toFixed(1)}d</b></span>
+                  <span style={{color:'#7A8FA6'}}>Supply <b style={{color:'#F4F6F8'}}>{stats.supply.toFixed(1)}d</b></span>
+                  <span style={{color:overRoom?'#E74C3C':'#27AE60',fontWeight:700}}>{stats.room>=0?'+':''}{stats.room.toFixed(1)}d room</span>
+                  {(stats.projectRisks.length>0||stats.perPerson.some((p:any)=>p.over))&&
+                    <span title="See Alerts panel" style={{marginLeft:'auto',fontSize:9,color:'#E74C3C',fontWeight:700,border:'1px solid #E74C3C',borderRadius:8,padding:'1px 7px'}}>⚠ see alerts</span>}
+                </div>
+                {itemGroups.length===0&&<div style={{fontSize:11,color:'#7A8FA6',fontStyle:'italic',marginBottom:6}}>No items placed yet.</div>}
+                {itemGroups.map(([projName,groupItems]:any)=>(
+                  <div key={projName} style={{marginTop:6}}>
+                    <div style={{fontSize:9,fontWeight:700,color:'#5DADE2',letterSpacing:0.5,marginBottom:3}}>{projName} ({groupItems.length})</div>
                     {groupItems.map((it:any)=>{
-                      const committed=!!(it.start_date&&it.end_date)
+                      const myAsg=itemAssignments.filter((a:any)=>a.item_id===it.id)
+                      const available=people.filter((p:any)=>p.active&&!myAsg.some((a:any)=>a.person_id===p.id))
+                      const hasNoOne=myAsg.length===0
                       return(
-                      <div key={it.id} style={{display:'flex',alignItems:'center',gap:6,fontSize:11,padding:'5px 0 5px 13px',borderBottom:'1px solid #1A2838'}}>
-                        <span style={{color:'#7A8FA6',fontFamily:'monospace',fontSize:9,width:56,flexShrink:0}}>{it.item_id}</span>
-                        <span style={{color:'#F4F6F8',flex:1,overflow:'hidden',whiteSpace:'nowrap' as const,textOverflow:'ellipsis'}}>{rt(it.request_type)} {it.name}</span>
-                        {committed?(
-                          <span title={`Already committed on Roadmap: ${it.start_date} – ${it.end_date}`} style={{color:'#5DADE2',fontSize:9,fontWeight:700,whiteSpace:'nowrap' as const,border:'1px solid #5DADE2',borderRadius:4,padding:'0 5px'}}>📅 Committed</span>
-                        ):(
-                          <span title="Not yet committed to any dates" style={{color:'#3A4A5E',fontSize:9,fontStyle:'italic',whiteSpace:'nowrap' as const}}>uncommitted</span>
-                        )}
-                        <span style={{color:sc(it.status),fontSize:9,fontWeight:700,whiteSpace:'nowrap' as const}}>{it.status}</span>
-                        <span style={{color:'#7A8FA6',fontSize:9,border:'1px solid #243447',borderRadius:4,padding:'0 5px',flexShrink:0}}>{it.effort||'M'}</span>
-                        <select value="" onChange={e=>placeItem(it,e.target.value)} style={{fontSize:10,background:'#0D1B2A',border:'1px solid #243447',borderRadius:5,color:'#7A8FA6',padding:'3px 5px'}}>
-                          <option value="">+ Add to sprint…</option>
-                          {teamSprints.map((s:any,ix:number)=><option key={s.id} value={s.id}>Sprint {ix+1} ({s.start_date})</option>)}
-                        </select>
-                      </div>
+                        <div key={it.id} style={{borderTop:'1px solid #1A2838',paddingTop:6,marginTop:6}}>
+                          <div style={{display:'flex',alignItems:'center',gap:6,fontSize:11}}>
+                            <span style={{color:'#7A8FA6',fontFamily:'monospace',fontSize:9}}>{it.item_id}</span>
+                            <span style={{color:'#F4F6F8',flex:1,overflow:'hidden',whiteSpace:'nowrap' as const,textOverflow:'ellipsis'}}>{rt(it.request_type)} {it.name}</span>
+                            {it.carriedOver&&<span title={`Originally placed in an earlier sprint — real work extends into this one`} style={{fontSize:8,color:'#C8973A',border:'1px solid #C8973A',borderRadius:4,padding:'0 5px'}}>↳ carried over</span>}
+                            <span style={{color:sc(it.status),fontSize:9,fontWeight:700}}>{it.status}</span>
+                            <span style={{color:'#7A8FA6',fontSize:9,border:'1px solid #243447',borderRadius:4,padding:'0 5px'}}>{it.effort||'M'}</span>
+                            {!it.carriedOver&&<button onClick={()=>placeItem(it,null)} title="Remove from sprint" style={{background:'none',border:'none',color:'#3A4A5E',fontSize:11,cursor:'pointer'}}>✕</button>}
+                          </div>
+                          {hasNoOne&&<div style={{fontSize:9,color:'#E8B95A',marginTop:2}}>⚠ No one assigned — not counted toward demand</div>}
+                          <div style={{display:'flex',gap:5,flexWrap:'wrap' as const,marginTop:4,alignItems:'center'}}>
+                            {myAsg.map((a:any)=>{
+                              const person=people.find((p:any)=>p.id===a.person_id)
+                              const flagged=stats.notBudgeted.some((n:any)=>n.id===a.id)
+                              return(
+                                <span key={a.id} title={flagged?'Not originally budgeted for this project':undefined}
+                                  style={{fontSize:9,background:flagged?'rgba(232,185,90,0.15)':'#1E3048',border:'1px solid '+(flagged?'#E8B95A':'#243447'),borderRadius:10,padding:'2px 7px',color:flagged?'#E8B95A':'#F4F6F8',display:'flex',alignItems:'center',gap:4}}>
+                                  {person?.name||'—'} · {((a.hours||0)/8).toFixed(1)}d{flagged?' ⚠':''}
+                                  <span onClick={()=>removeAssignment(a.id,it.id)} style={{cursor:'pointer',color:'#7A8FA6'}}>✕</span>
+                                </span>
+                              )
+                            })}
+                            {assignOpen===it.id?(
+                              <div style={{display:'flex',gap:4,alignItems:'center'}}>
+                                <select value={assignPerson} onChange={e=>setAssignPerson(e.target.value)} style={{fontSize:9,background:'#0D1B2A',border:'1px solid #243447',borderRadius:5,color:'#F4F6F8',padding:'2px 4px'}}>
+                                  <option value="">Person…</option>
+                                  {available.map((p:any)=><option key={p.id} value={p.id}>{p.name}</option>)}
+                                </select>
+                                <input type="number" step="0.5" value={assignDays} onChange={e=>setAssignDays(e.target.value)} title="Days" style={{width:40,fontSize:9,background:'#0D1B2A',border:'1px solid #243447',borderRadius:5,color:'#F4F6F8',padding:'2px 4px'}}/>
+                                <button onClick={()=>{if(assignPerson){addAssignment(it.id,assignPerson,parseFloat(assignDays)||1);setAssignOpen(null);setAssignPerson('');setAssignDays('1')}}}
+                                  style={{fontSize:9,background:'#27AE60',border:'none',borderRadius:5,color:'#fff',fontWeight:700,padding:'2px 8px',cursor:'pointer'}}>+</button>
+                                <button onClick={()=>setAssignOpen(null)} style={{fontSize:9,background:'none',border:'none',color:'#7A8FA6',cursor:'pointer'}}>✕</button>
+                              </div>
+                            ):(
+                              <button onClick={()=>{setAssignOpen(it.id);setAssignPerson('');setAssignDays('1')}} style={{fontSize:9,background:'none',border:'1px dashed #243447',borderRadius:10,color:'#7A8FA6',padding:'2px 8px',cursor:'pointer'}}>+ Assign</button>
+                            )}
+                          </div>
+                        </div>
                       )
                     })}
                   </div>
-                )
-              })}
-            </div>
-          )
-        })}
+                ))}
+              </div>
+            )
+          })}
+
+          <div style={{display:'flex',gap:6,marginBottom:20}}>
+            <input type="date" value={newSprintStart[team]||''} onChange={e=>setNewSprintStart((p:any)=>({...p,[team]:e.target.value}))}
+              title={lastEnd?`Last sprint ended ${lastEnd}`:undefined}
+              style={{background:'#12202F',border:'1px dashed #243447',borderRadius:6,color:'#F4F6F8',fontSize:11,padding:'6px 8px'}}/>
+            <button onClick={()=>createSprint(team,newSprintStart[team])} disabled={!newSprintStart[team]}
+              style={{background:'#27AE60',border:'none',borderRadius:6,color:'#fff',fontSize:11,fontWeight:700,padding:'6px 14px',cursor:'pointer',opacity:newSprintStart[team]?1:0.5}}>+ New Sprint</button>
+          </div>
+
+          <div style={{fontSize:11,fontWeight:700,color:'#5DADE2',letterSpacing:1,marginBottom:8}}>READY BACKLOG — BY PROJECT</div>
+          {readyBacklog.length===0&&<div style={{fontSize:11,color:'#7A8FA6',fontStyle:'italic'}}>Nothing left in the backlog right now.</div>}
+          {readyGroups.map(([projName,groupItems]:any)=>{
+            const proj=projects.find((p:any)=>p.name===projName)
+            return(
+              <div key={projName} style={{marginBottom:12}}>
+                <div style={{display:'flex',alignItems:'center',gap:6,fontSize:10,fontWeight:700,color:'#F4F6F8',marginBottom:4}}>
+                  {proj?<span style={{width:7,height:7,borderRadius:2,background:proj.color||'#3A4A5E',flexShrink:0}}/>:<span style={{width:7,height:7,borderRadius:2,background:'#3A4A5E',flexShrink:0,opacity:0.4}}/>}
+                  <span style={{overflow:'hidden',whiteSpace:'nowrap' as const,textOverflow:'ellipsis'}}>{projName}</span>
+                  <span style={{color:'#7A8FA6',fontWeight:400}}>({groupItems.length})</span>
+                </div>
+                {groupItems.map((it:any)=>{
+                  const committed=!!(it.start_date&&it.end_date)
+                  return(
+                  <div key={it.id} style={{display:'flex',alignItems:'center',gap:6,fontSize:11,padding:'5px 0 5px 13px',borderBottom:'1px solid #1A2838'}}>
+                    <span style={{color:'#7A8FA6',fontFamily:'monospace',fontSize:9,width:56,flexShrink:0}}>{it.item_id}</span>
+                    <span style={{color:'#F4F6F8',flex:1,overflow:'hidden',whiteSpace:'nowrap' as const,textOverflow:'ellipsis'}}>{rt(it.request_type)} {it.name}</span>
+                    {committed?(
+                      <span title={`Already committed on Roadmap: ${it.start_date} – ${it.end_date}`} style={{color:'#5DADE2',fontSize:9,fontWeight:700,whiteSpace:'nowrap' as const,border:'1px solid #5DADE2',borderRadius:4,padding:'0 5px'}}>📅 Committed</span>
+                    ):(
+                      <span title="Not yet committed to any dates" style={{color:'#3A4A5E',fontSize:9,fontStyle:'italic',whiteSpace:'nowrap' as const}}>uncommitted</span>
+                    )}
+                    <span style={{color:sc(it.status),fontSize:9,fontWeight:700,whiteSpace:'nowrap' as const}}>{it.status}</span>
+                    <span style={{color:'#7A8FA6',fontSize:9,border:'1px solid #243447',borderRadius:4,padding:'0 5px',flexShrink:0}}>{it.effort||'M'}</span>
+                    <select value="" onChange={e=>placeItem(it,e.target.value)} style={{fontSize:10,background:'#0D1B2A',border:'1px solid #243447',borderRadius:5,color:'#7A8FA6',padding:'3px 5px'}}>
+                      <option value="">+ Add to sprint…</option>
+                      {teamSprints.map((s:any,ix:number)=><option key={s.id} value={s.id}>Sprint {ix+1} ({s.start_date})</option>)}
+                    </select>
+                  </div>
+                  )
+                })}
+              </div>
+            )
+          })}
+        </div>
+
+        {/* RIGHT — Alerts, kept out of the planning flow but always visible */}
+        <div style={{width:320,flexShrink:0,position:'sticky' as const,top:0}}>
+          <div style={{fontSize:11,fontWeight:700,color:'#E74C3C',letterSpacing:1,marginBottom:10}}>⚠ ALERTS</div>
+          {allStats.every(({stats}:any)=>stats.projectRisks.length===0&&!stats.perPerson.some((p:any)=>p.over))&&(
+            <div style={{fontSize:11,color:'#7A8FA6',fontStyle:'italic'}}>Nothing at risk right now.</div>
+          )}
+          {allStats.map(({sprint,ix,stats}:any)=>{
+            if(stats.projectRisks.length===0&&!stats.perPerson.some((p:any)=>p.over))return null
+            return(
+              <div key={sprint.id} style={{background:'#12202F',border:'1px solid rgba(231,76,60,0.4)',borderRadius:8,padding:'10px 12px',marginBottom:12}}>
+                <div style={{fontSize:10,fontWeight:700,color:'#F4F6F8',marginBottom:6}}>Sprint {ix+1} <span style={{color:'#7A8FA6',fontWeight:400}}>({sprint.start_date})</span></div>
+                {stats.projectRisks.length>0&&(
+                  <>
+                  <div style={{fontSize:9,fontWeight:700,color:'#E74C3C',marginBottom:3}}>NOT YET SCHEDULED</div>
+                  {stats.projectRisks.map((r:any,ix3:number)=>(
+                    <div key={ix3} style={{fontSize:10,color:'#F4F6F8',marginBottom:4}}>
+                      <b>{r.project}</b> <span style={{color:'#E74C3C'}}>— {r.count} item{r.count!==1?'s':''} overlap, not in the plan</span>
+                    </div>
+                  ))}
+                  </>
+                )}
+                {stats.perPerson.filter((p:any)=>p.over).map((p:any,ix2:number)=>(
+                  <div key={ix2} style={{fontSize:10,color:'#E74C3C',marginBottom:2}}>⚠ <b>{p.person.name}</b> at {Math.round(p.pct*100)}% ({p.assignedDays.toFixed(1)}d sprint + {p.otherDays.toFixed(1)}d other = {p.totalDays.toFixed(1)}d of {p.sprintDays}d)</div>
+                ))}
+              </div>
+            )
+          })}
+        </div>
       </div>
     </div>
   )
