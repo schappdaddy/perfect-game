@@ -334,7 +334,7 @@ function rowSprintOverlapFraction(row:any,person:any,sprint:any,projects:any[],i
   }
   return claimed
 }
-function existingCommitmentDuringSprint(person:any,sprint:any,projects:any[],projectRoles:any[],items:any[]):number{
+function existingCommitmentDuringSprint(person:any,sprint:any,projects:any[],projectRoles:any[],items:any[]):number{ // roles param removed — no longer needed
   const rows=projectRoles.filter((r:any)=>r.person_id===person.id)
   return rows.reduce((s:number,row:any)=>s+rowSprintOverlapFraction(row,person,sprint,projects,items),0)
 }
@@ -372,24 +372,24 @@ function sprintStats(sprint:any,items:any[],itemAssignments:any[],projects:any[]
     return{person,assignedDays,otherDays,totalDays,sprintDays,over:totalDays>sprintDays+0.05,pct:sprintDays>0?totalDays/sprintDays:0}
   }).filter((p:any)=>p.assignedDays>0||p.otherDays>0) // only show people with some real involvement
 
-  // 3. Project execution risk: does what's actually scheduled match what the project's
-  // own budget plan assumed would happen this sprint?
-  const projectRisks:any[]=[]
-  for(const row of projectRoles){
-    const person=teamMembers.find((p:any)=>p.id===row.person_id)
-    if(!person)continue
-    const proj=projects.find((p:any)=>p.id===row.project_id)
-    if(!proj)continue
-    const frac=rowSprintOverlapFraction(row,person,sprint,projects,items)
-    if(frac<=0.01)continue // this project's plan doesn't even touch this sprint window
-    const plannedDays=frac*sprintDays
-    const actualDays=asg.filter((a:any)=>a.person_id===person.id).reduce((s:number,a:any)=>{
-      const it=items.find((i:any)=>i.id===a.item_id)
-      return it&&it.parent_project===proj.name?s+(a.hours||0)/8:s
-    },0)
-    const gap=plannedDays-actualDays
-    if(gap>0.5)projectRisks.push({project:proj,person,plannedDays,actualDays,gap})
+  // 3. Project execution risk: committed items (not in this sprint) whose dates fall
+  // inside or before this sprint's window — meaning they SHOULD be getting done now
+  // but haven't been pulled into the sprint plan. Pure delivery risk, nothing to do
+  // with Layer 1 budget projections.
+  const atRiskItems=items.filter((it:any)=>{
+    if(it.sprint_id===sprint.id)return false // already in this sprint, fine
+    if(!it.start_date||!it.end_date)return false // uncommitted, not a risk yet
+    if(ITEM_TERMINAL.includes(it.status))return false // already done
+    // Item's window overlaps or starts before the sprint ends
+    return it.start_date<=sprint.end_date&&it.end_date>=sprint.start_date
+  })
+  // Group by project for a readable summary, not a line-per-person wall
+  const riskByProject=new Map<string,number>()
+  for(const it of atRiskItems){
+    const key=it.parent_project||'(No Project)'
+    riskByProject.set(key,(riskByProject.get(key)||0)+1)
   }
+  const projectRisks=[...riskByProject.entries()].map(([project,count])=>({project,count})).sort((a,b)=>b.count-a.count)
 
   // "Not originally budgeted" — assigned to an item's project with no project_roles link.
   const notBudgeted=asg.filter((a:any)=>{
@@ -399,7 +399,7 @@ function sprintStats(sprint:any,items:any[],itemAssignments:any[],projects:any[]
     if(!proj)return false
     return!projectRoles.some((r:any)=>r.project_id===proj.id&&r.person_id===a.person_id)
   })
-  return{sprintItems,sprintDays,demand,supply,room:supply-demand,perPerson,projectRisks,unassignedItems,notBudgeted,assignments:asg}
+  return{sprintItems,sprintDays,demand,supply,room:supply-demand,perPerson,projectRisks,atRiskItems,unassignedItems,notBudgeted,assignments:asg}
 }
 
 function capacityByMonth(projects:any[],projectRoles:any[],people:any[],roles:any[],items:any[]=[]){
@@ -3180,7 +3180,7 @@ function Roadmap({items,setItems,projects,setProjects,milestones,sprints=[],item
                         <div style={{fontSize:11,fontWeight:700,color:'#5DADE2',marginBottom:3}}>{sp.team} — Sprint {ord}</div>
                         <div style={{fontSize:11,color:'#7A8FA6'}}>Demand <b style={{color:'#F4F6F8'}}>{stats.demand.toFixed(1)}d</b> · Supply <b style={{color:'#F4F6F8'}}>{stats.supply.toFixed(1)}d</b> · <span style={{color:stats.room<0?'#E74C3C':'#27AE60',fontWeight:700}}>{stats.room>=0?'+':''}{stats.room.toFixed(1)}d room</span></div>
                         {stats.projectRisks.length>0&&(
-                          <div style={{fontSize:10,color:'#E74C3C',marginTop:3}}>⚠ {stats.projectRisks.length} project{stats.projectRisks.length!==1?'s':''} at risk — planned time isn't fully scheduled</div>
+                          <div style={{fontSize:10,color:'#E74C3C',marginTop:3}}>⚠ {stats.atRiskItems.length} committed item{stats.atRiskItems.length!==1?'s':''} due this sprint not yet in the plan</div>
                         )}
                       </div>
                     )
@@ -5436,11 +5436,13 @@ function SprintsTab({items,setItems,projects,projectRoles,people,roles,sprints,s
                       <span style={{color:overRoom?'#E74C3C':'#27AE60',fontWeight:700}}>{stats.room>=0?'+':''}{stats.room.toFixed(1)}d room</span>
                     </div>
                     {stats.projectRisks.length>0&&(
-                      <div style={{background:'rgba(231,76,60,0.08)',border:'1px solid rgba(231,76,60,0.4)',borderRadius:6,padding:'6px 8px',marginBottom:8}}>
-                        <div style={{fontSize:9,fontWeight:700,color:'#E74C3C',marginBottom:3}}>⚠ AT RISK OF MISSING DATES</div>
+                      <div style={{background:'rgba(231,76,60,0.08)',border:'1px solid rgba(231,76,60,0.4)',borderRadius:6,padding:'6px 10px',marginBottom:8}}>
+                        <div style={{fontSize:9,fontWeight:700,color:'#E74C3C',marginBottom:4}}>⚠ COMMITTED ITEMS DUE THIS SPRINT — NOT YET SCHEDULED</div>
                         {stats.projectRisks.map((r:any,ix3:number)=>(
-                          <div key={ix3} style={{fontSize:10,color:'#F4F6F8',marginBottom:2}}>
-                            <b>{r.project.name}</b> planned {r.person.name} for {r.plannedDays.toFixed(1)}d this sprint, but only {r.actualDays.toFixed(1)}d is actually scheduled — {r.gap.toFixed(1)}d of planned work isn't happening
+                          <div key={ix3} style={{display:'flex',alignItems:'center',gap:6,fontSize:10,marginBottom:2}}>
+                            <span style={{color:'#F4F6F8',fontWeight:700}}>{r.project}</span>
+                            <span style={{color:'#7A8FA6'}}>—</span>
+                            <span style={{color:'#E74C3C'}}>{r.count} item{r.count!==1?'s':''} overlap this sprint window but aren't in the plan</span>
                           </div>
                         ))}
                       </div>
