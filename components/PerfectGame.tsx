@@ -5308,7 +5308,8 @@ function SprintsTab({items,setItems,projects,projectRoles,people,roles,sprints,s
   const [showSettings,setShowSettings]=useState(false)
   const [newSprintStart,setNewSprintStart]=useState<any>({})   // team -> date string, the "start a new sprint" input per column
   const [assignOpen,setAssignOpen]=useState<any>(null)          // item.id currently showing its "+ assign person" picker
-  const READY_STATUSES=['Ready','Accepted']                     // groomed-and-waiting — the pool sprints pull from
+  // "Ready backlog" = everything not yet closed out — the point is showing the team's
+  // full remaining runway, not gatekeeping on a specific grooming status.
 
   const allTeams=[...new Set([...TEAMS,...people.map((p:any)=>p.team).filter(Boolean)])]
 
@@ -5391,13 +5392,13 @@ function SprintsTab({items,setItems,projects,projectRoles,people,roles,sprints,s
         {allTeams.map(team=>{
           const teamSprints=sprints.filter((s:any)=>s.team===team).sort((a:any,b:any)=>a.start_date<b.start_date?-1:1)
           const lastEnd=teamSprints.length?teamSprints[teamSprints.length-1].end_date:null
-          const readyBacklog=items.filter((it:any)=>it.team===team&&!it.sprint_id&&READY_STATUSES.includes(it.status))
+          const readyBacklog=items.filter((it:any)=>it.team===team&&!it.sprint_id&&!ITEM_TERMINAL.includes(it.status))
             .sort((a:any,b:any)=>(a.committed_priority??a.sort_order??999)-(b.committed_priority??b.sort_order??999))
           return(
             <div key={team} style={{flex:1,minWidth:380}}>
               <div style={{fontSize:14,fontWeight:800,color:'#F4F6F8',marginBottom:4}}>{team}</div>
               <div style={{fontSize:11,color:readyBacklog.length<3?'#E8B95A':'#7A8FA6',marginBottom:12}}>
-                {readyBacklog.length} ready item{readyBacklog.length!==1?'s':''} not yet scheduled{readyBacklog.length<3?' — grooming may be falling behind':''}
+                {readyBacklog.length} item{readyBacklog.length!==1?'s':''} in the backlog not yet scheduled{readyBacklog.length<3?' — runway is getting thin':''}
               </div>
 
               {teamSprints.map((sprint:any,ix:number)=>{
@@ -5468,12 +5469,13 @@ function SprintsTab({items,setItems,projects,projectRoles,people,roles,sprints,s
               </div>
 
               <div style={{fontSize:11,fontWeight:700,color:'#5DADE2',letterSpacing:1,marginBottom:8}}>READY BACKLOG</div>
-              {readyBacklog.length===0&&<div style={{fontSize:11,color:'#7A8FA6',fontStyle:'italic'}}>Nothing groomed and ready right now.</div>}
+              {readyBacklog.length===0&&<div style={{fontSize:11,color:'#7A8FA6',fontStyle:'italic'}}>Nothing left in the backlog right now.</div>}
               {readyBacklog.map((it:any)=>(
                 <div key={it.id} style={{display:'flex',alignItems:'center',gap:6,fontSize:11,padding:'5px 0',borderBottom:'1px solid #1A2838'}}>
                   <span style={{color:'#7A8FA6',fontFamily:'monospace',fontSize:9,width:56,flexShrink:0}}>{it.item_id}</span>
                   <span style={{color:'#F4F6F8',flex:1,overflow:'hidden',whiteSpace:'nowrap' as const,textOverflow:'ellipsis'}}>{rt(it.request_type)} {it.name}</span>
-                  <span style={{color:'#7A8FA6',fontSize:9}}>{it.effort||'M'}</span>
+                  <span style={{color:sc(it.status),fontSize:9,fontWeight:700,whiteSpace:'nowrap' as const}}>{it.status}</span>
+                  <span style={{color:'#7A8FA6',fontSize:9,border:'1px solid #243447',borderRadius:4,padding:'0 5px',flexShrink:0}}>{it.effort||'M'}</span>
                   <select value="" onChange={e=>placeItem(it,e.target.value)} style={{fontSize:10,background:'#0D1B2A',border:'1px solid #243447',borderRadius:5,color:'#7A8FA6',padding:'3px 5px'}}>
                     <option value="">+ Add to sprint…</option>
                     {teamSprints.map((s:any,ix:number)=><option key={s.id} value={s.id}>Sprint {ix+1} ({s.start_date})</option>)}
