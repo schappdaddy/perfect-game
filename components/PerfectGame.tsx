@@ -451,15 +451,26 @@ function sprintStats(sprint:any,items:any[],itemAssignments:any[],projects:any[]
   }).sort((a:any,b:any)=>b.freeDays-a.freeDays)
 
   // 2. Per-person: sprint-assigned days (properly split across sprints) + other-project-
-  // implied days vs. their raw sprint days.
+  // implied days vs. their raw sprint days. Keeps the actual CONTRIBUTORS behind both
+  // numbers, not just the totals — so an alert can be clicked into and answer "which
+  // items, which other projects" instead of just stating a scary percentage.
   const perPerson=teamMembers.map((person:any)=>{
-    const assignedDays=asg.filter((a:any)=>a.person_id===person.id).reduce((s:number,a:any)=>{
+    const myAsg=asg.filter((a:any)=>a.person_id===person.id)
+    const sprintBreakdown=myAsg.map((a:any)=>{
+      const it=sprintItems.find((x:any)=>x.id===a.item_id)
       const span=spansByItem.get(a.item_id)?.get(a.id)
-      return span?s+assignmentDaysInSprint(span,sprint):s
-    },0)
-    const otherDays=existingCommitmentDuringSprint(person,sprint,projects,projectRoles,items)*sprintDays
+      const days=span?assignmentDaysInSprint(span,sprint):0
+      return{itemName:it?.name||'—',itemCode:it?.item_id||'',projectName:it?.parent_project||'(No Project)',days}
+    }).filter((b:any)=>b.days>0)
+    const assignedDays=sprintBreakdown.reduce((s:number,b:any)=>s+b.days,0)
+    const otherBreakdown=projectRoles.filter((r:any)=>r.person_id===person.id).map((row:any)=>{
+      const proj=projects.find((p:any)=>p.id===row.project_id)
+      const frac=rowSprintOverlapFraction(row,person,sprint,projects,items)
+      return{projectName:proj?.name||'—',days:frac*sprintDays}
+    }).filter((b:any)=>b.days>0.01)
+    const otherDays=otherBreakdown.reduce((s:number,b:any)=>s+b.days,0)
     const totalDays=assignedDays+otherDays
-    return{person,assignedDays,otherDays,totalDays,sprintDays,over:totalDays>sprintDays+0.05,pct:sprintDays>0?totalDays/sprintDays:0}
+    return{person,assignedDays,otherDays,totalDays,sprintDays,sprintBreakdown,otherBreakdown,over:totalDays>sprintDays+0.05,pct:sprintDays>0?totalDays/sprintDays:0}
   }).filter((p:any)=>p.assignedDays>0||p.otherDays>0) // only show people with some real involvement
 
   // 3. Project execution risk: committed items overlapping this sprint's window that
@@ -5543,6 +5554,7 @@ function SprintsTab({items,setItems,projects,projectRoles,people,setPeople,roles
 
   const [selectedTeam,setSelectedTeam]=useState<any>(null) // null → default to first team
   const [roomDrill,setRoomDrill]=useState<any>(null) // sprint.id currently showing its Room breakdown
+  const [alertDrill,setAlertDrill]=useState<any>(null) // `${sprintId}-${personId}` currently expanded in Alerts
   const [showCapRoster,setShowCapRoster]=useState(false)
   const allTeamsSorted=allTeams
   const team=selectedTeam&&allTeamsSorted.includes(selectedTeam)?selectedTeam:allTeamsSorted[0]
@@ -5773,9 +5785,44 @@ function SprintsTab({items,setItems,projects,projectRoles,people,setPeople,roles
                   ))}
                   </>
                 )}
-                {stats.perPerson.filter((p:any)=>p.over).map((p:any,ix2:number)=>(
-                  <div key={ix2} style={{fontSize:10,color:'#E74C3C',marginBottom:2}}>⚠ <b>{p.person.name}</b> at {Math.round(p.pct*100)}% ({p.assignedDays.toFixed(1)}d sprint + {p.otherDays.toFixed(1)}d other = {p.totalDays.toFixed(1)}d of {p.sprintDays}d)</div>
-                ))}
+                {stats.perPerson.filter((p:any)=>p.over).map((p:any,ix2:number)=>{
+                  const key=`${sprint.id}-${p.person.id}`
+                  const open=alertDrill===key
+                  return(
+                    <div key={ix2} style={{marginBottom:4}}>
+                      <div onClick={()=>setAlertDrill(open?null:key)} title="Click to see what's contributing"
+                        style={{fontSize:10,color:'#E74C3C',cursor:'pointer',textDecoration:'underline dotted'}}>
+                        ⚠ <b>{p.person.name}</b> at {Math.round(p.pct*100)}% ({p.assignedDays.toFixed(1)}d sprint + {p.otherDays.toFixed(1)}d other = {p.totalDays.toFixed(1)}d of {p.sprintDays}d)
+                      </div>
+                      {open&&(
+                        <div style={{background:'#0D1B2A',border:'1px solid #243447',borderRadius:6,padding:'7px 9px',marginTop:3}}>
+                          {p.sprintBreakdown.length>0&&(
+                            <>
+                            <div style={{fontSize:8,fontWeight:700,color:'#7A8FA6',marginBottom:2}}>SPRINT WORK</div>
+                            {p.sprintBreakdown.map((b:any,ix5:number)=>(
+                              <div key={ix5} style={{display:'flex',justifyContent:'space-between',fontSize:9,color:'#F4F6F8',marginBottom:2}}>
+                                <span style={{overflow:'hidden',whiteSpace:'nowrap' as const,textOverflow:'ellipsis',maxWidth:220}}>{b.itemCode} {b.itemName} <span style={{color:'#7A8FA6'}}>({b.projectName})</span></span>
+                                <span style={{color:'#7A8FA6',flexShrink:0,marginLeft:6}}>{b.days.toFixed(1)}d</span>
+                              </div>
+                            ))}
+                            </>
+                          )}
+                          {p.otherBreakdown.length>0&&(
+                            <>
+                            <div style={{fontSize:8,fontWeight:700,color:'#7A8FA6',marginTop:p.sprintBreakdown.length?6:0,marginBottom:2}}>OTHER PROJECTS (budgeted allocation)</div>
+                            {p.otherBreakdown.map((b:any,ix6:number)=>(
+                              <div key={ix6} style={{display:'flex',justifyContent:'space-between',fontSize:9,color:'#F4F6F8',marginBottom:2}}>
+                                <span>{b.projectName}</span>
+                                <span style={{color:'#7A8FA6'}}>{b.days.toFixed(1)}d</span>
+                              </div>
+                            ))}
+                            </>
+                          )}
+                        </div>
+                      )}
+                    </div>
+                  )
+                })}
               </div>
             )
           })}
