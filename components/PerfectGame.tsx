@@ -2945,6 +2945,26 @@ function Roadmap({items,setItems,projects,setProjects,milestones,sprints=[],item
   function pct(dateStr){return(new Date(dateStr+'T12:00:00').getTime()-totalStart.getTime())/totalMs*TOTAL_W}
   function barPx(s,e){return Math.max(2,(new Date(e+'T12:00:00').getTime()-totalStart.getTime())/totalMs*TOTAL_W-pct(s))}
   function todayPx(){return Math.max(0,Math.min(TOTAL_W,(today.getTime()-totalStart.getTime())/totalMs*TOTAL_W))}
+  // Sprint windows, deduped by exact date match (two teams sharing a cadence collapse
+  // into one band) and given their real "Sprint N" ordinal — computed once, shared by
+  // both the background shading (inside the scrollable body) and the dedicated label
+  // ruler (in the sticky header area, so it's never obscured by bars or milestones).
+  const sprintBandSps=(()=>{
+    const uniq=new Map<string,any[]>()
+    for(const sp of sprints){
+      const key=`${sp.start_date}|${sp.end_date}`
+      if(!uniq.has(key))uniq.set(key,[])
+      uniq.get(key)!.push(sp)
+    }
+    return uniq
+  })()
+  const ordinalOf=(sp:any)=>sprints.filter((s:any)=>s.team===sp.team).sort((a:any,b:any)=>a.start_date<b.start_date?-1:1).findIndex((s:any)=>s.id===sp.id)+1
+  const sprintBands=[...sprintBandSps.entries()].sort((a,b)=>a[0]<b[0]?-1:1).map(([key,sps],ix)=>{
+    const[start,end]=key.split('|')
+    const ordinals=[...new Set(sps.map(ordinalOf))]
+    const label=ordinals.length===1?`Sprint ${ordinals[0]}`:`Sprint ${ordinals.join('/')}`
+    return{key,start,end,ix,label}
+  })
   function dateToStr(d){return d.toISOString().split('T')[0]}
   function fmtD(str){return new Date(str+'T12:00:00').toLocaleDateString('default',{month:'short',day:'numeric',year:'numeric'})}
 
@@ -3267,42 +3287,14 @@ function Roadmap({items,setItems,projects,setProjects,milestones,sprints=[],item
               await supabase.from('projects').update(updates).eq('id',draggedProjectId)
             }}
 >
-            {showSprints&&(()=>{
-              const uniq=new Map<string,any[]>() // "start|end" -> sprints sharing that exact window
-              for(const sp of sprints){
-                const key=`${sp.start_date}|${sp.end_date}`
-                if(!uniq.has(key))uniq.set(key,[])
-                uniq.get(key)!.push(sp)
-              }
-              const bands=[...uniq.entries()].sort((a,b)=>a[0]<b[0]?-1:1)
-              // Ordinal number for a sprint within its own team's sequence — same rule
-              // used everywhere else a "Sprint N" label appears, so numbering matches
-              // the Sprints tab exactly.
-              const ordinalOf=(sp:any)=>sprints.filter((s:any)=>s.team===sp.team).sort((a:any,b:any)=>a.start_date<b.start_date?-1:1).findIndex((s:any)=>s.id===sp.id)+1
-              return bands.map(([key,sps],ix)=>{
-                const[start,end]=key.split('|')
-                // Right edge is the sprint's END date itself, proportionally — NOT plus a
-                // full column's width. That fudge only made sense at narrow (week) zoom;
-                // at Month/Quarter zoom a column can span 30+ days, so adding one blew the
-                // shaded region months past where the sprint actually ends.
-                const x1=pct(start),x2=pct(end)
-                const label=[...new Set((sps as any[]).map(ordinalOf))]
-                const bandLabel=label.length===1?`Sprint ${label[0]}`:`Sprint ${label.join('/')}`
-                return(
-                  <div key={key} onClick={()=>setSprintPopover(sprintPopover?.start_date===start?null:{start_date:start,end_date:end,sps})}
-                    title="Click for team capacity in this sprint"
-                    style={{position:'absolute',left:x1,width:Math.max(4,x2-x1),top:0,bottom:0,background:ix%2===0?'rgba(200,151,58,0.06)':'rgba(93,173,226,0.06)',borderLeft:'2px solid #C8973A',cursor:'pointer',zIndex:1}}>
-                    {/* Sticky top:36 (header's own height) + zIndex above the header's 10 —
-                        otherwise the header row's solid background paints directly over this
-                        label and it's invisible no matter how correct the code is. */}
-                    <div style={{position:'sticky' as const,top:36,left:0,zIndex:11,pointerEvents:'none' as const}}>
-                      <div style={{display:'inline-block',background:'#C8973A',color:'#0D1B2A',fontSize:10,fontWeight:800,padding:'3px 8px',borderRadius:'0 0 5px 0',whiteSpace:'nowrap' as const,boxShadow:'0 2px 6px rgba(0,0,0,0.4)'}}>{bandLabel}</div>
-                      <div style={{fontSize:9,color:'#0D1B2A',background:'#E8B95A',padding:'2px 6px',whiteSpace:'nowrap' as const,fontWeight:700,display:'inline-block'}}>{start} – {end}</div>
-                    </div>
-                  </div>
-                )
-              })
-            })()}
+            {showSprints&&sprintBands.map(({key,start,end,ix}:any)=>{
+              const x1=pct(start),x2=pct(end)
+              return(
+                <div key={key} onClick={()=>setSprintPopover(sprintPopover?.start_date===start?null:{start_date:start,end_date:end,sps:sprintBandSps.get(key)})}
+                  title="Click for team capacity in this sprint"
+                  style={{position:'absolute',left:x1,width:Math.max(4,x2-x1),top:0,bottom:0,background:ix%2===0?'rgba(200,151,58,0.06)':'rgba(93,173,226,0.06)',borderLeft:'2px solid #C8973A',cursor:'pointer',zIndex:1}}/>
+              )
+            })}
             {sprintPopover&&(()=>{
               const relevant=(sprintPopover.sps as any[])
               return(
@@ -3346,6 +3338,21 @@ function Roadmap({items,setItems,projects,setProjects,milestones,sprints=[],item
                   </div>
                 ))}
               </div>
+
+              {/* Sprint ruler — its own dedicated sticky strip right under the date header,
+                  so labels are always visible and never behind project bars or milestones. */}
+              {showSprints&&sprintBands.length>0&&(
+                <div style={{position:'sticky' as const,top:36,zIndex:9,height:24,background:'#0D1B2A',borderBottom:'1px solid #243447'}}>
+                  {sprintBands.map((b:any)=>(
+                    <div key={b.key} onClick={()=>setSprintPopover(sprintPopover?.start_date===b.start?null:{start_date:b.start,end_date:b.end,sps:sprintBandSps.get(b.key)})}
+                      title="Click for team capacity in this sprint"
+                      style={{position:'absolute',left:pct(b.start),top:0,bottom:0,display:'flex',alignItems:'center',gap:6,cursor:'pointer',borderLeft:'2px solid #C8973A',paddingLeft:5}}>
+                      <span style={{background:'#C8973A',color:'#0D1B2A',fontSize:10,fontWeight:800,padding:'2px 7px',borderRadius:4,whiteSpace:'nowrap' as const}}>{b.label}</span>
+                      <span style={{fontSize:9,color:'#E8B95A',fontWeight:600,whiteSpace:'nowrap' as const}}>{b.start} – {b.end}</span>
+                    </div>
+                  ))}
+                </div>
+              )}
 
               {/* Project groups */}
               {groups.map((group:any)=>{
