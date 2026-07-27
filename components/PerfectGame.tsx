@@ -3007,14 +3007,23 @@ function Roadmap({items,setItems,projects,setProjects,milestones,sprints=[],item
     setDragOverProject(null);setDragOverCol(null)
   }
 
+  // Tracks whether an actual DRAG happened (moved past a few pixels), separately from
+  // React's `draggingBar` state. State updates are async/batched, so a plain click's
+  // onClick can end up reading a STALE `draggingBar` value from just before the click
+  // even started, incorrectly treating an ordinary click as a drag and silently
+  // swallowing it. A plain ref has no such timing ambiguity — always accurate the
+  // instant it's read, regardless of React's render/commit schedule.
+  const justDraggedRef=useRef(false)
   function startBarDrag(e,item,type){
     e.preventDefault();e.stopPropagation()
     const gantt=ganttRef.current as any;if(!gantt) return
+    justDraggedRef.current=false
     barDragState.current={item,type,startX:e.clientX,origStart:item.start_date,origEnd:item.end_date,containerWidth:TOTAL_W}
     setDraggingBar(item.id);if(type!=='move') setDraggingEdge(type)
   }
   function startProjectBarDrag(e,project,type){
     e.preventDefault();e.stopPropagation()
+    justDraggedRef.current=false
     barDragState.current={item:project,type,startX:e.clientX,origStart:project.start_date,origEnd:project.end_date,containerWidth:TOTAL_W,isProject:true}
     setDraggingBar(project.id);if(type!=='move') setDraggingEdge(type)
   }
@@ -3023,6 +3032,7 @@ function Roadmap({items,setItems,projects,setProjects,milestones,sprints=[],item
     function onMouseMove(e){
       const state=barDragState.current;if(!state) return
       const dx=e.clientX-state.startX
+      if(Math.abs(dx)>3)justDraggedRef.current=true
       const daysTotal=totalMs/(1000*60*60*24)
       const pxPerDay=state.containerWidth/daysTotal
       const daysDelta=Math.round(dx/pxPerDay)
@@ -3111,7 +3121,7 @@ function Roadmap({items,setItems,projects,setProjects,milestones,sprints=[],item
         <div onMouseDown={e=>startBarDrag(e,item,'left')} style={{position:'absolute',left:0,top:0,bottom:0,width:8,cursor:'ew-resize',zIndex:5,background:'rgba(255,255,255,0.2)',borderRadius:'4px 0 0 4px'}}/>
         <div draggable onDragStart={e=>{e.dataTransfer.setData('itemId',item.id);e.dataTransfer.effectAllowed='move'}}
           onMouseDown={e=>startBarDrag(e,item,'move')}
-          onClick={()=>{if(!draggingBar){setEditing(item);setEditForm({name:item.name,start_date:item.start_date,end_date:item.end_date,roadmap_color:item.roadmap_color||groupColor,status:item.status||'',priority:item.priority||'',effort:item.effort||''})}}}
+          onClick={()=>{if(!justDraggedRef.current){setEditing(item);setEditForm({name:item.name,start_date:item.start_date,end_date:item.end_date,roadmap_color:item.roadmap_color||groupColor,status:item.status||'',priority:item.priority||'',effort:item.effort||''})}}}
           style={{position:'absolute',left:0,right:0,top:0,bottom:0,background:isTerminal?'repeating-linear-gradient(45deg,#2E3D4E,#2E3D4E 8px,#26333F 8px,#26333F 16px)':isViolation?'#C0392B':itemColor,borderRadius:5,display:'flex',alignItems:'center',padding:'0 12px',fontSize:10,fontWeight:600,color:isTerminal?'#8FA3B8':'#fff',overflow:'hidden',whiteSpace:'nowrap' as const,cursor:isDragging?'grabbing':'grab',border:isTerminal?'1px solid #3A4A5E':isViolation?'1px dashed #ff6b6b':'none',boxShadow:isTerminal?'none':isDragging?'0 4px 12px rgba(0,0,0,0.5)':'none'}}>
           {item.sprint_id&&(()=>{
             const sp=sprints.find((s:any)=>s.id===item.sprint_id)
