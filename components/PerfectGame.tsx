@@ -6055,7 +6055,7 @@ function BudgetTab({roles,setRoles,people,setPeople,projects,items,projectRoles,
   }
   async function addRole(){
     if(!newRoleName.trim())return
-    const{data,error}=await supabase.from('roles').insert({name:newRoleName.trim(),hourly_rate:parseFloat(newRoleRate)||0,type:'contractor',sort_order:roles.length}).select().single()
+    const{data,error}=await supabase.from('roles').insert({name:newRoleName.trim(),hourly_rate:parseFloat(newRoleRate)||0,sort_order:roles.length}).select().single()
     if(error){alert('Failed to add role: '+error.message);return}
     if(data){setRoles((prev:any[])=>[...prev,data]);setNewRoleName('');setNewRoleRate('')}
   }
@@ -6266,18 +6266,18 @@ function BudgetTab({roles,setRoles,people,setPeople,projects,items,projectRoles,
       const t7=ws7.addRow(t7row)
       styleSheet(ws7,{moneyCols:[2,3,4,5,6,7,8,9,10,11,12],totalRow:t7.number})
 
-      // ── 8. Rate Card (Rate Card tab) ──
+      // ── 8. Rate Card (Rate Card tab) — Contractor/FTE lives on the person now, not the role ──
       const ws8=wb.addWorksheet('Rate Card')
-      ws8.columns=[{header:'Role',key:'n',width:22},{header:'Type',key:'t',width:14},{header:'Hourly Rate',key:'r',width:14},{header:'CapEx Eligible',key:'e',width:14},{header:'CapEx / OpEx Split',key:'s',width:16}]
-      roles.forEach((r:any)=>ws8.addRow({n:r.name,t:r.type||'contractor',r:r.hourly_rate,e:(r.capex_eligible??true)?'Yes':'No',s:(r.capex_eligible??true)?`${r.capex_pct??80}% / ${100-(r.capex_pct??80)}%`:'0% / 100%'}))
-      ws8.getColumn(3).numFmt=USD
-      styleSheet(ws8,{moneyCols:[3]})
+      ws8.columns=[{header:'Role',key:'n',width:22},{header:'Hourly Rate',key:'r',width:14},{header:'CapEx Eligible',key:'e',width:14},{header:'CapEx / OpEx Split',key:'s',width:16}]
+      roles.forEach((r:any)=>ws8.addRow({n:r.name,r:r.hourly_rate,e:(r.capex_eligible??true)?'Yes':'No',s:(r.capex_eligible??true)?`${r.capex_pct??80}% / ${100-(r.capex_pct??80)}%`:'0% / 100%'}))
+      ws8.getColumn(2).numFmt=USD
+      styleSheet(ws8,{moneyCols:[2]})
 
       // ── 9. Roster (Roster tab) — role-level rate shown, no editorializing ──
       const ws9=wb.addWorksheet('Roster')
-      ws9.columns=[{header:'Name',key:'n',width:20},{header:'Role',key:'r',width:18},{header:'Team',key:'t',width:20},{header:'Department',key:'d',width:18},{header:'Vendor',key:'v',width:16},{header:'Rate',key:'ra',width:12},{header:'Active',key:'a',width:9}]
-      people.forEach((p:any)=>ws9.addRow({n:p.name,r:roles.find((x:any)=>x.id===p.role_id)?.name||'—',t:p.team||'',d:p.department||'',v:p.vendor||'',ra:rateOf(p,roles),a:p.active?'Yes':'No'}))
-      styleSheet(ws9,{moneyCols:[6]})
+      ws9.columns=[{header:'Name',key:'n',width:20},{header:'Role',key:'r',width:18},{header:'Type',key:'ty',width:12},{header:'Team',key:'t',width:20},{header:'Department',key:'d',width:18},{header:'Vendor',key:'v',width:16},{header:'Rate',key:'ra',width:12},{header:'Active',key:'a',width:9}]
+      people.forEach((p:any)=>ws9.addRow({n:p.name,r:roles.find((x:any)=>x.id===p.role_id)?.name||'—',ty:p.type||'contractor',t:p.team||'',d:p.department||'',v:p.vendor||'',ra:rateOf(p,roles),a:p.active?'Yes':'No'}))
+      styleSheet(ws9,{moneyCols:[7]})
 
       const buf=await wb.xlsx.writeBuffer()
       const blob=new Blob([buf],{type:'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet'})
@@ -6308,9 +6308,6 @@ function BudgetTab({roles,setRoles,people,setPeople,projects,items,projectRoles,
           {roles.map((r:any)=>(
             <div key={r.id} style={{display:'flex',alignItems:'center',gap:8,background:'#12202F',border:'1px solid #243447',borderRadius:8,padding:'8px 12px',marginBottom:6}}>
               <input value={r.name} onChange={e=>updRole(r.id,{name:e.target.value})} style={{flex:1,background:'transparent',border:'none',color:'#F4F6F8',fontSize:13,fontWeight:600}}/>
-              <select value={r.type||'contractor'} onChange={e=>updRole(r.id,{type:e.target.value})} style={{background:'#0D1B2A',border:'1px solid #243447',borderRadius:5,color:'#7A8FA6',fontSize:11,padding:'4px 6px'}}>
-                <option value="contractor">Contractor</option><option value="fte">FTE</option>
-              </select>
               <div style={{display:'flex',alignItems:'center',gap:3}}>
                 <span style={{color:'#7A8FA6',fontSize:12}}>$</span>
                 <input type="number" value={r.hourly_rate} onChange={e=>updRole(r.id,{hourly_rate:parseFloat(e.target.value)||0})} style={{width:70,background:'#0D1B2A',border:'1px solid #243447',borderRadius:5,color:'#F4F6F8',fontSize:12,padding:'4px 6px'}}/>
@@ -6382,6 +6379,10 @@ function BudgetTab({roles,setRoles,people,setPeople,projects,items,projectRoles,
                 <option value="">No role</option>
                 {roles.map((r:any)=><option key={r.id} value={r.id}>{r.name}</option>)}
               </select>
+              <select value={p.type||'contractor'} onChange={e=>updPerson(p.id,{type:e.target.value})} title="Contractor or FTE — lives on the person, not the role, since the same role can be filled either way"
+                style={{background:'#0D1B2A',border:'1px solid #243447',borderRadius:5,color:'#7A8FA6',fontSize:11,padding:'4px 6px'}}>
+                <option value="contractor">Contractor</option><option value="fte">FTE</option>
+              </select>
               <TeamSelect value={p.team||''} onChange={(v:any)=>updPerson(p.id,{team:v})}/>
               <DeptSelect value={p.department||''} onChange={(v:any)=>updPerson(p.id,{department:v})}/>
               <VendorSelect value={p.vendor||''} onChange={(v:any)=>updPerson(p.id,{vendor:v})}/>
@@ -6424,8 +6425,7 @@ function BudgetTab({roles,setRoles,people,setPeople,projects,items,projectRoles,
         // so switching it gives a consistent "what if we only look at contractors" view throughout.
         const rfPeople=people.filter((p:any)=>{
           if(rfPeopleFilter==='all')return true
-          const role=roles.find((r:any)=>r.id===p.role_id)
-          return(role?.type||'contractor')===rfPeopleFilter
+          return(p.type||'contractor')===rfPeopleFilter
         })
         const{totals:rollup,byProject:rollupByProj}=quarterlyRollup(projects,projectRoles,itemAssignments,items,rfPeople,roles)
         const deptOrder=[...new Set([...rfPeople.map((p:any)=>p.department).filter(Boolean),...(rfNewDept?[rfNewDept]:[])])]
