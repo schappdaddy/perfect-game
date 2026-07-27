@@ -2788,7 +2788,7 @@ function Roadmap({items,setItems,projects,setProjects,milestones,sprints=[],item
   const [ft,setFt]=useState('All')
   const [zoom,setZoom]=useState(1)
   const [editing,setEditing]=useState(null)
-  const [editForm,setEditForm]=useState({name:'',start_date:'',end_date:'',roadmap_color:''})
+  const [editForm,setEditForm]=useState({name:'',start_date:'',end_date:'',roadmap_color:'',status:'',priority:'',effort:''})
   const [saving,setSaving]=useState(false)
   const [sortBy,setSortBy]=useState('start_date')
   const [sortDir,setSortDir]=useState('asc')
@@ -2822,6 +2822,7 @@ function Roadmap({items,setItems,projects,setProjects,milestones,sprints=[],item
   const [backlogHover,setBacklogHover]=useState(false)
   const ganttRef=useRef(null)
   const labelRef=useRef(null)
+  const scrollAnchorRef=useRef<string|null>(null) // ISO date the view was centered on, captured just before a zoom change
   const barDragState=useRef(null)
   const today=new Date()
 
@@ -2954,6 +2955,16 @@ function Roadmap({items,setItems,projects,setProjects,milestones,sprints=[],item
   function pct(dateStr){return(new Date(dateStr+'T12:00:00').getTime()-totalStart.getTime())/totalMs*TOTAL_W}
   function barPx(s,e){return Math.max(2,(new Date(e+'T12:00:00').getTime()-totalStart.getTime())/totalMs*TOTAL_W-pct(s))}
   function todayPx(){return Math.max(0,Math.min(TOTAL_W,(today.getTime()-totalStart.getTime())/totalMs*TOTAL_W))}
+  // Restore scroll position to the same DATE after a zoom/view change — without this,
+  // switching Week→Month (or moving the zoom slider) silently jumps back to the very
+  // start of the timeline instead of staying where you were looking.
+  useEffect(()=>{
+    if(scrollAnchorRef.current&&ganttRef.current){
+      const newPx=pct(scrollAnchorRef.current)
+      ;(ganttRef.current as any).scrollLeft=Math.max(0,newPx)
+      scrollAnchorRef.current=null
+    }
+  },[view,zoom,cols.length])
   // Sprint windows, deduped by exact date match (two teams sharing a cadence collapse
   // into one band) and given their real "Sprint N" ordinal — computed once, shared by
   // both the background shading (inside the scrollable body) and the dedicated label
@@ -3066,7 +3077,9 @@ function Roadmap({items,setItems,projects,setProjects,milestones,sprints=[],item
 
   async function saveEdit(){
     if(!editing) return;setSaving(true)
-    await supabase.from('items').update({start_date:editForm.start_date,end_date:editForm.end_date,roadmap_color:editForm.roadmap_color,name:editForm.name}).eq('id',editing.id)
+    const fields={start_date:editForm.start_date,end_date:editForm.end_date,roadmap_color:editForm.roadmap_color,name:editForm.name,status:editForm.status,priority:editForm.priority,effort:editForm.effort}
+    setItems(items.map(i=>i.id===editing.id?{...i,...fields}:i))
+    await supabase.from('items').update(fields).eq('id',editing.id)
     setSaving(false);setEditing(null)
   }
 
@@ -3098,7 +3111,7 @@ function Roadmap({items,setItems,projects,setProjects,milestones,sprints=[],item
         <div onMouseDown={e=>startBarDrag(e,item,'left')} style={{position:'absolute',left:0,top:0,bottom:0,width:8,cursor:'ew-resize',zIndex:5,background:'rgba(255,255,255,0.2)',borderRadius:'4px 0 0 4px'}}/>
         <div draggable onDragStart={e=>{e.dataTransfer.setData('itemId',item.id);e.dataTransfer.effectAllowed='move'}}
           onMouseDown={e=>startBarDrag(e,item,'move')}
-          onClick={()=>{if(!draggingBar){setEditing(item);setEditForm({name:item.name,start_date:item.start_date,end_date:item.end_date,roadmap_color:item.roadmap_color||groupColor})}}}
+          onClick={()=>{if(!draggingBar){setEditing(item);setEditForm({name:item.name,start_date:item.start_date,end_date:item.end_date,roadmap_color:item.roadmap_color||groupColor,status:item.status||'',priority:item.priority||'',effort:item.effort||''})}}}
           style={{position:'absolute',left:0,right:0,top:0,bottom:0,background:isTerminal?'repeating-linear-gradient(45deg,#2E3D4E,#2E3D4E 8px,#26333F 8px,#26333F 16px)':isViolation?'#C0392B':itemColor,borderRadius:5,display:'flex',alignItems:'center',padding:'0 12px',fontSize:10,fontWeight:600,color:isTerminal?'#8FA3B8':'#fff',overflow:'hidden',whiteSpace:'nowrap' as const,cursor:isDragging?'grabbing':'grab',border:isTerminal?'1px solid #3A4A5E':isViolation?'1px dashed #ff6b6b':'none',boxShadow:isTerminal?'none':isDragging?'0 4px 12px rgba(0,0,0,0.5)':'none'}}>
           {item.sprint_id&&(()=>{
             const sp=sprints.find((s:any)=>s.id===item.sprint_id)
@@ -3120,7 +3133,13 @@ function Roadmap({items,setItems,projects,setProjects,milestones,sprints=[],item
         <select value={ft} onChange={e=>setFt(e.target.value)} style={sel}><option value="All">All Teams</option>{TEAMS.map(t=><option key={t}>{t}</option>)}</select>
         <div style={{display:'flex',gap:3}}>
           {(mobileR?[['month','Month'],['quarter','Quarter']]:[['day','Day'],['week','Week'],['month','Month'],['quarter','Quarter'],['year','Year']]).map(([k,label])=>(
-            <button key={k} onClick={()=>setView(k)} style={{background:view===k?'#C8973A':'#1E3048',color:view===k?'#0D1B2A':'#7A8FA6',border:`1px solid ${view===k?'#C8973A':'#243447'}`,borderRadius:6,padding:'4px 12px',fontSize:12,cursor:'pointer',fontWeight:view===k?700:400}}>{label}</button>
+            <button key={k} onClick={()=>{
+                if(ganttRef.current){
+                  const px=(ganttRef.current as any).scrollLeft
+                  scrollAnchorRef.current=localISO(new Date(totalStart.getTime()+(px/TOTAL_W)*totalMs))
+                }
+                setView(k)
+              }} style={{background:view===k?'#C8973A':'#1E3048',color:view===k?'#0D1B2A':'#7A8FA6',border:`1px solid ${view===k?'#C8973A':'#243447'}`,borderRadius:6,padding:'4px 12px',fontSize:12,cursor:'pointer',fontWeight:view===k?700:400}}>{label}</button>
           ))}
         </div>
         <div style={{display:'flex',alignItems:'center',gap:6}}>
@@ -3149,7 +3168,13 @@ function Roadmap({items,setItems,projects,setProjects,milestones,sprints=[],item
         </label>
         {!mobileR&&<div style={{display:'flex',alignItems:'center',gap:6}}>
           <span style={{fontSize:12,color:'#7A8FA6'}}>Zoom</span>
-          <input type="range" min={0.5} max={3} step={0.1} value={zoom} onChange={e=>setZoom(parseFloat(e.target.value))} style={{width:90,accentColor:'#C8973A'}}/>
+          <input type="range" min={0.5} max={3} step={0.1} value={zoom} onChange={e=>{
+              if(ganttRef.current){
+                const px=(ganttRef.current as any).scrollLeft
+                scrollAnchorRef.current=localISO(new Date(totalStart.getTime()+(px/TOTAL_W)*totalMs))
+              }
+              setZoom(parseFloat(e.target.value))
+            }} style={{width:90,accentColor:'#C8973A'}}/>
           <button onClick={()=>setZoom(1)} style={{...sel,fontSize:11,padding:'3px 8px'}}>Fit</button>
         </div>}
         {!mobileR&&<div style={{display:'flex',gap:6}}>
@@ -3615,6 +3640,26 @@ function Roadmap({items,setItems,projects,setProjects,milestones,sprints=[],item
               <div>
                 <div style={{fontSize:11,color:'#7A8FA6',marginBottom:4}}>End Date</div>
                 <input type="date" value={editForm.end_date} onChange={e=>setEditForm(p=>({...p,end_date:e.target.value}))} style={{width:'100%',background:'#1E3048',color:'#F4F6F8',border:'1px solid #243447',borderRadius:6,padding:'7px 10px',fontSize:12,boxSizing:'border-box' as const}}/>
+              </div>
+            </div>
+            <div style={{display:'grid',gridTemplateColumns:'1fr 1fr 1fr',gap:12,marginBottom:12}}>
+              <div>
+                <div style={{fontSize:11,color:'#7A8FA6',marginBottom:4}}>Status</div>
+                <select value={editForm.status} onChange={e=>setEditForm(p=>({...p,status:e.target.value}))} style={{width:'100%',background:'#1E3048',color:'#F4F6F8',border:'1px solid #243447',borderRadius:6,padding:'7px 6px',fontSize:12}}>
+                  {STATUSES.map(st=><option key={st} value={st}>{st}</option>)}
+                </select>
+              </div>
+              <div>
+                <div style={{fontSize:11,color:'#7A8FA6',marginBottom:4}}>Priority</div>
+                <select value={editForm.priority} onChange={e=>setEditForm(p=>({...p,priority:e.target.value}))} style={{width:'100%',background:'#1E3048',color:'#F4F6F8',border:'1px solid #243447',borderRadius:6,padding:'7px 6px',fontSize:12}}>
+                  {PRIORITIES.map(pr=><option key={pr} value={pr}>{pr}</option>)}
+                </select>
+              </div>
+              <div>
+                <div style={{fontSize:11,color:'#7A8FA6',marginBottom:4}}>Effort</div>
+                <select value={editForm.effort} onChange={e=>setEditForm(p=>({...p,effort:e.target.value}))} style={{width:'100%',background:'#1E3048',color:'#F4F6F8',border:'1px solid #243447',borderRadius:6,padding:'7px 6px',fontSize:12}}>
+                  {EFFORTS.map(ef=><option key={ef} value={ef}>{ef}</option>)}
+                </select>
               </div>
             </div>
             <div style={{marginBottom:12}}>
