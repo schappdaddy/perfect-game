@@ -3089,16 +3089,17 @@ function Roadmap({items,setItems,projects,setProjects,milestones,sprints=[],item
 
   function GanttBar({item,groupColor,isViolation}:{item:any,groupColor:string,isViolation:boolean}){
     const isDragging=draggingBar===item.id
+    const isTerminal=ITEM_TERMINAL.includes(item.status)
     const itemColor=colorBy==='status'?sc(item.status):(item.roadmap_color||groupColor)
     const leftPx=pct(item.start_date)
     const widthPx=barPx(item.start_date,item.end_date)
     return(
-      <div style={{position:'absolute',top:6,height:28,left:leftPx,width:widthPx,zIndex:3,minWidth:8,opacity:isDragging?0.6:1}}>
+      <div style={{position:'absolute',top:6,height:28,left:leftPx,width:widthPx,zIndex:3,minWidth:8,opacity:isDragging?0.6:isTerminal?0.75:1}}>
         <div onMouseDown={e=>startBarDrag(e,item,'left')} style={{position:'absolute',left:0,top:0,bottom:0,width:8,cursor:'ew-resize',zIndex:5,background:'rgba(255,255,255,0.2)',borderRadius:'4px 0 0 4px'}}/>
         <div draggable onDragStart={e=>{e.dataTransfer.setData('itemId',item.id);e.dataTransfer.effectAllowed='move'}}
           onMouseDown={e=>startBarDrag(e,item,'move')}
           onClick={()=>{if(!draggingBar){setEditing(item);setEditForm({name:item.name,start_date:item.start_date,end_date:item.end_date,roadmap_color:item.roadmap_color||groupColor})}}}
-          style={{position:'absolute',left:0,right:0,top:0,bottom:0,background:isViolation?'#C0392B':itemColor,borderRadius:5,display:'flex',alignItems:'center',padding:'0 12px',fontSize:10,fontWeight:600,color:'#fff',overflow:'hidden',whiteSpace:'nowrap' as const,cursor:isDragging?'grabbing':'grab',border:isViolation?'1px dashed #ff6b6b':'none',boxShadow:isDragging?'0 4px 12px rgba(0,0,0,0.5)':'none'}}>
+          style={{position:'absolute',left:0,right:0,top:0,bottom:0,background:isTerminal?'repeating-linear-gradient(45deg,#2E3D4E,#2E3D4E 8px,#26333F 8px,#26333F 16px)':isViolation?'#C0392B':itemColor,borderRadius:5,display:'flex',alignItems:'center',padding:'0 12px',fontSize:10,fontWeight:600,color:isTerminal?'#8FA3B8':'#fff',overflow:'hidden',whiteSpace:'nowrap' as const,cursor:isDragging?'grabbing':'grab',border:isTerminal?'1px solid #3A4A5E':isViolation?'1px dashed #ff6b6b':'none',boxShadow:isTerminal?'none':isDragging?'0 4px 12px rgba(0,0,0,0.5)':'none'}}>
           {item.sprint_id&&(()=>{
             const sp=sprints.find((s:any)=>s.id===item.sprint_id)
             if(!sp)return null
@@ -3306,14 +3307,6 @@ function Roadmap({items,setItems,projects,setProjects,milestones,sprints=[],item
               await supabase.from('projects').update(updates).eq('id',draggedProjectId)
             }}
 >
-            {showSprints&&sprintBands.map(({key,start,end,ix}:any)=>{
-              const x1=pct(start),x2=pct(end)
-              return(
-                <div key={key} onClick={()=>setSprintPopover(sprintPopover?.start_date===start?null:{start_date:start,end_date:end,sps:sprintBandSps.get(key)})}
-                  title="Click for team capacity in this sprint"
-                  style={{position:'absolute',left:x1,width:Math.max(4,x2-x1),top:0,bottom:0,background:ix%2===0?'rgba(200,151,58,0.06)':'rgba(93,173,226,0.06)',borderLeft:'2px solid #C8973A',cursor:'pointer',zIndex:1}}/>
-              )
-            })}
             {sprintPopover&&(()=>{
               const relevant=(sprintPopover.sps as any[])
               return(
@@ -3347,6 +3340,14 @@ function Roadmap({items,setItems,projects,setProjects,milestones,sprints=[],item
               </div>
             )}
             <div style={{minWidth:TOTAL_W,position:'relative'}}>
+              {showSprints&&sprintBands.map(({key,start,end,ix}:any)=>{
+                const x1=pct(start),x2=pct(end)
+                return(
+                  <div key={key} onClick={()=>setSprintPopover(sprintPopover?.start_date===start?null:{start_date:start,end_date:end,sps:sprintBandSps.get(key)})}
+                    title="Click for team capacity in this sprint"
+                    style={{position:'absolute',left:x1,width:Math.max(4,x2-x1),top:0,bottom:0,background:ix%2===0?'rgba(200,151,58,0.06)':'rgba(93,173,226,0.06)',borderLeft:'2px solid #C8973A',cursor:'pointer',zIndex:1}}/>
+                )
+              })}
 
               {/* Header */}
               <div style={{display:'flex',position:'sticky',top:0,zIndex:10,background:'#162436',borderBottom:'1px solid #243447',height:36}}>
