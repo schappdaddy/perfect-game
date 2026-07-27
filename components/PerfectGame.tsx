@@ -3275,14 +3275,23 @@ function Roadmap({items,setItems,projects,setProjects,milestones,sprints=[],item
                 uniq.get(key)!.push(sp)
               }
               const bands=[...uniq.entries()].sort((a,b)=>a[0]<b[0]?-1:1)
+              // Ordinal number for a sprint within its own team's sequence — same rule
+              // used everywhere else a "Sprint N" label appears, so numbering matches
+              // the Sprints tab exactly.
+              const ordinalOf=(sp:any)=>sprints.filter((s:any)=>s.team===sp.team).sort((a:any,b:any)=>a.start_date<b.start_date?-1:1).findIndex((s:any)=>s.id===sp.id)+1
               return bands.map(([key,sps],ix)=>{
                 const[start,end]=key.split('|')
                 const x1=pct(start),x2=pct(end)+ (TOTAL_W/Math.max(1,cols.length)) // include the end column's width
+                const ordinals=[...new Set((sps as any[]).map(ordinalOf))]
+                const label=ordinals.length===1?`Sprint ${ordinals[0]}`:`Sprint ${ordinals.join('/')}`
                 return(
                   <div key={key} onClick={()=>setSprintPopover(sprintPopover?.start_date===start?null:{start_date:start,end_date:end,sps})}
                     title="Click for team capacity in this sprint"
-                    style={{position:'absolute',left:x1,width:Math.max(4,x2-x1),top:0,bottom:0,background:ix%2===0?'rgba(93,173,226,0.05)':'rgba(200,151,58,0.05)',borderLeft:'1px dashed #243447',cursor:'pointer',zIndex:1}}>
-                    <div style={{position:'sticky' as const,top:2,fontSize:9,color:'#5DADE2',padding:'2px 4px',whiteSpace:'nowrap' as const}}>{start}–{end}</div>
+                    style={{position:'absolute',left:x1,width:Math.max(4,x2-x1),top:0,bottom:0,background:ix%2===0?'rgba(200,151,58,0.06)':'rgba(93,173,226,0.06)',borderLeft:'2px solid #C8973A',cursor:'pointer',zIndex:1}}>
+                    <div style={{position:'sticky' as const,top:0,left:0,zIndex:2}}>
+                      <div style={{display:'inline-block',background:'#C8973A',color:'#0D1B2A',fontSize:10,fontWeight:800,padding:'3px 8px',borderRadius:'0 0 5px 0',whiteSpace:'nowrap' as const}}>{label}</div>
+                      <div style={{fontSize:9,color:'#E8B95A',padding:'2px 6px',whiteSpace:'nowrap' as const,fontWeight:600}}>{start} – {end}</div>
+                    </div>
                   </div>
                 )
               })
