@@ -534,6 +534,53 @@ function capacityByMonth(projects:any[],projectRoles:any[],people:any[],roles:an
   }
   return{perPerson,byProject}
 }
+// The ACTUAL counterpart to capacityByMonth's Planned % — real work, sourced from the
+// same item_assignments Sprint planning writes to (and ProjectDetail's own assignment
+// editor, since it's the same table). Each assignment's own sequential span (dev THEN
+// QA, not simultaneous — same rule Sprints uses) is intersected with each calendar
+// month to get a real, date-accurate % of actual work, not a budget projection.
+function actualCapacityByMonth(items:any[],itemAssignments:any[],monthKeys:string[]){
+  const perPerson=new Map<string,Map<string,{days:number,pct:number}>>()
+  // Per-person, per-month CONTRIBUTORS — which specific items are behind the % — so the
+  // Actual row can be clicked into exactly like Planned already is.
+  const byItem=new Map<string,Map<string,any[]>>()
+  const itemsById=new Map(items.map((it:any)=>[it.id,it]))
+  const asgByItem=new Map<string,any[]>()
+  for(const a of itemAssignments){
+    if(!asgByItem.has(a.item_id))asgByItem.set(a.item_id,[])
+    asgByItem.get(a.item_id)!.push(a)
+  }
+  for(const[itemId,asgList] of asgByItem.entries()){
+    const item=itemsById.get(itemId)
+    if(!item?.start_date||!item?.end_date)continue
+    const spans=itemAssignmentSpans(item.start_date,asgList)
+    for(const a of asgList){
+      const span=spans.get(a.id)
+      if(!span||span.days<=0)continue
+      if(!perPerson.has(a.person_id))perPerson.set(a.person_id,new Map())
+      if(!byItem.has(a.person_id))byItem.set(a.person_id,new Map())
+      const pm=perPerson.get(a.person_id)!
+      const bi=byItem.get(a.person_id)!
+      for(const k of monthKeys){
+        const monthStart=`${k}-01`
+        const[y,m]=k.split('-').map(Number)
+        const monthEnd=localISO(new Date(y,m,0))
+        const totalDaysInMonth=workingDays(monthStart,monthEnd)
+        if(totalDaysInMonth<=0)continue
+        const ovStart=span.start>monthStart?span.start:monthStart
+        const ovEnd=span.end<monthEnd?span.end:monthEnd
+        const overlapDays=Math.max(0,workingDays(ovStart,ovEnd))
+        if(overlapDays<=0)continue
+        const pctContribution=overlapDays/totalDaysInMonth*100
+        const prev=pm.get(k)||{days:0,pct:0}
+        pm.set(k,{days:prev.days+overlapDays,pct:prev.pct+pctContribution})
+        if(!bi.has(k))bi.set(k,[])
+        bi.get(k)!.push({itemName:item.name,itemCode:item.item_id,projectName:item.parent_project||'(No Project)',days:overlapDays,pct:pctContribution})
+      }
+    }
+  }
+  return{perPerson,byItem}
+}
 // A dollar amount splits CapEx/OpEx by role — but only on a "Build" project. On a
 // "Support" project (e.g. Peak Prep) nothing is being capitalized, so it's all OpEx
 // regardless of role, even for an otherwise capex-eligible dev.
@@ -5977,6 +6024,7 @@ function SprintsTab({items,setItems,projects,projectRoles,people,setPeople,roles
 function BudgetTab({roles,setRoles,people,setPeople,projects,items,projectRoles,itemAssignments,qBudgets,setQBudgets}:any){
   const [view,setView]=useState('dashboard') // dashboard | capacity | rf | vendor | roster | rates
   const [capSel,setCapSel]=useState<any>(null) // {personId,key} — capacity cell drill-down
+  const [capActualSel,setCapActualSel]=useState<any>(null) // {personId,key} — Actual row drill-down
   const [rfFy,setRfFy]=useState<any>(null)
   const [rfNewDept,setRfNewDept]=useState('')
   const [rfNewQ,setRfNewQ]=useState('1')
@@ -6774,12 +6822,16 @@ function BudgetTab({roles,setRoles,people,setPeople,projects,items,projectRoles,
       {view==='capacity'&&(()=>{
         const{perPerson,byProject}=capacityByMonth(projects,projectRoles,people,roles,items)
         const monthKeys=buildMonthKeys(capWindow)
+        const{perPerson:actualPerPerson,byItem:actualByItem}=actualCapacityByMonth(items,itemAssignments,monthKeys)
         const teamOrder=[...new Set([...TEAMS,...people.map((p:any)=>p.team).filter(Boolean)]),'']
         const peopleByTeam=teamOrder.map(t=>({team:t||'No team',people:people.filter((p:any)=>p.active&&(p.team||'')===t)})).filter(g=>g.people.length)
         const pctColor=(pct:number)=>pct>105?'#E74C3C':pct>=85?'#27AE60':pct>=50?'#E8B95A':'#5DADE2'
         const sel=capSel
         const selPerson=sel?people.find((p:any)=>p.id===sel.personId):null
         const selBreakdown=sel?(byProject.get(sel.personId)?.get(sel.key)||[]):[]
+        const aSel=capActualSel
+        const aSelPerson=aSel?people.find((p:any)=>p.id===aSel.personId):null
+        const aSelBreakdown=aSel?(actualByItem.get(aSel.personId)?.get(aSel.key)||[]):[]
         return(
           <div>
             <div style={{display:'flex',alignItems:'center',gap:8,marginBottom:12,flexWrap:'wrap' as const}}>
@@ -6812,8 +6864,32 @@ function BudgetTab({roles,setRoles,people,setPeople,projects,items,projectRoles,
                 )}
               </div>
             )}
+            {aSel&&(
+              <div style={{background:'#12202F',border:'1px solid #5DADE2',borderRadius:10,padding:'12px 16px',maxWidth:480,marginBottom:16}}>
+                <div style={{display:'flex',alignItems:'center',gap:8,marginBottom:8}}>
+                  <span style={{fontSize:12,fontWeight:700,color:'#F4F6F8'}}>{aSelPerson?.name} — {monthLabel(aSel.key)} <span style={{color:'#7A8FA6',fontWeight:400}}>(Actual)</span></span>
+                  <button onClick={()=>setCapActualSel(null)} style={{marginLeft:'auto',background:'none',border:'none',color:'#7A8FA6',fontSize:14,cursor:'pointer'}}>✕</button>
+                </div>
+                {aSelBreakdown.length===0&&<div style={{fontSize:11,color:'#7A8FA6',fontStyle:'italic'}}>No real work found.</div>}
+                {[...aSelBreakdown].sort((a:any,b:any)=>b.pct-a.pct).map((b:any,ix:number)=>(
+                  <div key={ix} style={{display:'flex',alignItems:'center',gap:8,fontSize:11,padding:'4px 0',borderBottom:ix<aSelBreakdown.length-1?'1px solid #1A2838':'none'}}>
+                    <span style={{color:'#7A8FA6',fontFamily:'monospace',fontSize:9,width:56,flexShrink:0}}>{b.itemCode}</span>
+                    <span style={{color:'#F4F6F8',flex:1,overflow:'hidden',whiteSpace:'nowrap' as const,textOverflow:'ellipsis'}}>{b.itemName} <span style={{color:'#7A8FA6'}}>({b.projectName})</span></span>
+                    <span style={{color:pctColor(Math.round(b.pct)),fontWeight:700,width:40,textAlign:'right' as const}}>{Math.round(b.pct)}%</span>
+                    <span style={{color:'#7A8FA6',width:50,textAlign:'right' as const}}>{b.days.toFixed(1)}d</span>
+                  </div>
+                ))}
+                {aSelBreakdown.length>0&&(
+                  <div style={{display:'flex',fontSize:11,fontWeight:700,paddingTop:6,marginTop:2,borderTop:'1px solid #243447'}}>
+                    <span style={{color:'#F4F6F8',flex:1}}>Total</span>
+                    <span style={{color:pctColor(Math.round(aSelBreakdown.reduce((s:number,b:any)=>s+b.pct,0))),width:40,textAlign:'right' as const}}>{Math.round(aSelBreakdown.reduce((s:number,b:any)=>s+b.pct,0))}%</span>
+                    <span style={{color:'#7A8FA6',width:50,textAlign:'right' as const}}>{aSelBreakdown.reduce((s:number,b:any)=>s+b.days,0).toFixed(1)}d</span>
+                  </div>
+                )}
+              </div>
+            )}
           <div style={{overflowX:'auto'}}>
-            <div style={{fontSize:11,color:'#7A8FA6',marginBottom:12,lineHeight:1.5}}>Allocation % per person per month, summed across every project they're named on (only rows linked to a roster person count here — generic/unassigned rows aren't real capacity yet). Click any % to see which projects it's coming from.</div>
+            <div style={{fontSize:11,color:'#7A8FA6',marginBottom:12,lineHeight:1.5}}>Allocation % per person per month, summed across every project they're named on (only rows linked to a roster person count here — generic/unassigned rows aren't real capacity yet). Click any % to see which projects it's coming from. The lighter <b>Actual</b> row underneath is real work — sourced from Sprint Planning's assignments (and Budget's own assignment editor, same records), sized against real calendar days.</div>
             <table style={{borderCollapse:'collapse',fontSize:11,minWidth:640}}>
               <thead><tr>
                 <th style={{textAlign:'left',padding:'6px 10px',color:'#7A8FA6',borderBottom:'1px solid #243447',position:'sticky' as const,left:0,background:'#0D1B2A'}}>Person</th>
@@ -6825,8 +6901,10 @@ function BudgetTab({roles,setRoles,people,setPeople,projects,items,projectRoles,
                   <tr><td colSpan={monthKeys.length+1} style={{padding:'10px 10px 4px',fontSize:10,fontWeight:700,letterSpacing:1,color:'#5DADE2'}}>{group.team.toUpperCase()}</td></tr>
                   {group.people.map((p:any)=>{
                     const pm=perPerson.get(p.id)
+                    const apm=actualPerPerson.get(p.id)
                     return(
-                      <tr key={p.id}>
+                      <Fragment key={p.id}>
+                      <tr>
                         <td style={{padding:'4px 10px',color:'#F4F6F8',position:'sticky' as const,left:0,background:'#0D1B2A',whiteSpace:'nowrap' as const}}>{p.name} <span style={{color:'#7A8FA6',fontSize:9}}>· {roles.find((r:any)=>r.id===p.role_id)?.name||'—'}</span></td>
                         {monthKeys.map(k=>{
                           const cell=pm?.get(k)
@@ -6844,6 +6922,25 @@ function BudgetTab({roles,setRoles,people,setPeople,projects,items,projectRoles,
                           )
                         })}
                       </tr>
+                      <tr>
+                        <td style={{padding:'0 10px 6px',color:'#7A8FA6',fontSize:9,fontStyle:'italic',position:'sticky' as const,left:0,background:'#0D1B2A'}}>Actual</td>
+                        {monthKeys.map(k=>{
+                          const acell=apm?.get(k)
+                          const apct=acell?Math.round(acell.pct):0
+                          const isASel=capActualSel&&capActualSel.personId===p.id&&capActualSel.key===k
+                          return(
+                            <td key={k+'-actual'} style={{textAlign:'center',padding:'0 10px 6px'}}>
+                              {apct>0?(
+                                <div onClick={()=>setCapActualSel(isASel?null:{personId:p.id,key:k})} title="Click to see which items are behind this"
+                                  style={{cursor:'pointer',display:'inline-block',borderRadius:4,padding:'1px 4px',background:isASel?'#1E3048':'transparent',border:isASel?'1px solid #C8973A':'1px solid transparent'}}>
+                                  <span style={{fontSize:10,color:pctColor(apct),opacity:0.8}}>{apct}%</span>
+                                </div>
+                              ):<span style={{color:'#243447',fontSize:10}}>—</span>}
+                            </td>
+                          )
+                        })}
+                      </tr>
+                      </Fragment>
                     )
                   })}
                   <tr style={{borderTop:'1px solid #243447'}}>
