@@ -947,9 +947,14 @@ function ProjectDetail({project,items,setItems,projects,setProjects,milestones,s
     if(!sprint)return
     const forItem=nextAssignments.filter((a:any)=>a.item_id===itemId)
     const newEnd=computeItemEndFromAssignments(sprint.start_date,sprint.end_date,forItem)
-    if(newEnd===item.end_date)return
-    setItems((prev:any[])=>prev.map((it:any)=>it.id===itemId?{...it,end_date:newEnd}:it))
-    await supabase.from('items').update({end_date:newEnd}).eq('id',itemId)
+    // Re-anchor start_date to the sprint's real start too, not just end_date — a Roadmap
+    // drag (or any other direct date edit) can move start_date on its own without going
+    // through sprint placement, which silently breaks the date math from here on since
+    // end_date gets computed relative to whatever start_date now says, not the sprint's
+    // actual start. Pinning both every time this runs closes that drift for good.
+    if(newEnd===item.end_date&&item.start_date===sprint.start_date)return
+    setItems((prev:any[])=>prev.map((it:any)=>it.id===itemId?{...it,start_date:sprint.start_date,end_date:newEnd}:it))
+    await supabase.from('items').update({start_date:sprint.start_date,end_date:newEnd}).eq('id',itemId)
   }
   async function addAssignment(itemId:any,personId:any,days:number){
     if(!personId)return
@@ -5689,9 +5694,12 @@ function SprintsTab({items,setItems,projects,projectRoles,people,setPeople,roles
     if(!sprint)return
     const forItem=nextAssignments.filter((a:any)=>a.item_id===itemId)
     const newEnd=computeItemEndFromAssignments(sprint.start_date,sprint.end_date,forItem)
-    if(newEnd===item.end_date)return
-    setItems((prev:any[])=>prev.map((it:any)=>it.id===itemId?{...it,end_date:newEnd}:it))
-    await supabase.from('items').update({end_date:newEnd}).eq('id',itemId)
+    // Re-anchor start_date to the sprint's real start too — a Roadmap drag (or any other
+    // direct date edit) can move start_date on its own without going through sprint
+    // placement, silently breaking the math from here on. Pinning both closes that drift.
+    if(newEnd===item.end_date&&item.start_date===sprint.start_date)return
+    setItems((prev:any[])=>prev.map((it:any)=>it.id===itemId?{...it,start_date:sprint.start_date,end_date:newEnd}:it))
+    await supabase.from('items').update({start_date:sprint.start_date,end_date:newEnd}).eq('id',itemId)
   }
   // One-time cleanup: every item already placed in a sprint gets its end date freshly
   // recomputed from its CURRENT assignments using the current (correct, sequential)
@@ -5701,20 +5709,24 @@ function SprintsTab({items,setItems,projects,projectRoles,people,setPeople,roles
   async function recalculateAllItemDates(){
     setRecalcBusy(true)
     const placed=items.filter((it:any)=>it.sprint_id)
-    const updates:{id:any,end_date:string}[]=[]
+    // Re-anchors BOTH start_date and end_date to the sprint's real dates — a prior
+    // version of this only touched end_date, which couldn't fully fix an item whose
+    // start_date had drifted away from its sprint (e.g. via a Roadmap drag), since the
+    // math was still being computed relative to the wrong starting point.
+    const updates:{id:any,start_date:string,end_date:string}[]=[]
     for(const it of placed){
       const sprint=sprints.find((s:any)=>s.id===it.sprint_id)
       if(!sprint)continue
       const forItem=itemAssignments.filter((a:any)=>a.item_id===it.id)
       const newEnd=computeItemEndFromAssignments(sprint.start_date,sprint.end_date,forItem)
-      if(newEnd!==it.end_date)updates.push({id:it.id,end_date:newEnd})
+      if(newEnd!==it.end_date||it.start_date!==sprint.start_date)updates.push({id:it.id,start_date:sprint.start_date,end_date:newEnd})
     }
     if(updates.length){
       setItems((prev:any[])=>prev.map((it:any)=>{
         const u=updates.find(x=>x.id===it.id)
-        return u?{...it,end_date:u.end_date}:it
+        return u?{...it,start_date:u.start_date,end_date:u.end_date}:it
       }))
-      for(const u of updates)await supabase.from('items').update({end_date:u.end_date}).eq('id',u.id)
+      for(const u of updates)await supabase.from('items').update({start_date:u.start_date,end_date:u.end_date}).eq('id',u.id)
     }
     setRecalcBusy(false)
     alert(updates.length?`Recalculated ${updates.length} item${updates.length!==1?'s':''}.`:'Everything was already up to date.')
