@@ -3281,16 +3281,23 @@ function Roadmap({items,setItems,projects,setProjects,milestones,sprints=[],item
               const ordinalOf=(sp:any)=>sprints.filter((s:any)=>s.team===sp.team).sort((a:any,b:any)=>a.start_date<b.start_date?-1:1).findIndex((s:any)=>s.id===sp.id)+1
               return bands.map(([key,sps],ix)=>{
                 const[start,end]=key.split('|')
-                const x1=pct(start),x2=pct(end)+ (TOTAL_W/Math.max(1,cols.length)) // include the end column's width
-                const ordinals=[...new Set((sps as any[]).map(ordinalOf))]
-                const label=ordinals.length===1?`Sprint ${ordinals[0]}`:`Sprint ${ordinals.join('/')}`
+                // Right edge is the sprint's END date itself, proportionally — NOT plus a
+                // full column's width. That fudge only made sense at narrow (week) zoom;
+                // at Month/Quarter zoom a column can span 30+ days, so adding one blew the
+                // shaded region months past where the sprint actually ends.
+                const x1=pct(start),x2=pct(end)
+                const label=[...new Set((sps as any[]).map(ordinalOf))]
+                const bandLabel=label.length===1?`Sprint ${label[0]}`:`Sprint ${label.join('/')}`
                 return(
                   <div key={key} onClick={()=>setSprintPopover(sprintPopover?.start_date===start?null:{start_date:start,end_date:end,sps})}
                     title="Click for team capacity in this sprint"
                     style={{position:'absolute',left:x1,width:Math.max(4,x2-x1),top:0,bottom:0,background:ix%2===0?'rgba(200,151,58,0.06)':'rgba(93,173,226,0.06)',borderLeft:'2px solid #C8973A',cursor:'pointer',zIndex:1}}>
-                    <div style={{position:'sticky' as const,top:0,left:0,zIndex:2}}>
-                      <div style={{display:'inline-block',background:'#C8973A',color:'#0D1B2A',fontSize:10,fontWeight:800,padding:'3px 8px',borderRadius:'0 0 5px 0',whiteSpace:'nowrap' as const}}>{label}</div>
-                      <div style={{fontSize:9,color:'#E8B95A',padding:'2px 6px',whiteSpace:'nowrap' as const,fontWeight:600}}>{start} – {end}</div>
+                    {/* Sticky top:36 (header's own height) + zIndex above the header's 10 —
+                        otherwise the header row's solid background paints directly over this
+                        label and it's invisible no matter how correct the code is. */}
+                    <div style={{position:'sticky' as const,top:36,left:0,zIndex:11,pointerEvents:'none' as const}}>
+                      <div style={{display:'inline-block',background:'#C8973A',color:'#0D1B2A',fontSize:10,fontWeight:800,padding:'3px 8px',borderRadius:'0 0 5px 0',whiteSpace:'nowrap' as const,boxShadow:'0 2px 6px rgba(0,0,0,0.4)'}}>{bandLabel}</div>
+                      <div style={{fontSize:9,color:'#0D1B2A',background:'#E8B95A',padding:'2px 6px',whiteSpace:'nowrap' as const,fontWeight:700,display:'inline-block'}}>{start} – {end}</div>
                     </div>
                   </div>
                 )
