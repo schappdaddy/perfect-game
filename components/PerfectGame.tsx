@@ -5650,8 +5650,10 @@ function SprintsTab({items,setItems,projects,projectRoles,people,setPeople,roles
                     style={{color:overRoom?'#E74C3C':'#27AE60',fontWeight:700,cursor:'pointer',textDecoration:'underline dotted'}}>
                     {stats.room>=0?'+':''}{stats.room.toFixed(1)}d room
                   </span>
-                  {(stats.projectRisks.length>0||stats.perPerson.some((p:any)=>p.over))&&
+                  {stats.perPerson.some((p:any)=>p.over)&&
                     <span title="See Alerts panel" style={{marginLeft:'auto',fontSize:9,color:'#E74C3C',fontWeight:700,border:'1px solid #E74C3C',borderRadius:8,padding:'1px 7px'}}>⚠ see alerts</span>}
+                  {stats.projectRisks.length>0&&
+                    <span title="See the Planned-for-this-timeframe panel below" style={{marginLeft:stats.perPerson.some((p:any)=>p.over)?6:'auto',fontSize:9,color:'#C8973A',fontWeight:700,border:'1px solid #C8973A',borderRadius:8,padding:'1px 7px'}}>📅 {stats.atRiskItems.length} to add</span>}
                 </div>
                 {roomDrill===sprint.id&&(
                   <div style={{background:'#0D1B2A',border:'1px solid #243447',borderRadius:6,padding:'8px 10px',marginBottom:10}}>
@@ -5716,6 +5718,30 @@ function SprintsTab({items,setItems,projects,projectRoles,people,setPeople,roles
                     })}
                   </div>
                 ))}
+
+                {stats.atRiskItems.length>0&&(()=>{
+                  const riskGroups=groupByProject(stats.atRiskItems)
+                  return(
+                    <div style={{marginTop:14,paddingTop:10,borderTop:'1px dashed #3A4A5E'}}>
+                      <div style={{fontSize:10,fontWeight:700,color:'#C8973A',letterSpacing:0.5,marginBottom:6}}>📅 PLANNED FOR THIS TIMEFRAME — NOT YET IN THE SPRINT</div>
+                      <div style={{fontSize:9,color:'#7A8FA6',marginBottom:8,lineHeight:1.4}}>These items already have real dates (from Roadmap) that fall inside this sprint's window, but haven't been added yet.</div>
+                      {riskGroups.map(([projName,groupItems]:any)=>(
+                        <div key={projName} style={{marginBottom:8}}>
+                          <div style={{fontSize:9,fontWeight:700,color:'#5DADE2',letterSpacing:0.5,marginBottom:3}}>{projName} ({groupItems.length})</div>
+                          {groupItems.map((it:any)=>(
+                            <div key={it.id} style={{display:'flex',alignItems:'center',gap:6,fontSize:10,padding:'4px 0',borderTop:'1px solid #1A2838'}}>
+                              <span style={{color:'#7A8FA6',fontFamily:'monospace',fontSize:9,width:56,flexShrink:0}}>{it.item_id}</span>
+                              <span style={{color:'#F4F6F8',flex:1,overflow:'hidden',whiteSpace:'nowrap' as const,textOverflow:'ellipsis'}}>{rt(it.request_type)} {it.name}</span>
+                              <span style={{color:'#7A8FA6',fontSize:9,whiteSpace:'nowrap' as const}}>{it.start_date} – {it.end_date}</span>
+                              <span style={{color:sc(it.status),fontSize:9,fontWeight:700}}>{it.status}</span>
+                              <button onClick={()=>placeItem(it,sprint.id)} style={{fontSize:9,background:'#27AE60',border:'none',borderRadius:5,color:'#fff',fontWeight:700,padding:'3px 9px',cursor:'pointer',flexShrink:0}}>+ Add to Sprint {ix+1}</button>
+                            </div>
+                          ))}
+                        </div>
+                      ))}
+                    </div>
+                  )
+                })()}
               </div>
             )
           })}
@@ -5767,24 +5793,15 @@ function SprintsTab({items,setItems,projects,projectRoles,people,setPeople,roles
         {/* RIGHT — Alerts, kept out of the planning flow but always visible */}
         <div style={{width:320,flexShrink:0,position:'sticky' as const,top:0}}>
           <div style={{fontSize:11,fontWeight:700,color:'#E74C3C',letterSpacing:1,marginBottom:10}}>⚠ ALERTS</div>
-          {allStats.every(({stats}:any)=>stats.projectRisks.length===0&&!stats.perPerson.some((p:any)=>p.over))&&(
+          <div style={{fontSize:10,color:'#7A8FA6',marginBottom:10,lineHeight:1.4}}>Who's overcommitted, across sprint work and everything else. Items that just need scheduling now live in each sprint's own "Planned for this timeframe" panel instead.</div>
+          {allStats.every(({stats}:any)=>!stats.perPerson.some((p:any)=>p.over))&&(
             <div style={{fontSize:11,color:'#7A8FA6',fontStyle:'italic'}}>Nothing at risk right now.</div>
           )}
           {allStats.map(({sprint,ix,stats}:any)=>{
-            if(stats.projectRisks.length===0&&!stats.perPerson.some((p:any)=>p.over))return null
+            if(!stats.perPerson.some((p:any)=>p.over))return null
             return(
               <div key={sprint.id} style={{background:'#12202F',border:'1px solid rgba(231,76,60,0.4)',borderRadius:8,padding:'10px 12px',marginBottom:12}}>
                 <div style={{fontSize:10,fontWeight:700,color:'#F4F6F8',marginBottom:6}}>Sprint {ix+1} <span style={{color:'#7A8FA6',fontWeight:400}}>({sprint.start_date})</span></div>
-                {stats.projectRisks.length>0&&(
-                  <>
-                  <div style={{fontSize:9,fontWeight:700,color:'#E74C3C',marginBottom:3}}>NOT YET SCHEDULED</div>
-                  {stats.projectRisks.map((r:any,ix3:number)=>(
-                    <div key={ix3} style={{fontSize:10,color:'#F4F6F8',marginBottom:4}}>
-                      <b>{r.project}</b> <span style={{color:'#E74C3C'}}>— {r.count} item{r.count!==1?'s':''} overlap, not in the plan</span>
-                    </div>
-                  ))}
-                  </>
-                )}
                 {stats.perPerson.filter((p:any)=>p.over).map((p:any,ix2:number)=>{
                   const key=`${sprint.id}-${p.person.id}`
                   const open=alertDrill===key
