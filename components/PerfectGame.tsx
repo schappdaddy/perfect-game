@@ -2904,7 +2904,16 @@ function Roadmap({items,setItems,projects,setProjects,milestones,sprints=[],item
     const rangeEnd=new Date(latest);rangeEnd.setMonth(rangeEnd.getMonth()+3)
     const qStart=new Date(rangeStart.getFullYear(),Math.floor(rangeStart.getMonth()/3)*3,1)
     const qEnd=new Date(rangeEnd.getFullYear(),Math.floor(rangeEnd.getMonth()/3)*3+3,0)
-    if(view==='week'){
+    if(view==='day'){
+      const cols=[];let d=new Date(qStart)
+      while(d<=qEnd){
+        const de=new Date(d)
+        const isMonthStart=d.getDate()===1
+        cols.push({key:d.toISOString(),label:isMonthStart?d.toLocaleString('default',{month:'short',day:'numeric'}):`${d.getDate()}`,start:new Date(d),end:de,isCodeFreeze:isCF(new Date(d),de),isWeekend:d.getDay()===0||d.getDay()===6})
+        d.setDate(d.getDate()+1)
+      }
+      return cols
+    }else if(view==='week'){
       const cols=[];let d=new Date(qStart)
       while(d<=qEnd){const we=new Date(d);we.setDate(we.getDate()+6);cols.push({key:d.toISOString(),label:`${d.getMonth()+1}/${d.getDate()}/${String(d.getFullYear()).slice(2)}`,start:new Date(d),end:we,isCodeFreeze:isCF(new Date(d),we)});d.setDate(d.getDate()+7)}
       return cols
@@ -2939,7 +2948,7 @@ function Roadmap({items,setItems,projects,setProjects,milestones,sprints=[],item
   const totalStart=cols[0]?.start
   const totalEnd=cols[cols.length-1]?.end
   const totalMs=totalEnd.getTime()-totalStart.getTime()
-  const COL_W=view==='week'?60*zoom:view==='month'?100*zoom:view==='quarter'?200*zoom:300*zoom
+  const COL_W=view==='day'?32*zoom:view==='week'?60*zoom:view==='month'?100*zoom:view==='quarter'?200*zoom:300*zoom
   const TOTAL_W=cols.length*COL_W
 
   function pct(dateStr){return(new Date(dateStr+'T12:00:00').getTime()-totalStart.getTime())/totalMs*TOTAL_W}
@@ -3066,8 +3075,14 @@ function Roadmap({items,setItems,projects,setProjects,milestones,sprints=[],item
 
   function CfShading(){
     return(
-      <>{cols.map((col,ci)=>col.isCodeFreeze&&(
-        <div key={`cf-${col.key}`} style={{position:'absolute',top:0,bottom:0,left:ci*COL_W,width:COL_W,background:'rgba(192,57,43,0.07)',zIndex:0,borderLeft:'1px dashed rgba(192,57,43,0.3)',borderRight:'1px dashed rgba(192,57,43,0.3)',pointerEvents:'none'}}/>
+      <>{cols.map((col,ci)=>(
+        <Fragment key={`sh-${col.key}`}>
+          {col.isCodeFreeze&&<div style={{position:'absolute',top:0,bottom:0,left:ci*COL_W,width:COL_W,background:'rgba(192,57,43,0.07)',zIndex:0,borderLeft:'1px dashed rgba(192,57,43,0.3)',borderRight:'1px dashed rgba(192,57,43,0.3)',pointerEvents:'none'}}/>}
+          {/* Weekend columns shaded full-height too — at Day zoom this is the difference
+              between losing your place scrolling through rows and always knowing which
+              day you're looking at without reading a single label. */}
+          {col.isWeekend&&!col.isCodeFreeze&&<div style={{position:'absolute',top:0,bottom:0,left:ci*COL_W,width:COL_W,background:'rgba(10,20,32,0.35)',zIndex:0,pointerEvents:'none'}}/>}
+        </Fragment>
       ))}</>
     )
   }
@@ -3103,7 +3118,7 @@ function Roadmap({items,setItems,projects,setProjects,milestones,sprints=[],item
       <div style={{display:'flex',gap:8,padding:'10px 20px',borderBottom:'1px solid #243447',alignItems:'center',background:'#162436',flexWrap:'wrap' as const}}>
         <select value={ft} onChange={e=>setFt(e.target.value)} style={sel}><option value="All">All Teams</option>{TEAMS.map(t=><option key={t}>{t}</option>)}</select>
         <div style={{display:'flex',gap:3}}>
-          {(mobileR?[['month','Month'],['quarter','Quarter']]:[['week','Week'],['month','Month'],['quarter','Quarter'],['year','Year']]).map(([k,label])=>(
+          {(mobileR?[['month','Month'],['quarter','Quarter']]:[['day','Day'],['week','Week'],['month','Month'],['quarter','Quarter'],['year','Year']]).map(([k,label])=>(
             <button key={k} onClick={()=>setView(k)} style={{background:view===k?'#C8973A':'#1E3048',color:view===k?'#0D1B2A':'#7A8FA6',border:`1px solid ${view===k?'#C8973A':'#243447'}`,borderRadius:6,padding:'4px 12px',fontSize:12,cursor:'pointer',fontWeight:view===k?700:400}}>{label}</button>
           ))}
         </div>
@@ -3203,6 +3218,10 @@ function Roadmap({items,setItems,projects,setProjects,milestones,sprints=[],item
             <div style={{height:36,flexShrink:0,background:'#162436',borderBottom:'1px solid #243447',padding:'0 12px',fontSize:11,fontWeight:700,color:'#7A8FA6',letterSpacing:1,display:'flex',alignItems:'center'}}>
               PROJECT / ITEM
             </div>
+            {/* Matching spacer for the sprint ruler on the bar side — without this, the
+                label column and the bars fall out of sync by exactly the ruler's height
+                the moment Sprints is toggled on. */}
+            {showSprints&&sprintBands.length>0&&<div style={{height:24,flexShrink:0,background:'#0D1B2A',borderBottom:'1px solid #243447'}}/>}
             <div ref={labelRef} style={{flex:1,overflowY:'hidden'}}>
               {groups.map((group:any)=>{
                 const isCollapsed=getCollapsed()[group.id]
@@ -3332,7 +3351,7 @@ function Roadmap({items,setItems,projects,setProjects,milestones,sprints=[],item
               {/* Header */}
               <div style={{display:'flex',position:'sticky',top:0,zIndex:10,background:'#162436',borderBottom:'1px solid #243447',height:36}}>
                 {cols.map(col=>(
-                  <div key={col.key} style={{width:COL_W,flexShrink:0,borderRight:'1px solid #243447',padding:'6px 4px',fontSize:10,fontWeight:700,color:col.isCodeFreeze?'#E74C3C':'#C8973A',textAlign:'center' as const,overflow:'hidden',whiteSpace:'nowrap' as const,background:col.isCodeFreeze?'rgba(192,57,43,0.12)':'transparent',display:'flex',flexDirection:'column',alignItems:'center',justifyContent:'center'}}>
+                  <div key={col.key} style={{width:COL_W,flexShrink:0,borderRight:'1px solid #243447',padding:'6px 4px',fontSize:10,fontWeight:700,color:col.isCodeFreeze?'#E74C3C':col.isWeekend?'#3A4A5E':'#C8973A',textAlign:'center' as const,overflow:'hidden',whiteSpace:'nowrap' as const,background:col.isCodeFreeze?'rgba(192,57,43,0.12)':col.isWeekend?'rgba(10,20,32,0.5)':'transparent',display:'flex',flexDirection:'column',alignItems:'center',justifyContent:'center'}}>
                     {col.label}
                     {col.isCodeFreeze&&<div style={{fontSize:8,color:'#E74C3C',marginTop:1}}>CODE FREEZE</div>}
                   </div>
