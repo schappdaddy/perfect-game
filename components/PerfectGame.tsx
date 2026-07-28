@@ -3034,10 +3034,15 @@ function Roadmap({items,setItems,projects,setProjects,milestones,sprints=[],item
     return uniq
   })()
   const ordinalOf=(sp:any)=>sprints.filter((s:any)=>s.team===sp.team).sort((a:any,b:any)=>a.start_date<b.start_date?-1:1).findIndex((s:any)=>s.id===sp.id)+1
+  // Initials from each word in the team name — works for any custom team ("Retail
+  // Program" → "RP"), not just the two built-in ones.
+  const teamAbbrev=(team:string)=>team?team.split(' ').map((w:string)=>w[0]).join('').toUpperCase():'?'
   const sprintBands=[...sprintBandSps.entries()].sort((a,b)=>a[0]<b[0]?-1:1).map(([key,sps],ix)=>{
     const[start,end]=key.split('|')
-    const ordinals=[...new Set(sps.map(ordinalOf))]
-    const label=ordinals.length===1?`Sprint ${ordinals[0]}`:`Sprint ${ordinals.join('/')}`
+    // Labeled per TEAM, not just a bare ordinal — a shared date window might be CE's
+    // 3rd sprint and OE's 1st at the same time, and a team with fewer sprints created
+    // should never look like it has one it doesn't.
+    const label=sps.map((sp:any)=>`${teamAbbrev(sp.team)} Sprint ${ordinalOf(sp)}`).join(' · ')
     return{key,start,end,ix,label}
   })
   function dateToStr(d){return d.toISOString().split('T')[0]}
@@ -3597,12 +3602,16 @@ function Roadmap({items,setItems,projects,setProjects,milestones,sprints=[],item
               <div style={{borderBottom:'1px solid #243447',flexShrink:0}}>
                 <button onClick={()=>setProjectsPanelOpen(o=>!o)} style={{background:'none',border:'none',cursor:'pointer',padding:'10px 12px',display:'flex',alignItems:'center',gap:6,color:'#2E86AB',fontSize:11,fontWeight:700,letterSpacing:1,width:'100%',whiteSpace:'nowrap' as const}}>
                   <span style={{fontSize:10}}>{projectsPanelOpen?'▼':'▶'}</span>
-                  <span>◈ PROJECTS ({filteredProjects.filter(p=>!p.start_date||!p.end_date).length})</span>
+                  <span>◈ PROJECTS ({filteredProjects.filter(p=>(!p.start_date||!p.end_date)&&!p.ongoing).length})</span>
                   <span style={{marginLeft:'auto',fontSize:9,color:'#7A8FA6',fontWeight:400}}>drag to set dates</span>
                 </button>
                 {projectsPanelOpen&&(
                   <div style={{padding:'0 8px 10px'}}>
-                    {filteredProjects.filter(p=>!p.start_date||!p.end_date).map(project=>{
+                    {/* ∞ projects deliberately excluded — they don't get a normal
+                        start/end committed here, since their forecast is item-based,
+                        not project-timeline-based. Dragging one onto the roadmap to
+                        "set dates" wouldn't mean anything for how it's actually planned. */}
+                    {filteredProjects.filter(p=>(!p.start_date||!p.end_date)&&!p.ongoing).map(project=>{
                       const rc=ragColor(project.rag)
                       const pclr=pc(project.priority)
                       const childCount=withDates.filter(i=>i.parent_project===project.name).length
