@@ -2841,6 +2841,7 @@ function Roadmap({items,setItems,projects,setProjects,milestones,sprints=[],item
   const [view,setView]=useState('quarter')
   const [colorBy,setColorBy]=useState('status')
   const [ft,setFt]=useState('All')
+  const roadmapTeams=[...new Set([...TEAMS,...people.map((p:any)=>p.team).filter(Boolean),...projects.map((p:any)=>p.team).filter(Boolean)])]
   const [zoom,setZoom]=useState(1)
   const [editing,setEditing]=useState(null)
   const [editForm,setEditForm]=useState({name:'',start_date:'',end_date:'',roadmap_color:'',status:'',priority:'',effort:''})
@@ -3026,7 +3027,11 @@ function Roadmap({items,setItems,projects,setProjects,milestones,sprints=[],item
   // ruler (in the sticky header area, so it's never obscured by bars or milestones).
   const sprintBandSps=(()=>{
     const uniq=new Map<string,any[]>()
-    for(const sp of sprints){
+    // Respects the same team filter (ft) as the projects/items lists above — filtered
+    // to Operational Efficiency should show ONLY Operational Efficiency's sprints, not
+    // every team's merged together.
+    const relevantSprints=ft==='All'?sprints:sprints.filter((sp:any)=>sp.team===ft)
+    for(const sp of relevantSprints){
       const key=`${sp.start_date}|${sp.end_date}`
       if(!uniq.has(key))uniq.set(key,[])
       uniq.get(key)!.push(sp)
@@ -3200,7 +3205,7 @@ function Roadmap({items,setItems,projects,setProjects,milestones,sprints=[],item
     <div style={{display:'flex',flexDirection:'column',height:'100%'}}>
       {/* Controls */}
       <div style={{display:'flex',gap:8,padding:'10px 20px',borderBottom:'1px solid #243447',alignItems:'center',background:'#162436',flexWrap:'wrap' as const}}>
-        <select value={ft} onChange={e=>setFt(e.target.value)} style={sel}><option value="All">All Teams</option>{TEAMS.map(t=><option key={t}>{t}</option>)}</select>
+        <select value={ft} onChange={e=>setFt(e.target.value)} style={sel}><option value="All">All Teams</option>{roadmapTeams.map(t=><option key={t}>{t}</option>)}</select>
         <div style={{display:'flex',gap:3}}>
           {(mobileR?[['month','Month'],['quarter','Quarter']]:[['day','Day'],['week','Week'],['month','Month'],['quarter','Quarter'],['year','Year']]).map(([k,label])=>(
             <button key={k} onClick={()=>{
