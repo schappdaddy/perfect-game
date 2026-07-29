@@ -1566,14 +1566,13 @@ function ProjectDetail({project,items,setItems,projects,setProjects,milestones,s
     </div>
   )
 }
-function Projects({items,setItems,projects,setProjects,milestones,setMilestones,tasks,setTasks,space,ccrs,ccrItems,roles=[],people=[],projectRoles=[],setProjectRoles,itemAssignments=[],setItemAssignments,sprints=[]}:{items:any[],setItems:any,projects:any[],setProjects:any,milestones:any[],setMilestones:any,tasks:any[],setTasks:any,space:string,ccrs:any[],ccrItems:any[],roles?:any[],people?:any[],projectRoles?:any[],setProjectRoles?:any,itemAssignments?:any[],setItemAssignments?:any,sprints?:any[]}) {
+function Projects({items,setItems,projects,setProjects,milestones,setMilestones,tasks,setTasks,space,ccrs,ccrItems,roles=[],people=[],projectRoles=[],setProjectRoles,itemAssignments=[],setItemAssignments,sprints=[],selectedProject,setSelectedProject}:{items:any[],setItems:any,projects:any[],setProjects:any,milestones:any[],setMilestones:any,tasks:any[],setTasks:any,space:string,ccrs:any[],ccrItems:any[],roles?:any[],people?:any[],projectRoles?:any[],setProjectRoles?:any,itemAssignments?:any[],setItemAssignments?:any,sprints?:any[],selectedProject:any,setSelectedProject:any}) {
   const mobile=useIsMobile()
   const [adding,setAdding]=useState(false)
   const [editing,setEditing]=useState(null)
   const [saving,setSaving]=useState(false)
   const [filterTeam,setFilterTeam]=useState('All')
   const [filterRAG,setFilterRAG]=useState('All')
-  const [selectedProject,setSelectedProject]=useState(null)
   const [dragId,setDragId]=useState(null)
   const [dragOverId,setDragOverId]=useState(null)
   const [addingMilestone,setAddingMilestone]=useState(false)
@@ -2835,7 +2834,7 @@ const sorted=items.filter(i=>!isItemDone(i)).sort((a,b)=>{
 }
 
 // ── ROADMAP ───────────────────────────────────────────────────────────────
-function Roadmap({items,setItems,projects,setProjects,milestones,sprints=[],itemAssignments=[],projectRoles=[],people=[],roles=[]}:{items:any[],projects:any[],setItems:any,setProjects:any,milestones:any[],sprints?:any[],itemAssignments?:any[],projectRoles?:any[],people?:any[],roles?:any[]}) {
+function Roadmap({items,setItems,projects,setProjects,milestones,sprints=[],itemAssignments=[],projectRoles=[],people=[],roles=[],onOpenProject}:{items:any[],projects:any[],setItems:any,setProjects:any,milestones:any[],sprints?:any[],itemAssignments?:any[],projectRoles?:any[],people?:any[],roles?:any[],onOpenProject?:(p:any)=>void}) {
   const [showSprints,setShowSprints]=useState(false)
   const [sprintPopover,setSprintPopover]=useState<any>(null) // {start_date,end_date} of clicked band
   const [view,setView]=useState('quarter')
@@ -3338,7 +3337,7 @@ function Roadmap({items,setItems,projects,setProjects,milestones,sprints=[],item
                       </button>
                       <div style={{overflow:'hidden',flex:1}}>
                         <div style={{display:'flex',alignItems:'center',gap:5,marginBottom:2}}>
-                          <span style={{fontSize:12,fontWeight:700,color:'#F4F6F8',overflow:'hidden',whiteSpace:'nowrap' as const,textOverflow:'ellipsis',maxWidth:110}}>{group.name}{group.ongoing?' ∞':''}</span>
+                          <span onClick={()=>onOpenProject?.(group)} title="Click to open this project's details" style={{fontSize:12,fontWeight:700,color:'#F4F6F8',overflow:'hidden',whiteSpace:'nowrap' as const,textOverflow:'ellipsis',maxWidth:110,cursor:onOpenProject?'pointer':undefined}}>{group.name}{group.ongoing?' ∞':''}</span>
                           <span style={{fontSize:10,color:rc,fontWeight:700,flexShrink:0}}>{group.rag==='Green'?'🟢':group.rag==='Amber'?'🟡':group.rag==='Red'?'🔴':'⚪'}</span>
                           {group.violations.length>0&&<span style={{fontSize:9,color:'#E74C3C',flexShrink:0}}>⚠️</span>}
                         </div>
@@ -7777,6 +7776,7 @@ export default function PerfectGame() {
   const [sprintConfig,setSprintConfig]=useState<any[]>([])
   const [loading,setLoading]=useState(true)
   const [activeTab,setActiveTab]=useState('desk')
+  const [selectedProject,setSelectedProject]=useState<any>(null) // shared so Roadmap can open the same Project detail panel Projects uses
   const [space,setSpace]=useState('work')
   const [asstOpen,setAsstOpen]=useState(false)
   const [asstSeed,setAsstSeed]=useState('')
@@ -7919,8 +7919,8 @@ useEffect(()=>{
       </div>
       <div style={{flex:1,overflow:'hidden'}}>
         {activeTab==='backlog'&&<Backlog items={sItems} setItems={setSItems} projects={sProjects} setProjects={setSProjects} space={space} ccrs={ccrs} ccrItems={ccrItems} setCcrItems={setCcrItems}/>}
-        {activeTab==='projects'&&<Projects items={sItems} setItems={setSItems} projects={sProjects} setProjects={setSProjects} milestones={sMilestones} setMilestones={setSMilestones} tasks={tasks} setTasks={setTasks} space={space} ccrs={ccrs} ccrItems={ccrItems} roles={roles} people={people} projectRoles={projectRoles} setProjectRoles={setProjectRoles} itemAssignments={itemAssignments} setItemAssignments={setItemAssignments} sprints={sprints}/>}
-{activeTab==='roadmap'&&<Roadmap items={sItems} setItems={setSItems} projects={sProjects} setProjects={setSProjects} milestones={sMilestones} sprints={sprints} itemAssignments={itemAssignments} projectRoles={projectRoles} people={people} roles={roles}/>}
+        {activeTab==='projects'&&<Projects items={sItems} setItems={setSItems} projects={sProjects} setProjects={setSProjects} milestones={sMilestones} setMilestones={setSMilestones} tasks={tasks} setTasks={setTasks} space={space} ccrs={ccrs} ccrItems={ccrItems} roles={roles} people={people} projectRoles={projectRoles} setProjectRoles={setProjectRoles} itemAssignments={itemAssignments} setItemAssignments={setItemAssignments} sprints={sprints} selectedProject={selectedProject} setSelectedProject={setSelectedProject}/>}
+{activeTab==='roadmap'&&<Roadmap items={sItems} setItems={setSItems} projects={sProjects} setProjects={setSProjects} milestones={sMilestones} sprints={sprints} itemAssignments={itemAssignments} projectRoles={projectRoles} people={people} roles={roles} onOpenProject={(p:any)=>{setSelectedProject(p);setActiveTab('projects')}}/>}
         {activeTab==='teams'&&<Teams items={sItems} projects={sProjects} milestones={sMilestones} ccrs={ccrs} ccrItems={ccrItems}/>}
         {activeTab==='desk'&&<Desk items={items} setItems={setItems} projects={projects} setProjects={setProjects} milestones={milestones} setMilestones={setMilestones} tasks={tasks} setTasks={setTasks} ccrs={ccrs} setCcrs={setCcrs} ccrItems={ccrItems} setCcrItems={setCcrItems} space={space} openAssistant={(t:string)=>{setAsstSeed(t);setAsstOpen(true)}}/>}
         <Assistant open={asstOpen} setOpen={setAsstOpen} seed={asstSeed} setSeed={setAsstSeed} items={items} setItems={setItems} projects={projects} setProjects={setProjects} milestones={milestones} tasks={tasks} setTasks={setTasks} ccrs={ccrs} setCcrs={setCcrs} ccrItems={ccrItems} setCcrItems={setCcrItems} space={space}/>
