@@ -2834,7 +2834,7 @@ const sorted=items.filter(i=>!isItemDone(i)).sort((a,b)=>{
 }
 
 // ── ROADMAP ───────────────────────────────────────────────────────────────
-function Roadmap({items,setItems,projects,setProjects,milestones,sprints=[],itemAssignments=[],projectRoles=[],people=[],roles=[],onOpenProject}:{items:any[],projects:any[],setItems:any,setProjects:any,milestones:any[],sprints?:any[],itemAssignments?:any[],projectRoles?:any[],people?:any[],roles?:any[],onOpenProject?:(p:any)=>void}) {
+function Roadmap({items,setItems,projects,setProjects,milestones,setMilestones,tasks=[],setTasks,sprints=[],itemAssignments=[],projectRoles=[],people=[],roles=[],onOpenProject}:{items:any[],projects:any[],setItems:any,setProjects:any,milestones:any[],setMilestones?:any,tasks?:any[],setTasks?:any,sprints?:any[],itemAssignments?:any[],projectRoles?:any[],people?:any[],roles?:any[],onOpenProject?:(p:any)=>void}) {
   const [showSprints,setShowSprints]=useState(false)
   const [sprintPopover,setSprintPopover]=useState<any>(null) // {start_date,end_date} of clicked band
   const [view,setView]=useState('quarter')
@@ -2862,6 +2862,70 @@ function Roadmap({items,setItems,projects,setProjects,milestones,sprints=[],item
         if(yes)await closeItemsForProject(items,setItems,quickProject.name,itemStatus)
       }
     }
+  }
+  // Milestones, tasks, commit/uncommit, and quick-add-item state for the quick-view —
+  // same behavior as Desk's modal, scoped locally here (qp = quick project) so both
+  // copies can coexist without colliding.
+  const [qpMsName,setQpMsName]=useState('')
+  const [qpMsDate,setQpMsDate]=useState('')
+  const [qpMvTitle,setQpMvTitle]=useState('')
+  const [qpMvDate,setQpMvDate]=useState('')
+  const [qpQiName,setQpQiName]=useState('')
+  const [qpQiPri,setQpQiPri]=useState('P3')
+  const [qpQiType,setQpQiType]=useState('Bug')
+  const [qpMcId,setQpMcId]=useState<any>(null)
+  const [qpMcStart,setQpMcStart]=useState('')
+  const [qpMcEnd,setQpMcEnd]=useState('')
+  async function qpToggleMs(m:any){
+    const v=!m.completed
+    setMilestones((prev:any[])=>prev.map((x:any)=>x.id===m.id?{...x,completed:v}:x))
+    await supabase.from('milestones').update({completed:v}).eq('id',m.id)
+  }
+  async function qpAddMs(){
+    if(!qpMsName.trim()||!qpMsDate||!quickProject)return
+    const{data,error}=await supabase.from('milestones').insert({project_id:quickProject.id,name:qpMsName.trim(),date:qpMsDate,type:'milestone',completed:false,sort_order:milestones.filter((m:any)=>m.project_id===quickProject.id).length,space:spaceOf(quickProject)}).select().single()
+    if(error){alert('Failed to add milestone: '+error.message);return}
+    if(data){setMilestones((prev:any[])=>[...prev,data]);setQpMsName('');setQpMsDate('')}
+  }
+  async function qpSubmitTask(){
+    if(!qpMvTitle.trim()||!quickProject)return
+    const ok=await addProjectTask(setTasks,quickProject.id,qpMvTitle,qpMvDate||null,spaceOf(quickProject))
+    if(ok){setQpMvTitle('');setQpMvDate('')}
+  }
+  async function qpSubmitQuickItem(){
+    if(!qpQiName.trim()||!quickProject)return
+    const iid=nextItemId(items)
+    const{data,error}=await supabase.from('items').insert({
+      item_id:iid,name:qpQiName.trim(),description:'',priority:qpQiPri,request_type:qpQiType,
+      swimlane:'POS',team:quickProject.team||'Consumer Experience',effort:'M',status:spaceOf(quickProject)==='home'?'To Do':'New',
+      region:'',vendor:'Deckers',parent_project:quickProject.name,flagged:false,sort_order:items.length,space:spaceOf(quickProject),
+    }).select().single()
+    if(error){alert('Failed to add item: '+error.message);return}
+    if(data){setItems((prev:any[])=>[...prev,data]);setQpQiName('');setQpQiPri('P3');setQpQiType('Bug')}
+  }
+  async function qpCommitItem(i:any){
+    if(!quickProject.start_date||!quickProject.end_date){
+      const today=new Date();const iso=(d:Date)=>`${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,'0')}-${String(d.getDate()).padStart(2,'0')}`
+      setQpMcStart(quickProject.start_date&&quickProject.start_date>iso(today)?quickProject.start_date:iso(today))
+      setQpMcEnd(iso(new Date(+today+30*86400000)))
+      setQpMcId(i.id)
+      return
+    }
+    const upd={start_date:quickProject.start_date,end_date:quickProject.end_date}
+    setItems((prev:any[])=>prev.map((x:any)=>x.id===i.id?{...x,...upd}:x))
+    await supabase.from('items').update(upd).eq('id',i.id)
+  }
+  async function qpConfirmCommit(){
+    if(!qpMcId||!qpMcStart||!qpMcEnd)return
+    if(qpMcEnd<qpMcStart){alert('End date is before start date.');return}
+    const upd={start_date:qpMcStart,end_date:qpMcEnd}
+    setItems((prev:any[])=>prev.map((x:any)=>x.id===qpMcId?{...x,...upd}:x))
+    setQpMcId(null)
+    await supabase.from('items').update(upd).eq('id',qpMcId)
+  }
+  async function qpUncommitItem(i:any){
+    setItems((prev:any[])=>prev.map((x:any)=>x.id===i.id?{...x,start_date:null,end_date:null}:x))
+    await supabase.from('items').update({start_date:null,end_date:null}).eq('id',i.id)
   }
   const [zoom,setZoom]=useState(1)
   const [editing,setEditing]=useState(null)
@@ -3926,24 +3990,132 @@ function Roadmap({items,setItems,projects,setProjects,milestones,sprints=[],item
             {quickProject.description&&<div style={{fontSize:12,color:'#B8C4D0',lineHeight:1.5,marginBottom:12}}>{quickProject.description}</div>}
             <div style={{marginBottom:12}}>
               <div style={{fontSize:10,fontWeight:700,letterSpacing:1,color:'#C8973A',marginBottom:5}}>MILESTONES</div>
-              {pms.length===0&&<div style={{fontSize:11,color:'#7A8FA6',fontStyle:'italic'}}>None yet.</div>}
+              {pms.length===0&&<div style={{fontSize:11,color:'#7A8FA6',fontStyle:'italic',marginBottom:4}}>None yet.</div>}
               {pms.map((m:any)=>{
                 const clr=m.completed?'#27AE60':(+new Date(m.date+'T12:00:00')<Date.now()?'#E74C3C':'#C8973A')
                 return(
                   <div key={m.id} style={{display:'flex',alignItems:'center',gap:8,fontSize:11,marginBottom:4}}>
+                    <input type="checkbox" checked={!!m.completed} onChange={()=>qpToggleMs(m)} style={{cursor:'pointer'}}/>
                     <span style={{color:clr,fontWeight:700}}>{m.completed?'✓':'◇'}</span>
-                    <span style={{color:'#F4F6F8'}}>{m.name}</span>
+                    <span style={{color:m.completed?'#7A8FA6':'#F4F6F8',textDecoration:m.completed?'line-through':'none'}}>{m.name}</span>
                     <span style={{color:'#7A8FA6',marginLeft:'auto'}}>{m.date}</span>
                   </div>
                 )
               })}
+              <div style={{display:'flex',gap:6,marginTop:6}}>
+                <input placeholder="New milestone..." value={qpMsName} onChange={e=>setQpMsName(e.target.value)}
+                  style={{flex:1,background:'#0D1B2A',border:'1px solid #243447',borderRadius:6,color:'#F4F6F8',fontSize:11,padding:'5px 8px'}}/>
+                <input type="date" value={qpMsDate} onChange={e=>setQpMsDate(e.target.value)}
+                  style={{background:'#0D1B2A',border:'1px solid #243447',borderRadius:6,color:'#F4F6F8',fontSize:11,padding:'5px 8px'}}/>
+                <button onClick={qpAddMs} disabled={!qpMsName.trim()||!qpMsDate} style={{background:'#C8973A',border:'none',borderRadius:6,color:'#0D1B2A',fontSize:11,fontWeight:700,padding:'5px 12px',cursor:'pointer',opacity:!qpMsName.trim()||!qpMsDate?0.5:1}}>+ Add</button>
+              </div>
             </div>
-            {onOpenProject&&(
-              <button onClick={()=>{setQuickProject(null);onOpenProject(quickProject)}}
-                style={{width:'100%',background:'#1E3048',border:'1px solid #243447',borderRadius:6,color:'#5DADE2',fontSize:11,fontWeight:700,padding:'8px',cursor:'pointer'}}>
-                Full Details → (budget, CCRs, tasks)
-              </button>
-            )}
+            {(()=>{
+              const pTasks=tasks.filter((t:any)=>t.project_id===quickProject.id&&!t.done).sort((a:any,b:any)=>(a.due_date||'9999')<(b.due_date||'9999')?-1:1)
+              return(
+                <div style={{marginBottom:12}}>
+                  <div style={{fontSize:10,fontWeight:700,letterSpacing:1,color:'#C8973A',marginBottom:5}}>☑ MY TASKS</div>
+                  {pTasks.length===0&&<div style={{fontSize:11,color:'#7A8FA6',fontStyle:'italic',marginBottom:4}}>No open tasks</div>}
+                  {pTasks.map((t:any)=>{
+                    const overdue=t.due_date&&+new Date(t.due_date+'T12:00:00')<Date.now()
+                    return(
+                      <div key={t.id} style={{display:'flex',alignItems:'center',gap:7,fontSize:11,marginBottom:3}}>
+                        <input type="checkbox" checked={false} onChange={()=>toggleProjectTask(setTasks,t)} style={{cursor:'pointer'}}/>
+                        <span style={{color:'#F4F6F8',flex:1}}>{t.title}</span>
+                        {t.due_date&&<span style={{color:overdue?'#E74C3C':'#C8973A',fontWeight:700,fontSize:10}}>{overdue?'⚠ ':''}{t.due_date}</span>}
+                        <button onClick={()=>deleteProjectTask(setTasks,t)} style={{background:'none',border:'none',color:'#3A4A5E',fontSize:11,cursor:'pointer',padding:0}}>✕</button>
+                      </div>
+                    )
+                  })}
+                  <div style={{display:'flex',gap:6,marginTop:5}}>
+                    <input placeholder="New task..." value={qpMvTitle} onChange={e=>setQpMvTitle(e.target.value)} onKeyDown={e=>{if(e.key==='Enter')qpSubmitTask()}}
+                      style={{flex:1,background:'#0D1B2A',border:'1px solid #243447',borderRadius:6,color:'#F4F6F8',fontSize:11,padding:'5px 8px'}}/>
+                    <input type="date" value={qpMvDate} onChange={e=>setQpMvDate(e.target.value)} style={{background:'#0D1B2A',border:'1px solid #243447',borderRadius:6,color:'#F4F6F8',fontSize:11,padding:'5px 8px'}}/>
+                    <button onClick={qpSubmitTask} disabled={!qpMvTitle.trim()} style={{background:'#C8973A',border:'none',borderRadius:6,color:'#0D1B2A',fontSize:11,fontWeight:700,padding:'5px 12px',cursor:'pointer',opacity:!qpMvTitle.trim()?0.5:1}}>+ Add</button>
+                  </div>
+                </div>
+              )
+            })()}
+            {(()=>{
+              const doneP=pis.filter((i:any)=>i.status==='Done')
+              const committedList=pis.filter((i:any)=>i.status!=='Done'&&i.start_date&&i.end_date)
+              const uncommittedP=pis.filter((i:any)=>i.status!=='Done'&&!(i.start_date&&i.end_date))
+              const committedI=(i:any)=>!!(i.start_date&&i.end_date)
+              const row=(i:any)=>(
+                <div key={i.id} style={{display:'flex',alignItems:'center',gap:8,fontSize:11,marginBottom:3}}>
+                  <span style={{color:'#7A8FA6',fontFamily:'monospace',fontSize:10,flexShrink:0}}>{i.item_id}</span>
+                  <span style={{color:'#F4F6F8',flex:1}}>{rt(i.request_type)} {i.name}</span>
+                  <select value={i.status||''} onChange={e=>applyItemStatus(items,setItems,i.id,e.target.value)}
+                    style={{background:'#0D1B2A',border:'1px solid #243447',borderRadius:4,color:sc(i.status),fontSize:10,padding:'1px 4px',cursor:'pointer',fontFamily:'inherit',flexShrink:0}}>
+                    {statusesFor(spaceOf(i)).map((st:string)=><option key={st} value={st}>{st}</option>)}
+                  </select>
+                  {i.end_date&&<span style={{color:'#7A8FA6',fontSize:10,flexShrink:0}}>{i.end_date}</span>}
+                  {committedI(i)
+                    ?<button onClick={()=>qpUncommitItem(i)} title="Uncommit — clear dates, return to backlog" style={{background:'none',border:'1px solid rgba(231,76,60,0.4)',borderRadius:4,color:'#E74C3C',fontSize:9,fontWeight:700,padding:'1px 7px',cursor:'pointer',flexShrink:0}}>✕ Uncommit</button>
+                    :<button onClick={()=>qpCommitItem(i)} title="Commit — set dates to the project timeline" style={{background:'none',border:'1px solid rgba(39,174,96,0.4)',borderRadius:4,color:'#27AE60',fontSize:9,fontWeight:700,padding:'1px 7px',cursor:'pointer',flexShrink:0}}>✓ Commit</button>}
+                </div>
+              )
+              const rowWithCommit=(i:any)=>(
+                <div key={i.id}>
+                  {row(i)}
+                  {qpMcId===i.id&&(
+                    <div style={{display:'flex',gap:5,alignItems:'center',margin:'2px 0 6px',padding:'5px 7px',border:'1px solid #27AE60',borderRadius:6,background:'rgba(39,174,96,0.06)',flexWrap:'wrap' as const}}>
+                      <span style={{fontSize:9,color:'#27AE60',fontWeight:700}}>{quickProject.ongoing?'∞ project — set item dates:':'Project undated — set item dates:'}</span>
+                      <input type="date" value={qpMcStart} onChange={e=>setQpMcStart(e.target.value)} style={{background:'#0D1B2A',border:'1px solid #243447',borderRadius:4,color:'#F4F6F8',fontSize:10,padding:'2px 5px'}}/>
+                      <span style={{color:'#7A8FA6',fontSize:10}}>→</span>
+                      <input type="date" value={qpMcEnd} onChange={e=>setQpMcEnd(e.target.value)} style={{background:'#0D1B2A',border:'1px solid #243447',borderRadius:4,color:'#F4F6F8',fontSize:10,padding:'2px 5px'}}/>
+                      <button onClick={qpConfirmCommit} style={{background:'#27AE60',border:'none',borderRadius:4,color:'#fff',fontSize:9,fontWeight:700,padding:'3px 9px',cursor:'pointer'}}>✓ Commit</button>
+                      <button onClick={()=>setQpMcId(null)} style={{background:'none',border:'1px solid #243447',borderRadius:4,color:'#7A8FA6',fontSize:9,padding:'3px 7px',cursor:'pointer'}}>Cancel</button>
+                    </div>
+                  )}
+                </div>
+              )
+              return(<>
+                {committedList.length>0&&(
+                  <div style={{marginBottom:12}}>
+                    <div style={{fontSize:10,fontWeight:700,letterSpacing:1,color:'#27AE60',marginBottom:5}}>✓ COMMITTED ({committedList.length})</div>
+                    {[...committedList].sort((a:any,b:any)=>a.end_date<b.end_date?-1:1).map(row)}
+                  </div>
+                )}
+                {uncommittedP.length>0&&(
+                  <div style={{marginBottom:12}}>
+                    <div style={{fontSize:10,fontWeight:700,letterSpacing:1,color:'#C8973A',marginBottom:5}}>◌ NOT COMMITTED ({uncommittedP.length})</div>
+                    {uncommittedP.map(rowWithCommit)}
+                  </div>
+                )}
+                {doneP.length>0&&(
+                  <div style={{marginBottom:12}}>
+                    <div style={{fontSize:10,fontWeight:700,letterSpacing:1,color:'#16A085',marginBottom:5}}>✓ DONE ({doneP.length})</div>
+                    {doneP.map((i:any)=>(
+                      <div key={i.id} style={{display:'flex',alignItems:'center',gap:8,fontSize:11,marginBottom:3,opacity:0.7}}>
+                        <span style={{color:'#7A8FA6',fontFamily:'monospace',fontSize:10,flexShrink:0}}>{i.item_id}</span>
+                        <span style={{color:'#9AABBC',flex:1,textDecoration:'line-through',textDecorationColor:'#3A4A5E'}}>{rt(i.request_type)} {i.name}</span>
+                        <select value={i.status||''} onChange={e=>applyItemStatus(items,setItems,i.id,e.target.value)}
+                          style={{background:'#0D1B2A',border:'1px solid #243447',borderRadius:4,color:'#16A085',fontSize:10,padding:'1px 4px',cursor:'pointer',fontFamily:'inherit',flexShrink:0}}>
+                          {statusesFor(spaceOf(i)).map((st:string)=><option key={st} value={st}>{st}</option>)}
+                        </select>
+                        {i.end_date&&<span style={{color:'#7A8FA6',fontSize:10,flexShrink:0}}>{i.end_date}</span>}
+                      </div>
+                    ))}
+                  </div>
+                )}
+              </>)
+            })()}
+            <div style={{borderTop:'1px solid #243447',marginTop:14,paddingTop:10}}>
+              <div style={{fontSize:10,fontWeight:700,letterSpacing:1,color:'#7A8FA6',marginBottom:6}}>+ ADD ITEM TO THIS PROJECT</div>
+              <div style={{display:'flex',gap:6}}>
+                <input placeholder="New item name..." value={qpQiName} onChange={e=>setQpQiName(e.target.value)} onKeyDown={e=>{if(e.key==='Enter')qpSubmitQuickItem()}}
+                  style={{flex:1,background:'#0D1B2A',border:'1px solid #243447',borderRadius:6,color:'#F4F6F8',fontSize:11,padding:'5px 8px'}}/>
+                <select value={qpQiPri} onChange={e=>setQpQiPri(e.target.value)} style={{background:'#0D1B2A',border:'1px solid #243447',borderRadius:6,color:'#F4F6F8',fontSize:11,padding:'5px 6px'}}>
+                  {PRIORITIES.map(p=><option key={p} value={p}>{p}</option>)}
+                </select>
+                <select value={qpQiType} onChange={e=>setQpQiType(e.target.value)} style={{background:'#0D1B2A',border:'1px solid #243447',borderRadius:6,color:'#F4F6F8',fontSize:11,padding:'5px 6px'}}>
+                  {REQUEST_TYPES.map(t=><option key={t} value={t}>{rt(t)} {t}</option>)}
+                </select>
+                <button onClick={qpSubmitQuickItem} disabled={!qpQiName.trim()} style={{background:'#C8973A',border:'none',borderRadius:6,color:'#0D1B2A',fontSize:11,fontWeight:700,padding:'5px 12px',cursor:'pointer',opacity:!qpQiName.trim()?0.5:1}}>+ Add</button>
+              </div>
+              <div style={{fontSize:9,color:'#5C6E80',marginTop:4}}>Lands uncommitted with defaults (New · M · {'{'}team from project{'}'}) — refine in the Backlog anytime</div>
+            </div>
           </div>
         </div>
         )
@@ -8021,7 +8193,7 @@ useEffect(()=>{
       <div style={{flex:1,overflow:'hidden'}}>
         {activeTab==='backlog'&&<Backlog items={sItems} setItems={setSItems} projects={sProjects} setProjects={setSProjects} space={space} ccrs={ccrs} ccrItems={ccrItems} setCcrItems={setCcrItems}/>}
         {activeTab==='projects'&&<Projects items={sItems} setItems={setSItems} projects={sProjects} setProjects={setSProjects} milestones={sMilestones} setMilestones={setSMilestones} tasks={tasks} setTasks={setTasks} space={space} ccrs={ccrs} ccrItems={ccrItems} roles={roles} people={people} projectRoles={projectRoles} setProjectRoles={setProjectRoles} itemAssignments={itemAssignments} setItemAssignments={setItemAssignments} sprints={sprints} selectedProject={selectedProject} setSelectedProject={setSelectedProject}/>}
-{activeTab==='roadmap'&&<Roadmap items={sItems} setItems={setSItems} projects={sProjects} setProjects={setSProjects} milestones={sMilestones} sprints={sprints} itemAssignments={itemAssignments} projectRoles={projectRoles} people={people} roles={roles} onOpenProject={(p:any)=>{setSelectedProject(p);setActiveTab('projects')}}/>}
+{activeTab==='roadmap'&&<Roadmap items={sItems} setItems={setSItems} projects={sProjects} setProjects={setSProjects} milestones={sMilestones} setMilestones={setSMilestones} tasks={tasks} setTasks={setTasks} sprints={sprints} itemAssignments={itemAssignments} projectRoles={projectRoles} people={people} roles={roles} onOpenProject={(p:any)=>{setSelectedProject(p);setActiveTab('projects')}}/>}
         {activeTab==='teams'&&<Teams items={sItems} projects={sProjects} milestones={sMilestones} ccrs={ccrs} ccrItems={ccrItems}/>}
         {activeTab==='desk'&&<Desk items={items} setItems={setItems} projects={projects} setProjects={setProjects} milestones={milestones} setMilestones={setMilestones} tasks={tasks} setTasks={setTasks} ccrs={ccrs} setCcrs={setCcrs} ccrItems={ccrItems} setCcrItems={setCcrItems} space={space} openAssistant={(t:string)=>{setAsstSeed(t);setAsstOpen(true)}}/>}
         <Assistant open={asstOpen} setOpen={setAsstOpen} seed={asstSeed} setSeed={setAsstSeed} items={items} setItems={setItems} projects={projects} setProjects={setProjects} milestones={milestones} tasks={tasks} setTasks={setTasks} ccrs={ccrs} setCcrs={setCcrs} ccrItems={ccrItems} setCcrItems={setCcrItems} space={space}/>
