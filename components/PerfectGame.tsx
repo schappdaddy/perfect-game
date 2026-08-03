@@ -2841,6 +2841,28 @@ function Roadmap({items,setItems,projects,setProjects,milestones,sprints=[],item
   const [colorBy,setColorBy]=useState('status')
   const [ft,setFt]=useState('All')
   const roadmapTeams=[...new Set([...TEAMS,...people.map((p:any)=>p.team).filter(Boolean),...projects.map((p:any)=>p.team).filter(Boolean)])]
+  // In-place project quick-view — same RAG/Status/Priority/Team/Effort/date editing as
+  // the Desk quick-view modal, so clicking a project on Roadmap edits it right there
+  // instead of navigating away. A "Full Details →" link inside it still reaches the
+  // complete ProjectDetail panel (budget, CCRs, tasks) for anything deeper.
+  const [quickProject,setQuickProject]=useState<any>(null)
+  async function updateQuickProject(fields:any){
+    if(!quickProject)return
+    const wasTerminal=PROJECT_TERMINAL.includes(quickProject.status)
+    setProjects((prev:any[])=>prev.map((p:any)=>p.id===quickProject.id?{...p,...fields}:p))
+    setQuickProject((p:any)=>({...p,...fields}))
+    const{error}=await supabase.from('projects').update(fields).eq('id',quickProject.id)
+    if(error){alert('Failed to update project: '+error.message);return}
+    if(fields.status&&PROJECT_TERMINAL.includes(fields.status)&&!wasTerminal){
+      const open=items.filter((i:any)=>i.parent_project===quickProject.name&&!ITEM_TERMINAL.includes(i.status))
+      if(open.length){
+        const home=spaceOf(quickProject)==='home'
+        const itemStatus=fields.status==='Cancelled'?(home?"Won't Do":'Will Not Implement'):'Done'
+        const yes=confirm(`"${quickProject.name}" is now ${fields.status}. Also mark its ${open.length} open item${open.length!==1?'s':''} as ${itemStatus}?\n\nOK — close the items (they move to the Done tab)\nCancel — leave them in the backlog`)
+        if(yes)await closeItemsForProject(items,setItems,quickProject.name,itemStatus)
+      }
+    }
+  }
   const [zoom,setZoom]=useState(1)
   const [editing,setEditing]=useState(null)
   const [editForm,setEditForm]=useState({name:'',start_date:'',end_date:'',roadmap_color:'',status:'',priority:'',effort:''})
@@ -3337,7 +3359,7 @@ function Roadmap({items,setItems,projects,setProjects,milestones,sprints=[],item
                       </button>
                       <div style={{overflow:'hidden',flex:1}}>
                         <div style={{display:'flex',alignItems:'center',gap:5,marginBottom:2}}>
-                          <span onClick={()=>onOpenProject?.(group)} title="Click to open this project's details" style={{fontSize:12,fontWeight:700,color:'#F4F6F8',overflow:'hidden',whiteSpace:'nowrap' as const,textOverflow:'ellipsis',maxWidth:110,cursor:onOpenProject?'pointer':undefined}}>{group.name}{group.ongoing?' ∞':''}</span>
+                          <span onClick={()=>setQuickProject(group)} title="Click to edit this project" style={{fontSize:12,fontWeight:700,color:'#F4F6F8',overflow:'hidden',whiteSpace:'nowrap' as const,textOverflow:'ellipsis',maxWidth:110,cursor:'pointer'}}>{group.name}{group.ongoing?' ∞':''}</span>
                           <span style={{fontSize:10,color:rc,fontWeight:700,flexShrink:0}}>{group.rag==='Green'?'🟢':group.rag==='Amber'?'🟡':group.rag==='Red'?'🔴':'⚪'}</span>
                           {group.violations.length>0&&<span style={{fontSize:9,color:'#E74C3C',flexShrink:0}}>⚠️</span>}
                         </div>
@@ -3847,6 +3869,85 @@ function Roadmap({items,setItems,projects,setProjects,milestones,sprints=[],item
           </div>
         </div>
       )}
+      {quickProject&&(()=>{
+        const pms=milestones.filter((m:any)=>m.project_id===quickProject.id).sort((a:any,b:any)=>a.date<b.date?-1:1)
+        const pis=items.filter((i:any)=>i.parent_project===quickProject.name)
+        const committedN=pis.filter((i:any)=>i.status!=='Done'&&i.start_date&&i.end_date).length
+        return(
+        <div onClick={()=>setQuickProject(null)} style={{position:'fixed',inset:0,background:'rgba(0,0,0,0.6)',zIndex:250,display:'flex',alignItems:'center',justifyContent:'center'}}>
+          <div onClick={e=>e.stopPropagation()} style={{background:'#162436',border:'1px solid #243447',borderRadius:12,width:520,maxWidth:'94vw',maxHeight:'86vh',overflowY:'auto',padding:16,boxSizing:'border-box' as const}}>
+            <div style={{display:'flex',alignItems:'center',gap:10,marginBottom:8}}>
+              <span style={{width:12,height:12,borderRadius:3,background:quickProject.color||'#3A4A5E'}}/>
+              <span style={{fontSize:16,fontWeight:800,color:'#F4F6F8'}}>{quickProject.name}</span>
+              <div style={{display:'flex',gap:3}}>
+                {(['Green','Amber','Red','—'] as string[]).map(r=>{
+                  const active=quickProject.rag===r||(!quickProject.rag&&r==='—')
+                  const clr=r==='Green'?'#27AE60':r==='Amber'?'#E8B95A':r==='Red'?'#E74C3C':'#7A8FA6'
+                  return(
+                    <button key={r} onClick={()=>updateQuickProject({rag:r==='—'?null:r})} title={r==='—'?'No RAG':r}
+                      style={{background:active?clr+'33':'transparent',border:'1px solid '+(active?clr:'#243447'),borderRadius:4,padding:'1px 6px',fontSize:10,cursor:'pointer',lineHeight:1.5}}>
+                      {r==='Green'?'🟢':r==='Amber'?'🟡':r==='Red'?'🔴':'⚪'}
+                    </button>
+                  )
+                })}
+              </div>
+              <button onClick={()=>setQuickProject(null)} style={{marginLeft:'auto',background:'none',border:'none',color:'#7A8FA6',fontSize:18,cursor:'pointer',lineHeight:1}}>✕</button>
+            </div>
+            <div style={{display:'flex',gap:6,flexWrap:'wrap' as const,marginBottom:10,alignItems:'center'}}>
+              <select value={quickProject.status||''} onChange={e=>updateQuickProject({status:e.target.value})} title="Status"
+                style={{background:'#1E3048',border:'1px solid #243447',borderRadius:4,color:'#F4F6F8',fontSize:10,fontWeight:600,padding:'3px 6px',cursor:'pointer'}}>
+                {projectStatusesFor(spaceOf(quickProject)).map((st:string)=><option key={st} value={st}>{st}</option>)}
+              </select>
+              <select value={quickProject.priority||''} onChange={e=>updateQuickProject({priority:e.target.value})} title="Priority"
+                style={{background:'#1E3048',border:'1px solid #243447',borderRadius:4,color:'#F4F6F8',fontSize:10,fontWeight:600,padding:'3px 6px',cursor:'pointer'}}>
+                {PRIORITIES.map(p=><option key={p} value={p}>{p}</option>)}
+              </select>
+              {spaceOf(quickProject)==='work'&&(
+                <select value={quickProject.team||''} onChange={e=>updateQuickProject({team:e.target.value})} title="Team"
+                  style={{background:'#1E3048',border:'1px solid #243447',borderRadius:4,color:'#F4F6F8',fontSize:10,fontWeight:600,padding:'3px 6px',cursor:'pointer'}}>
+                  {roadmapTeams.map((t:string)=><option key={t} value={t}>{t}</option>)}
+                </select>
+              )}
+              <select value={quickProject.effort||''} onChange={e=>updateQuickProject({effort:e.target.value})} title="Effort — sets the default per-person budget allocation %"
+                style={{background:'#1E3048',border:'1px solid #243447',borderRadius:4,color:'#F4F6F8',fontSize:10,fontWeight:600,padding:'3px 6px',cursor:'pointer'}}>
+                <option value="">Effort…</option>
+                {EFFORTS.map(e=><option key={e} value={e}>{e} ({EFFORT_ALLOC[e]}%)</option>)}
+              </select>
+              <input type="date" value={quickProject.start_date||''} onChange={e=>updateQuickProject({start_date:e.target.value||null})} title="Start date"
+                style={{background:'#1E3048',border:'1px solid #243447',borderRadius:4,color:'#F4F6F8',fontSize:10,padding:'2px 5px'}}/>
+              <span style={{color:'#7A8FA6',fontSize:10}}>→</span>
+              <input type="date" value={quickProject.end_date||''} disabled={!!quickProject.ongoing} onChange={e=>updateQuickProject({end_date:e.target.value||null})} title="End date"
+                style={{background:'#1E3048',border:'1px solid #243447',borderRadius:4,color:'#F4F6F8',fontSize:10,padding:'2px 5px',opacity:quickProject.ongoing?0.4:1}}/>
+              <label style={{display:'flex',alignItems:'center',gap:4,fontSize:10,color:'#7A8FA6',cursor:'pointer'}} title="Ongoing — no fixed end date">
+                <input type="checkbox" checked={!!quickProject.ongoing} onChange={e=>updateQuickProject({ongoing:e.target.checked,...(e.target.checked?{end_date:null}:{})})}/>∞
+              </label>
+              <span style={{background:'#1E3048',border:'1px solid #243447',borderRadius:4,padding:'3px 8px',fontSize:10,color:'#7A8FA6'}}>Items: <span style={{color:'#F4F6F8',fontWeight:600}}>{committedN} committed / {pis.length}</span></span>
+            </div>
+            {quickProject.description&&<div style={{fontSize:12,color:'#B8C4D0',lineHeight:1.5,marginBottom:12}}>{quickProject.description}</div>}
+            <div style={{marginBottom:12}}>
+              <div style={{fontSize:10,fontWeight:700,letterSpacing:1,color:'#C8973A',marginBottom:5}}>MILESTONES</div>
+              {pms.length===0&&<div style={{fontSize:11,color:'#7A8FA6',fontStyle:'italic'}}>None yet.</div>}
+              {pms.map((m:any)=>{
+                const clr=m.completed?'#27AE60':(+new Date(m.date+'T12:00:00')<Date.now()?'#E74C3C':'#C8973A')
+                return(
+                  <div key={m.id} style={{display:'flex',alignItems:'center',gap:8,fontSize:11,marginBottom:4}}>
+                    <span style={{color:clr,fontWeight:700}}>{m.completed?'✓':'◇'}</span>
+                    <span style={{color:'#F4F6F8'}}>{m.name}</span>
+                    <span style={{color:'#7A8FA6',marginLeft:'auto'}}>{m.date}</span>
+                  </div>
+                )
+              })}
+            </div>
+            {onOpenProject&&(
+              <button onClick={()=>{setQuickProject(null);onOpenProject(quickProject)}}
+                style={{width:'100%',background:'#1E3048',border:'1px solid #243447',borderRadius:6,color:'#5DADE2',fontSize:11,fontWeight:700,padding:'8px',cursor:'pointer'}}>
+                Full Details → (budget, CCRs, tasks)
+              </button>
+            )}
+          </div>
+        </div>
+        )
+      })()}
     </div>
   )
 }
