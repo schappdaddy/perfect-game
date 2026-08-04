@@ -2295,6 +2295,37 @@ const sorted=items.filter(i=>!isItemDone(i)).sort((a,b)=>{
     setItems(prev=>prev.map(i=>{const u=changed.find(u=>u.id===i.id);return u?{...i,committed_priority:u.committed_priority}:i}))
     Promise.all(changed.map(u=>supabase.from('items').update({committed_priority:u.committed_priority}).eq('id',u.id))).then()
   }
+  // Commit / Uncommit from the Backlog row itself — same behavior as everywhere else:
+  // if the item's parent project has real dates, commit straight to them; if the
+  // project is undated or ∞, open an inline picker instead of guessing dates for you.
+  const [bcId,setBcId]=useState<any>(null)
+  const [bcStart,setBcStart]=useState('')
+  const [bcEnd,setBcEnd]=useState('')
+  async function commitBacklogItem(item:any){
+    const proj=projects.find((p:any)=>p.name===item.parent_project)
+    if(proj&&proj.start_date&&proj.end_date&&!proj.ongoing){
+      const upd={start_date:proj.start_date,end_date:proj.end_date}
+      setItems((prev:any[])=>prev.map((i:any)=>i.id===item.id?{...i,...upd}:i))
+      await supabase.from('items').update(upd).eq('id',item.id)
+      return
+    }
+    const today=new Date();const iso=(d:Date)=>`${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,'0')}-${String(d.getDate()).padStart(2,'0')}`
+    setBcStart(proj?.start_date&&proj.start_date>iso(today)?proj.start_date:iso(today))
+    setBcEnd(iso(new Date(+today+30*86400000)))
+    setBcId(item.id)
+  }
+  async function confirmBacklogCommit(){
+    if(!bcId||!bcStart||!bcEnd)return
+    if(bcEnd<bcStart){alert('End date is before start date.');return}
+    const upd={start_date:bcStart,end_date:bcEnd}
+    setItems((prev:any[])=>prev.map((i:any)=>i.id===bcId?{...i,...upd}:i))
+    setBcId(null)
+    await supabase.from('items').update(upd).eq('id',bcId)
+  }
+  async function uncommitBacklogItem(item:any){
+    setItems((prev:any[])=>prev.map((i:any)=>i.id===item.id?{...i,start_date:null,end_date:null}:i))
+    await supabase.from('items').update({start_date:null,end_date:null}).eq('id',item.id)
+  }
 
 
   const filtered=sorted.filter(item=>{
@@ -2633,13 +2664,28 @@ const sorted=items.filter(i=>!isItemDone(i)).sort((a,b)=>{
                     <td style={TD}>
                       <div style={{display:'flex',alignItems:'center',gap:6}}>
                         <div style={{fontSize:12,color:'#F4F6F8',fontWeight:isSel?700:400}}>{rt(item.request_type)} {item.name}</div>
-                        {item.start_date&&item.end_date&&(
-                          <span title={`Committed: ${item.start_date} → ${item.end_date}`}
-                            style={{background:'rgba(39,174,96,0.15)',color:'#27AE60',border:'1px solid rgba(39,174,96,0.4)',borderRadius:4,padding:'1px 6px',fontSize:9,fontWeight:700,flexShrink:0}}>
-                            ✓ committed
-                          </span>
-                        )}
+                        {item.start_date&&item.end_date
+                          ?<span onClick={e=>{e.stopPropagation();uncommitBacklogItem(item)}} title={`Committed: ${item.start_date} → ${item.end_date} — click to uncommit`}
+                              style={{background:'rgba(39,174,96,0.15)',color:'#27AE60',border:'1px solid rgba(39,174,96,0.4)',borderRadius:4,padding:'1px 6px',fontSize:9,fontWeight:700,flexShrink:0,cursor:'pointer'}}>
+                              ✓ committed
+                            </span>
+                          :!ITEM_TERMINAL.includes(item.status)&&(
+                            <span onClick={e=>{e.stopPropagation();commitBacklogItem(item)}} title="Commit — set real dates, either from the project's timeline or your own"
+                              style={{background:'none',color:'#7A8FA6',border:'1px dashed #243447',borderRadius:4,padding:'1px 6px',fontSize:9,fontWeight:700,flexShrink:0,cursor:'pointer'}}>
+                              + Commit
+                            </span>
+                          )}
                       </div>
+                      {bcId===item.id&&(
+                        <div onClick={e=>e.stopPropagation()} style={{display:'flex',gap:5,alignItems:'center',margin:'4px 0',padding:'5px 7px',border:'1px solid #27AE60',borderRadius:6,background:'rgba(39,174,96,0.06)',flexWrap:'wrap' as const}}>
+                          <span style={{fontSize:9,color:'#27AE60',fontWeight:700}}>Set dates:</span>
+                          <input type="date" value={bcStart} onChange={e=>setBcStart(e.target.value)} style={{background:'#0D1B2A',border:'1px solid #243447',borderRadius:4,color:'#F4F6F8',fontSize:10,padding:'2px 5px'}}/>
+                          <span style={{color:'#7A8FA6',fontSize:10}}>→</span>
+                          <input type="date" value={bcEnd} onChange={e=>setBcEnd(e.target.value)} style={{background:'#0D1B2A',border:'1px solid #243447',borderRadius:4,color:'#F4F6F8',fontSize:10,padding:'2px 5px'}}/>
+                          <button onClick={confirmBacklogCommit} style={{background:'#27AE60',border:'none',borderRadius:4,color:'#fff',fontSize:9,fontWeight:700,padding:'3px 9px',cursor:'pointer'}}>✓ Commit</button>
+                          <button onClick={()=>setBcId(null)} style={{background:'none',border:'1px solid #243447',borderRadius:4,color:'#7A8FA6',fontSize:9,padding:'3px 7px',cursor:'pointer'}}>Cancel</button>
+                        </div>
+                      )}
                       {item.description&&<div style={{color:'#7A8FA6',fontSize:10,marginTop:1,maxWidth:220,overflow:'hidden',whiteSpace:'nowrap',textOverflow:'ellipsis'}}>{item.description}</div>}
                     </td>
                     <td style={TD}><span style={{background:pclr.bg,color:pclr.text,borderRadius:4,padding:'2px 8px',fontSize:10,fontWeight:700,whiteSpace:'nowrap' as const}}>{item.priority}</span></td>
