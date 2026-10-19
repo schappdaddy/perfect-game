@@ -20,6 +20,7 @@ const STATE_LABEL:any={planned:'Planned',proposed:'Proposed',bau:'Ongoing BAU'}
 const TRACK_COLORS=['#5B7A99','#E07B2A','#27AE60','#8E44AD','#C8973A','#2E86AB']
 
 const pad=(n:number)=>String(n).padStart(2,'0')
+const CLIP={overflow:'hidden',whiteSpace:'nowrap' as const,textOverflow:'ellipsis',minWidth:0}
 const daysIn=(y:number,m:number)=>new Date(y,m,0).getDate() // m is 1-12
 function parts(iso:string){const[y,m,d]=iso.split('-').map(Number);return{y,m,d}}
 function addMonths(iso:string,n:number){
@@ -255,10 +256,10 @@ export default function StrategyTab({projects,setProjects,strategies,setStrategi
     rows.push({kind:'track',track:t,h:24})
     rows.push({kind:'goals',track:t,h:28})
     onTrack(t).forEach(p=>rows.push({kind:'project',p,h:ROW_H}))
-    if(!onTrack(t).length)rows.push({kind:'hint',text:'No projects on this track yet. Add one from the panel on the right.',h:ROW_H})
+    if(!onTrack(t).length)rows.push({kind:'hint',text:'No projects yet. Add them in Strategy settings.',h:ROW_H})
   })
   if(untracked.length){rows.push({kind:'band',label:'IN-FLIGHT WORK, NOT ON A TRACK',color:'#3A4A5E',h:22});untracked.forEach(p=>rows.push({kind:'project',p,h:ROW_H}))}
-  if(bau.length){rows.push({kind:'band',label:`ONGOING DELIVERABLES (${strategy.bau_pct}% BAU SHARE)`,color:'#3A4A5E',h:22});bau.forEach(p=>rows.push({kind:'project',p,h:ROW_H}))}
+  if(bau.length){rows.push({kind:'band',label:`ONGOING BAU (${strategy.bau_pct}% SHARE)`,color:'#3A4A5E',h:22});bau.forEach(p=>rows.push({kind:'project',p,h:ROW_H}))}
   rows.push({kind:'band',label:`TEAM LOAD VS ${limit}% AVAILABLE`,color:'#243447',h:22})
   loads.forEach(l=>rows.push({kind:'load',load:l,h:ROW_H}))
   let yAcc=0
@@ -338,7 +339,7 @@ export default function StrategyTab({projects,setProjects,strategies,setStrategi
             {/* Header: fiscal years and quarters */}
             <div style={{position:'sticky',top:0,zIndex:5,background:'#162436',borderBottom:'1px solid #243447'}}>
               <div style={{display:'flex'}}>
-                <div style={{...cellLabel,background:'#162436',zIndex:6,padding:'6px 12px',fontSize:10,color:'#7A8FA6',letterSpacing:1}}>FISCAL YEAR (APR–MAR)</div>
+                <div style={{...cellLabel,background:'#162436',zIndex:6,padding:'6px 12px',fontSize:10,color:'#7A8FA6',letterSpacing:1,display:'flex',alignItems:'center'}}><span title="Fiscal year runs April to March" style={CLIP}>FISCAL YEAR (APR–MAR)</span></div>
                 {fys.map(fy=><div key={fy} style={{width:12*MONTH_W,flexShrink:0,textAlign:'center' as const,padding:'5px 0',fontSize:12,fontWeight:800,color:'#F4F6F8',borderRight:'1px solid #3A4A5E',background:'#1E3048'}}>FY{String(fy).slice(-2)}</div>)}
               </div>
               <div style={{display:'flex'}}>
@@ -370,14 +371,14 @@ export default function StrategyTab({projects,setProjects,strategies,setStrategi
                 if(r.kind==='track')return(
                   <div key={ri} style={{display:'flex',height:r.h,position:'relative',zIndex:1}}>
                     <div style={{...cellLabel,background:r.track.color,borderRight:'none',padding:'0 12px',display:'flex',alignItems:'center',fontSize:11,fontWeight:800,color:'#0D1B2A',letterSpacing:1}}>
-                      {r.track.name.toUpperCase()} TRACK
+                      <span title={`${r.track.name} track`} style={CLIP}>{r.track.name.toUpperCase()}</span>
                     </div>
-                    <div style={{width:TW,background:r.track.color,display:'flex',alignItems:'center',padding:'0 10px',fontSize:11,color:'#0D1B2A',fontWeight:600}}>{r.track.description||''}</div>
+                    <div style={{width:TW,background:r.track.color,display:'flex',alignItems:'center',padding:'0 10px',fontSize:11,color:'#0D1B2A',fontWeight:600}}><span style={{...CLIP,position:'sticky',left:LABEL_W+10}}>{r.track.description||''}</span></div>
                   </div>
                 )
                 if(r.kind==='goals')return(
                   <div key={ri} style={{display:'flex',height:r.h,position:'relative',zIndex:1,borderBottom:'1px solid #243447'}}>
-                    <div style={{...cellLabel,padding:'0 12px',display:'flex',alignItems:'center',fontSize:10,fontWeight:700,color:r.track.color}}>{r.track.name} goal for each FY</div>
+                    <div style={{...cellLabel,padding:'0 12px',display:'flex',alignItems:'center',fontSize:10,fontWeight:700,color:r.track.color}}><span title={`${r.track.name}: goal for each fiscal year`} style={CLIP}>Goal for each FY</span></div>
                     {fys.map(fy=>{
                       const g=goals.find((x:any)=>x.track_id===r.track.id&&x.fy===fy)
                       const editing=editGoal&&editGoal.track_id===r.track.id&&editGoal.fy===fy
@@ -398,13 +399,13 @@ export default function StrategyTab({projects,setProjects,strategies,setStrategi
                 )
                 if(r.kind==='band')return(
                   <div key={ri} style={{display:'flex',height:r.h,position:'relative',zIndex:1}}>
-                    <div style={{...cellLabel,background:r.color,borderRight:'none',padding:'0 12px',display:'flex',alignItems:'center',fontSize:10,fontWeight:800,color:'#F4F6F8',letterSpacing:1,whiteSpace:'nowrap' as const}}>{r.label}</div>
+                    <div style={{...cellLabel,background:r.color,borderRight:'none',padding:'0 12px',display:'flex',alignItems:'center',fontSize:10,fontWeight:800,color:'#F4F6F8',letterSpacing:1}}><span title={r.label} style={CLIP}>{r.label}</span></div>
                     <div style={{width:TW,background:r.color}}/>
                   </div>
                 )
                 if(r.kind==='hint')return(
                   <div key={ri} style={{display:'flex',height:r.h,position:'relative',zIndex:1}}>
-                    <div style={{...cellLabel,padding:'0 12px',display:'flex',alignItems:'center',fontSize:10,color:'#3A4A5E',fontStyle:'italic'}}>{r.text}</div>
+                    <div style={{...cellLabel,padding:'0 12px',display:'flex',alignItems:'center',fontSize:10,color:'#3A4A5E',fontStyle:'italic'}}><span title={r.text} style={CLIP}>{r.text}</span></div>
                   </div>
                 )
                 if(r.kind==='load')return(
