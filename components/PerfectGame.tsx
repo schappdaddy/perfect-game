@@ -2,6 +2,8 @@
 import { useState, useEffect, useRef, Fragment } from 'react'
 import { supabase } from '../lib/supabase'
 import * as XLSX from 'xlsx'
+import StrategyTab from './StrategyTab'
+import { EpicsSection } from './Epics'
 
 const T = {
   navy:'#0D1B2A',navyMid:'#162436',navyLt:'#1E3048',
@@ -890,7 +892,7 @@ function AssignPicker({available,onAdd}:any){
     </div>
   )
 }
-function ProjectDetail({project,items,setItems,projects,setProjects,milestones,setMilestones,tasks,setTasks,onClose,d,fmt,ccrs=[],ccrItems=[],roles=[],people=[],projectRoles=[],setProjectRoles,itemAssignments=[],setItemAssignments,sprints=[]}:any) {
+function ProjectDetail({project,items,setItems,projects,setProjects,milestones,setMilestones,tasks,setTasks,onClose,d,fmt,ccrs=[],ccrItems=[],roles=[],people=[],projectRoles=[],setProjectRoles,itemAssignments=[],setItemAssignments,sprints=[],epics=[],setEpics}:any) {
   async function updProjectField(fields:any){
     setProjects((prev:any[])=>prev.map(p=>p.id===project.id?{...p,...fields}:p))
     await supabase.from('projects').update(fields).eq('id',project.id)
@@ -1359,6 +1361,9 @@ function ProjectDetail({project,items,setItems,projects,setProjects,milestones,s
           </div>
         </div>
 
+        {/* Epics — group this project's items */}
+        {setEpics&&<EpicsSection project={project} items={items} setItems={setItems} epics={epics} setEpics={setEpics}/>}
+
         {/* Committed items */}
         <div style={{padding:'14px 16px',borderBottom:'1px solid #243447'}}>
           <div style={{fontSize:12,fontWeight:700,color:'#2E86AB',letterSpacing:1,marginBottom:10}}>📅 COMMITTED ({withDates.length})</div>
@@ -1566,7 +1571,7 @@ function ProjectDetail({project,items,setItems,projects,setProjects,milestones,s
     </div>
   )
 }
-function Projects({items,setItems,projects,setProjects,milestones,setMilestones,tasks,setTasks,space,ccrs,ccrItems,roles=[],people=[],projectRoles=[],setProjectRoles,itemAssignments=[],setItemAssignments,sprints=[],selectedProject,setSelectedProject}:{items:any[],setItems:any,projects:any[],setProjects:any,milestones:any[],setMilestones:any,tasks:any[],setTasks:any,space:string,ccrs:any[],ccrItems:any[],roles?:any[],people?:any[],projectRoles?:any[],setProjectRoles?:any,itemAssignments?:any[],setItemAssignments?:any,sprints?:any[],selectedProject:any,setSelectedProject:any}) {
+function Projects({items,setItems,projects,setProjects,milestones,setMilestones,tasks,setTasks,space,ccrs,ccrItems,roles=[],people=[],projectRoles=[],setProjectRoles,itemAssignments=[],setItemAssignments,sprints=[],selectedProject,setSelectedProject,epics=[],setEpics}:{items:any[],setItems:any,projects:any[],setProjects:any,milestones:any[],setMilestones:any,tasks:any[],setTasks:any,space:string,ccrs:any[],ccrItems:any[],roles?:any[],people?:any[],projectRoles?:any[],setProjectRoles?:any,itemAssignments?:any[],setItemAssignments?:any,sprints?:any[],selectedProject:any,setSelectedProject:any,epics?:any[],setEpics?:any}) {
   const mobile=useIsMobile()
   const [adding,setAdding]=useState(false)
   const [editing,setEditing]=useState(null)
@@ -1889,6 +1894,8 @@ function Projects({items,setItems,projects,setProjects,milestones,setMilestones,
       {selectedProject&&(
   <ProjectDetail
     project={projects.find(p=>p.id===selectedProject.id)||selectedProject}
+    epics={epics}
+    setEpics={setEpics}
     items={items}
     setItems={setItems}
     projects={projects}
@@ -2007,7 +2014,7 @@ function PanelField({label,field,type='text',selected,upd}:{label:string,field:s
   )
 }
 
-function Backlog({items,setItems,projects,setProjects,space,ccrs=[],ccrItems=[],setCcrItems}:{items:any[],setItems:any,projects:any[],setProjects:any,space:string,ccrs?:any[],ccrItems?:any[],setCcrItems?:any}) {
+function Backlog({items,setItems,projects,setProjects,space,ccrs=[],ccrItems=[],setCcrItems,epics=[]}:{items:any[],setItems:any,projects:any[],setProjects:any,space:string,ccrs?:any[],ccrItems?:any[],setCcrItems?:any,epics?:any[]}) {
   // CCR membership helpers — the link is a junction row, edited from either side
   const itemCcrLink=(itemId:any)=>{const l=(ccrItems as any[]).find((x:any)=>x.item_id===itemId);return l?{link:l,ccr:(ccrs as any[]).find((c:any)=>c.id===l.ccr_id)}:null}
   async function detachItemCcr(itemId:any){
@@ -2385,7 +2392,9 @@ const sorted=items.filter(i=>!isItemDone(i)).sort((a,b)=>{
       await applyItemStatus(items,setItems,id,val)
       return
     }
-    const extra=field==='vendor_delivery_date'?{vendor_date_changed_at:new Date().toISOString()}:{}
+    const extra:any=field==='vendor_delivery_date'?{vendor_date_changed_at:new Date().toISOString()}:{}
+    // Epics belong to one project — moving an item to another project drops its epic
+    if(field==='parent_project'){const it=items.find(i=>i.id===id);if(it?.parent_project!==val)extra.epic_id=null}
     setItems(items.map(i=>i.id===id?{...i,[field]:val,...extra}:i))
     if(selected?.id===id) setSelected(s=>({...s,[field]:val,...extra}))
     await supabase.from('items').update({[field]:val,...extra}).eq('id',id)
@@ -2760,6 +2769,21 @@ const sorted=items.filter(i=>!isItemDone(i)).sort((a,b)=>{
               <EditableDropdown field="region" value={selected.region} options={regionOpts} setOptions={setRegionOpts} label="Region"/>
               <EditableDropdown field="vendor" value={selected.vendor} options={vendors} setOptions={setVendors} label="Vendor"/>
               <EditableDropdown field="parent_project" value={selected.parent_project} options={parentOpts} setOptions={null} label="Parent Project"/>
+              {(()=>{
+                const proj=projects.find((p:any)=>p.name===selected.parent_project)
+                const opts=proj?(epics as any[]).filter(e=>e.project_id===proj.id):[]
+                return(
+                  <div>
+                    <div style={{fontSize:11,color:'#7A8FA6',marginBottom:4,letterSpacing:0.5}}>EPIC</div>
+                    <select value={opts.some(e=>e.id===selected.epic_id)?selected.epic_id:''} disabled={!proj} onChange={e=>upd(selected.id,'epic_id',e.target.value||null)}
+                      title={proj?(opts.length?'':'This project has no epics yet. Add them from the project panel.'):'Set a parent project first'}
+                      style={{width:'100%',background:'#1E3048',color:'#F4F6F8',border:'1px solid #243447',borderRadius:6,padding:'7px 10px',fontSize:13,cursor:proj?'pointer':'not-allowed',opacity:proj?1:0.5}}>
+                      <option value="">{!proj?'Set a parent project first':opts.length?'No epic':'No epics in this project yet'}</option>
+                      {opts.map(e=><option key={e.id} value={e.id}>{e.name}</option>)}
+                    </select>
+                  </div>
+                )
+              })()}
               <PanelField selected={selected} upd={upd} label="Owner" field="owner"/>
               <PanelField selected={selected} upd={upd} label="Dependency" field="dependency"/>
               <PanelField selected={selected} upd={upd} label="Vendor Delivery Date" field="vendor_delivery_date" type="date"/>
@@ -7768,7 +7792,14 @@ function DoneTab({items,setItems,projects,setProjects,ccrs,ccrItems,space}:{item
 // ─────────────────────────────────────────────────────────────────
 // Assistant — conversational copilot. Client runs the tool loop against
 // live app state; /api/assistant proxies Claude and holds the key.
-function Assistant({open,setOpen,seed,setSeed,items,setItems,projects,setProjects,milestones,tasks,setTasks,ccrs,setCcrs,ccrItems,setCcrItems,space}:any){
+function Assistant({open,setOpen,seed,setSeed,items:itemsProp,setItems,projects:projectsProp,setProjects,milestones,tasks:tasksProp,setTasks,ccrs,setCcrs,ccrItems,setCcrItems,space,
+  epics:epicsProp=[],setEpics,strategies:strategiesProp=[],setStrategies,tracks:tracksProp=[],setTracks,goals:goalsProp=[],setGoals,deps:depsProp=[],setDeps}:any){
+  // Tools run several writes in one turn, and React hasn't re-rendered between them —
+  // so they read and write this live copy instead of the props captured at send time
+  // (reading stale props gave every item added in one request the same RTL id).
+  const live=useRef<any>({})
+  live.current={items:itemsProp,projects:projectsProp,tasks:tasksProp,epics:epicsProp,strategies:strategiesProp,tracks:tracksProp,goals:goalsProp,deps:depsProp}
+  const items=itemsProp,projects=projectsProp
   const [msgs,setMsgs]=useState<any[]>([])       // UI transcript: {role:'user'|'assistant'|'act',text}
   const [apiMsgs,setApiMsgs]=useState<any[]>([]) // raw Anthropic message history
   const [input,setInput]=useState('')
@@ -7884,13 +7915,14 @@ function Assistant({open,setOpen,seed,setSeed,items,setItems,projects,setProject
 
   const findProject=(ref:string)=>{
     if(!ref)return null
-    const r=ref.toLowerCase()
-    const pool=projects.filter((p:any)=>spaceOf(p)===space)
+    const r=ref.toLowerCase().trim()
+    const pool=live.current.projects.filter((p:any)=>spaceOf(p)===space)
     return pool.find((p:any)=>p.name.toLowerCase()===r)||pool.find((p:any)=>p.name.toLowerCase().includes(r))||null
   }
   const findItem=(ref:string)=>{
     const r=(ref||'').toLowerCase().trim()
-    const pool=items.filter((i:any)=>spaceOf(i)===space)
+    if(!r)return null
+    const pool=live.current.items.filter((i:any)=>spaceOf(i)===space)
     return pool.find((i:any)=>(i.item_id||'').toLowerCase()===r)
       ||pool.filter((i:any)=>!ITEM_TERMINAL.includes(i.status)).find((i:any)=>(i.name||'').toLowerCase().includes(r))
       ||pool.find((i:any)=>(i.name||'').toLowerCase().includes(r))||null
@@ -7898,6 +7930,10 @@ function Assistant({open,setOpen,seed,setSeed,items,setItems,projects,setProject
 
   // ── Tool executors: same writes the UI makes, reported back as JSON
   async function execTool(name:string,inp:any):Promise<any>{
+    const{items,projects,tasks}=live.current
+    // Keep the live copy current after each write so the next tool in this turn sees it
+    const pushLive=(key:string,row:any)=>{live.current={...live.current,[key]:[...live.current[key],row]}}
+    const patchLive=(key:string,id:any,fields:any)=>{live.current={...live.current,[key]:live.current[key].map((x:any)=>x.id===id?{...x,...fields}:x)}}
     try{
       if(name==='get_overview'){
         const now=Date.now(),in7=now+7*86400000
@@ -7933,7 +7969,7 @@ function Assistant({open,setOpen,seed,setSeed,items,setItems,projects,setProject
           parent_project:parent,team,sort_order:items.length,space}
         const{data,error}=await supabase.from('items').insert(payload).select().single()
         if(error)return{error:error.message}
-        if(data)setItems((prev:any[])=>[...prev,data])
+        if(data){setItems((prev:any[])=>[...prev,data]);pushLive('items',data)}
         return{created:{id:payload.item_id,name:payload.name,project:parent||'none',team:team||'none',priority:payload.priority,type:payload.request_type,flagged:inp.flag_audience||'no'}}
       }
       if(name==='create_ccr'){
@@ -7997,6 +8033,145 @@ function Assistant({open,setOpen,seed,setSeed,items,setItems,projects,setProject
         if(error){setTasks((prev:any[])=>[...prev,t]);return{error:error.message}}
         return{deleted:{task:label}}
       }
+      // ── Strategy & epics ──────────────────────────────────────────────
+      const L=live.current
+      const findStrategy=(ref?:string)=>{
+        const r=(ref||'').toLowerCase().trim()
+        return(r&&L.strategies.find((s:any)=>s.name.toLowerCase()===r))||(r&&L.strategies.find((s:any)=>s.name.toLowerCase().includes(r)))||L.strategies[0]||null
+      }
+      const findTrack=(ref:string,strat:any)=>{
+        const r=(ref||'').toLowerCase().trim()
+        const pool=L.tracks.filter((t:any)=>!strat||t.strategy_id===strat.id)
+        return pool.find((t:any)=>t.name.toLowerCase()===r)||pool.find((t:any)=>t.name.toLowerCase().includes(r))||null
+      }
+      const pname=(id:any)=>L.projects.find((p:any)=>p.id===id)?.name
+      if(name==='get_strategy'){
+        const st=findStrategy(inp.strategy)
+        if(!st)return{error:'No strategy exists yet. Offer to create one with create_strategy.'}
+        const trs=L.tracks.filter((t:any)=>t.strategy_id===st.id).sort((a:any,b:any)=>a.sort_order-b.sort_order)
+        const trIds=new Set(trs.map((t:any)=>t.id))
+        const work=L.projects.filter((p:any)=>spaceOf(p)==='work')
+        const fmtP=(p:any)=>({name:p.name,team:p.team,status:p.status,state:p.planning_state||'planned',start:p.start_date,end:p.ongoing?'ongoing':p.end_date,
+          depends_on:L.deps.filter((d:any)=>d.project_id===p.id).map((d:any)=>pname(d.depends_on_id)).filter(Boolean)})
+        return{
+          strategy:{name:st.name,fiscal_years:`FY${st.start_fy}–FY${st.end_fy} (FY runs Apr–Mar; FY${st.start_fy} starts ${st.start_fy-1}-04-01)`,bau_pct:st.bau_pct,code_freeze_months:st.freeze_months},
+          tracks:trs.map((t:any)=>({name:t.name,description:t.description,
+            goals:L.goals.filter((g:any)=>g.track_id===t.id).sort((a:any,b:any)=>a.fy-b.fy).map((g:any)=>({fy:g.fy,goal:g.goal})),
+            projects:work.filter((p:any)=>p.track_id===t.id).map(fmtP)})),
+          not_on_a_track:work.filter((p:any)=>!trIds.has(p.track_id)&&!PROJECT_TERMINAL.includes(p.status)).map(fmtP),
+          other_strategies:L.strategies.filter((s:any)=>s.id!==st.id).map((s:any)=>s.name),
+        }
+      }
+      if(name==='create_strategy'){
+        const row={name:inp.name,start_fy:Number(inp.start_fy),end_fy:Number(inp.end_fy),bau_pct:inp.bau_pct??30,freeze_months:inp.code_freeze_months||[10,11,12],sort_order:L.strategies.length}
+        const{data,error}=await supabase.from('strategies').insert(row).select().single()
+        if(error)return{error:error.message}
+        setStrategies((prev:any[])=>[...prev,data]);pushLive('strategies',data)
+        return{created:{strategy:data.name,fiscal_years:`FY${data.start_fy}–FY${data.end_fy}`}}
+      }
+      if(name==='add_track'){
+        const st=findStrategy(inp.strategy)
+        if(!st)return{error:'No strategy exists yet.'}
+        if(findTrack(inp.name,st)?.name.toLowerCase()===String(inp.name).toLowerCase())return{error:`Track "${inp.name}" already exists`}
+        const n=L.tracks.filter((t:any)=>t.strategy_id===st.id).length
+        const{data,error}=await supabase.from('tracks').insert({strategy_id:st.id,name:inp.name,description:inp.description||null,color:['#5B7A99','#E07B2A','#27AE60','#8E44AD'][n%4],sort_order:n}).select().single()
+        if(error)return{error:error.message}
+        setTracks((prev:any[])=>[...prev,data]);pushLive('tracks',data)
+        return{created:{track:data.name,strategy:st.name}}
+      }
+      if(name==='set_track_goal'){
+        const st=findStrategy(inp.strategy)
+        const tr=findTrack(inp.track,st)
+        if(!tr)return{error:`No track matched "${inp.track}"`,tracks:L.tracks.filter((t:any)=>!st||t.strategy_id===st.id).map((t:any)=>t.name)}
+        const{data,error}=await supabase.from('track_goals').upsert({track_id:tr.id,fy:Number(inp.fy),goal:inp.goal},{onConflict:'track_id,fy'}).select().single()
+        if(error)return{error:error.message}
+        setGoals((prev:any[])=>[...prev.filter((g:any)=>!(g.track_id===tr.id&&g.fy===data.fy)),data])
+        live.current={...live.current,goals:[...live.current.goals.filter((g:any)=>!(g.track_id===tr.id&&g.fy===data.fy)),data]}
+        return{updated:{track:tr.name,fy:data.fy,goal:data.goal}}
+      }
+      if(name==='plan_project'){
+        const st=findStrategy(inp.strategy)
+        let pr=findProject(inp.project)
+        if(pr&&pr.name.toLowerCase()!==String(inp.project).toLowerCase()&&inp.create_if_missing)pr=null
+        const fields:any={}
+        if(inp.track!==undefined){
+          if(inp.track===''||inp.track===null)fields.track_id=null
+          else{const tr=findTrack(inp.track,st);if(!tr)return{error:`No track matched "${inp.track}"`,tracks:L.tracks.filter((t:any)=>!st||t.strategy_id===st.id).map((t:any)=>t.name)};fields.track_id=tr.id}
+        }
+        if(inp.start_date!==undefined)fields.start_date=inp.start_date||null
+        if(inp.end_date!==undefined){fields.end_date=inp.end_date||null;if(inp.end_date)fields.ongoing=false}
+        if(inp.planning_state)fields.planning_state=inp.planning_state
+        if(fields.start_date&&fields.end_date&&fields.end_date<fields.start_date)return{error:'end_date is before start_date'}
+        if(!pr){
+          if(!inp.create_if_missing)return{error:`No project matched "${inp.project}". Set create_if_missing to add it as a new proposed project.`,projects:L.projects.filter((p:any)=>spaceOf(p)==='work'&&!PROJECT_TERMINAL.includes(p.status)).map((p:any)=>p.name)}
+          const team=inp.team?TEAMS.find(x=>x.toLowerCase().includes(String(inp.team).toLowerCase()))||null:null
+          const{data,error}=await supabase.from('projects').insert({name:inp.project,team,status:'Planning',priority:'P3',rag:'Green',color:'#E07B2A',description:inp.description||'',
+            sort_order:L.projects.length,space:'work',planning_state:'proposed',...fields}).select().single()
+          if(error)return{error:error.message}
+          setProjects((prev:any[])=>[...prev,data]);pushLive('projects',data)
+          return{created:{project:data.name,team:data.team||'none',track:inp.track||'none',state:data.planning_state,start:data.start_date,end:data.end_date}}
+        }
+        if(!Object.keys(fields).length)return{error:'Nothing to change'}
+        setProjects((prev:any[])=>prev.map((p:any)=>p.id===pr.id?{...p,...fields}:p));patchLive('projects',pr.id,fields)
+        const{error}=await supabase.from('projects').update(fields).eq('id',pr.id)
+        if(error)return{error:error.message}
+        const now={...pr,...fields}
+        return{updated:{project:pr.name,track:L.tracks.find((t:any)=>t.id===now.track_id)?.name||'none',state:now.planning_state||'planned',start:now.start_date,end:now.ongoing?'ongoing':now.end_date}}
+      }
+      if(name==='add_dependency'||name==='remove_dependency'){
+        const a=findProject(inp.project),b=findProject(inp.depends_on)
+        if(!a||!b)return{error:`No project matched "${!a?inp.project:inp.depends_on}"`}
+        if(a.id===b.id)return{error:'A project cannot depend on itself'}
+        const existing=L.deps.find((d:any)=>d.project_id===a.id&&d.depends_on_id===b.id)
+        if(name==='remove_dependency'){
+          if(!existing)return{error:`${a.name} does not depend on ${b.name}`}
+          setDeps((prev:any[])=>prev.filter((d:any)=>d.id!==existing.id))
+          live.current={...live.current,deps:live.current.deps.filter((d:any)=>d.id!==existing.id)}
+          const{error}=await supabase.from('project_dependencies').delete().eq('id',existing.id)
+          if(error)return{error:error.message}
+          return{removed:{project:a.name,depended_on:b.name}}
+        }
+        if(existing)return{unchanged:`${a.name} already depends on ${b.name}`}
+        const{data,error}=await supabase.from('project_dependencies').insert({project_id:a.id,depends_on_id:b.id}).select().single()
+        if(error)return{error:error.message}
+        setDeps((prev:any[])=>[...prev,data]);pushLive('deps',data)
+        return{created:{project:a.name,depends_on:b.name}}
+      }
+      if(name==='list_project_items'){
+        const pr=findProject(inp.project)
+        if(!pr)return{error:`No project matched "${inp.project}"`}
+        const pe=L.epics.filter((e:any)=>e.project_id===pr.id)
+        return{project:pr.name,epics:pe.map((e:any)=>e.name),
+          items:L.items.filter((i:any)=>i.parent_project===pr.name).map((i:any)=>({id:i.item_id,name:i.name,type:i.request_type,status:i.status,description:(i.description||'').slice(0,160),epic:pe.find((e:any)=>e.id===i.epic_id)?.name||null}))}
+      }
+      if(name==='create_epic'){
+        const pr=findProject(inp.project)
+        if(!pr)return{error:`No project matched "${inp.project}"`}
+        if(L.epics.some((e:any)=>e.project_id===pr.id&&e.name.toLowerCase()===String(inp.name).toLowerCase()))return{unchanged:`Epic "${inp.name}" already exists in ${pr.name}`}
+        const{data,error}=await supabase.from('epics').insert({project_id:pr.id,name:inp.name,description:inp.description||null,space:spaceOf(pr),
+          sort_order:L.epics.filter((e:any)=>e.project_id===pr.id).length}).select().single()
+        if(error)return{error:error.message}
+        setEpics((prev:any[])=>[...prev,data]);pushLive('epics',data)
+        return{created:{epic:data.name,project:pr.name}}
+      }
+      if(name==='assign_items_to_epic'){
+        const pr=findProject(inp.project)
+        if(!pr)return{error:`No project matched "${inp.project}"`}
+        const r=String(inp.epic||'').toLowerCase()
+        const pe=L.epics.filter((e:any)=>e.project_id===pr.id)
+        const ep=pe.find((e:any)=>e.name.toLowerCase()===r)||pe.find((e:any)=>e.name.toLowerCase().includes(r))
+        if(!ep)return{error:`No epic matched "${inp.epic}" in ${pr.name}`,epics:pe.map((e:any)=>e.name)}
+        const ids=(inp.items||[]).map((x:string)=>String(x).toLowerCase())
+        const hits=L.items.filter((i:any)=>i.parent_project===pr.name&&ids.includes((i.item_id||'').toLowerCase()))
+        const missing=(inp.items||[]).filter((x:string)=>!hits.some((i:any)=>(i.item_id||'').toLowerCase()===String(x).toLowerCase()))
+        if(!hits.length)return{error:'None of those item ids belong to this project',missing}
+        const{error}=await supabase.from('items').update({epic_id:ep.id}).in('id',hits.map((i:any)=>i.id))
+        if(error)return{error:error.message}
+        const hitIds=new Set(hits.map((i:any)=>i.id))
+        setItems((prev:any[])=>prev.map((i:any)=>hitIds.has(i.id)?{...i,epic_id:ep.id}:i))
+        live.current={...live.current,items:live.current.items.map((i:any)=>hitIds.has(i.id)?{...i,epic_id:ep.id}:i)}
+        return{updated:{epic:ep.name,items:hits.map((i:any)=>i.item_id),not_found:missing}}
+      }
       return{error:`Unknown tool ${name}`}
     }catch(e:any){return{error:String(e?.message||e)}}
   }
@@ -8011,9 +8186,10 @@ function Assistant({open,setOpen,seed,setSeed,items,setItems,projects,setProject
       today:localISO(new Date()),space,voice:voiceOut,
       projects:projects.filter((p:any)=>spaceOf(p)===space&&!PROJECT_TERMINAL.includes(p.status)).map((p:any)=>p.name),
       teams:TEAMS,statuses:statusesFor(space),
+      strategies:live.current.strategies.map((s:any)=>`${s.name} (FY${s.start_fy}–FY${s.end_fy}; tracks: ${live.current.tracks.filter((t:any)=>t.strategy_id===s.id).map((t:any)=>t.name).join(', ')||'none'})`),
     }
     try{
-      for(let hop=0;hop<6;hop++){
+      for(let hop=0;hop<12;hop++){
         const r=await fetch('/api/assistant',{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify({messages:history,context})})
         const data=await r.json()
         if(!r.ok){setMsgs(m=>[...m,{role:'assistant',text:'⚠ '+(data?.error||'Assistant request failed')+(r.status===500?' — check ANTHROPIC_API_KEY in Vercel.':'')}]);break}
@@ -8093,6 +8269,11 @@ export default function PerfectGame() {
   const [sprints,setSprints]=useState<any[]>([])
   const [sprintAssignments,setSprintAssignments]=useState<any[]>([])
   const [sprintConfig,setSprintConfig]=useState<any[]>([])
+  const [epics,setEpics]=useState<any[]>([])
+  const [strategies,setStrategies]=useState<any[]>([])
+  const [tracks,setTracks]=useState<any[]>([])
+  const [trackGoals,setTrackGoals]=useState<any[]>([])
+  const [projectDeps,setProjectDeps]=useState<any[]>([])
   const [loading,setLoading]=useState(true)
   const [activeTab,setActiveTab]=useState('desk')
   const [selectedProject,setSelectedProject]=useState<any>(null) // shared so Roadmap can open the same Project detail panel Projects uses
@@ -8112,11 +8293,11 @@ export default function PerfectGame() {
   const sItems=items.filter(inSpace),sProjects=projects.filter(inSpace),sMilestones=milestones.filter(inSpace)
   const setSItems=scopedSetter(setItems),setSProjects=scopedSetter(setProjects),setSMilestones=scopedSetter(setMilestones)
   // Teams & Stakeholder are work-only concepts
-  useEffect(()=>{if(space==='home'&&(activeTab==='teams'||activeTab==='stakeholder'||activeTab==='budget'||activeTab==='sprints'))setActiveTab('desk')},[space])
+  useEffect(()=>{if(space==='home'&&(activeTab==='teams'||activeTab==='stakeholder'||activeTab==='budget'||activeTab==='sprints'||activeTab==='strategy'))setActiveTab('desk')},[space])
 
 useEffect(()=>{
     async function load(){
-      const[{data:itemData},{data:projectData},{data:milestoneData},{data:taskData},{data:ccrData},{data:ccrItemData},{data:roleData},{data:peopleData},{data:projRoleData},{data:itemAsgData},{data:qbData},{data:sprintData},{data:sprintAsgData},{data:sprintCfgData}]=await Promise.all([
+      const[{data:itemData},{data:projectData},{data:milestoneData},{data:taskData},{data:ccrData},{data:ccrItemData},{data:roleData},{data:peopleData},{data:projRoleData},{data:itemAsgData},{data:qbData},{data:sprintData},{data:sprintAsgData},{data:sprintCfgData},{data:epicData},{data:stratData},{data:trackData},{data:goalData},{data:depData}]=await Promise.all([
       supabase.from('items').select('*').order('sort_order',{ascending:true}),
       supabase.from('projects').select('*').order('sort_order',{ascending:true}),
       supabase.from('milestones').select('*').order('date',{ascending:true}),
@@ -8131,6 +8312,11 @@ useEffect(()=>{
       supabase.from('sprints').select('*').order('start_date',{ascending:true}),
       supabase.from('sprint_assignments').select('*'),
       supabase.from('sprint_config').select('*'),
+      supabase.from('epics').select('*').order('sort_order',{ascending:true}),
+      supabase.from('strategies').select('*').order('sort_order',{ascending:true}),
+      supabase.from('tracks').select('*').order('sort_order',{ascending:true}),
+      supabase.from('track_goals').select('*'),
+      supabase.from('project_dependencies').select('*'),
     ])
     if(itemData) setItems(itemData)
     if(milestoneData) setMilestones(milestoneData)
@@ -8145,6 +8331,11 @@ useEffect(()=>{
     if(sprintData) setSprints(sprintData)
     if(sprintAsgData) setSprintAssignments(sprintAsgData)
     if(sprintCfgData) setSprintConfig(sprintCfgData)
+    if(epicData) setEpics(epicData)
+    if(stratData) setStrategies(stratData)
+    if(trackData) setTracks(trackData)
+    if(goalData) setTrackGoals(goalData)
+    if(depData) setProjectDeps(depData)
 
     // Auto-create any missing projects from parent_project values
     if(itemData&&projectData){
@@ -8185,6 +8376,7 @@ useEffect(()=>{
 
   const TABS=[
   {key:'desk',label:'Desk',icon:'✎'},
+  {key:'strategy',label:'Strategy',icon:'◭'},
   {key:'projects',label:'Projects',icon:'◈',badge:totalViolations>0?totalViolations:null},
   {key:'backlog',label:'Backlog',icon:'≡'},
   {key:'roadmap',label:'Roadmap',icon:'◫'},
@@ -8216,7 +8408,7 @@ useEffect(()=>{
           </div>
         </div>
         <div style={{display:'flex',height:'100%',overflowX:'auto' as const,WebkitOverflowScrolling:'touch' as any}}>
-          {TABS.filter(tab=>space==='work'||!['teams','stakeholder','budget','sprints'].includes(tab.key)).map(tab=>(
+          {TABS.filter(tab=>space==='work'||!['teams','stakeholder','budget','sprints','strategy'].includes(tab.key)).map(tab=>(
             <button key={tab.key} onClick={()=>setActiveTab(tab.key)} style={{background:activeTab===tab.key?'#0D1B2A':'transparent',color:activeTab===tab.key?'#F4F6F8':'#7A8FA6',border:'none',borderBottom:activeTab===tab.key?'2px solid #C8973A':'2px solid transparent',padding:mobile?'0 10px':'0 13px',cursor:'pointer',fontSize:12.5,fontWeight:activeTab===tab.key?700:400,display:'flex',alignItems:'center',gap:6,height:'100%',position:'relative',whiteSpace:'nowrap' as const,flexShrink:0}}>
               <span style={{fontSize:mobile?17:15}}>{tab.icon}</span>
               {!mobile&&tab.label}
@@ -8237,12 +8429,16 @@ useEffect(()=>{
         </div>}
       </div>
       <div style={{flex:1,overflow:'hidden'}}>
-        {activeTab==='backlog'&&<Backlog items={sItems} setItems={setSItems} projects={sProjects} setProjects={setSProjects} space={space} ccrs={ccrs} ccrItems={ccrItems} setCcrItems={setCcrItems}/>}
-        {activeTab==='projects'&&<Projects items={sItems} setItems={setSItems} projects={sProjects} setProjects={setSProjects} milestones={sMilestones} setMilestones={setSMilestones} tasks={tasks} setTasks={setTasks} space={space} ccrs={ccrs} ccrItems={ccrItems} roles={roles} people={people} projectRoles={projectRoles} setProjectRoles={setProjectRoles} itemAssignments={itemAssignments} setItemAssignments={setItemAssignments} sprints={sprints} selectedProject={selectedProject} setSelectedProject={setSelectedProject}/>}
+        {activeTab==='backlog'&&<Backlog items={sItems} setItems={setSItems} projects={sProjects} setProjects={setSProjects} space={space} ccrs={ccrs} ccrItems={ccrItems} setCcrItems={setCcrItems} epics={epics}/>}
+        {activeTab==='strategy'&&<StrategyTab projects={projects} setProjects={setProjects} strategies={strategies} setStrategies={setStrategies} tracks={tracks} setTracks={setTracks} goals={trackGoals} setGoals={setTrackGoals} deps={projectDeps} setDeps={setProjectDeps}
+          people={people} teams={TEAMS} capacity={capacityByMonth(projects.filter(inSpace),projectRoles,people,roles,items.filter(inSpace))}
+          onOpenProject={(p:any)=>{setSelectedProject(p);setActiveTab('projects')}} openAssistant={(t:string)=>{setAsstSeed(t);setAsstOpen(true)}}/>}
+        {activeTab==='projects'&&<Projects items={sItems} setItems={setSItems} projects={sProjects} setProjects={setSProjects} milestones={sMilestones} setMilestones={setSMilestones} tasks={tasks} setTasks={setTasks} space={space} ccrs={ccrs} ccrItems={ccrItems} roles={roles} people={people} projectRoles={projectRoles} setProjectRoles={setProjectRoles} itemAssignments={itemAssignments} setItemAssignments={setItemAssignments} sprints={sprints} selectedProject={selectedProject} setSelectedProject={setSelectedProject} epics={epics} setEpics={setEpics}/>}
 {activeTab==='roadmap'&&<Roadmap items={sItems} setItems={setSItems} projects={sProjects} setProjects={setSProjects} milestones={sMilestones} setMilestones={setSMilestones} tasks={tasks} setTasks={setTasks} sprints={sprints} itemAssignments={itemAssignments} projectRoles={projectRoles} people={people} roles={roles} onOpenProject={(p:any)=>{setSelectedProject(p);setActiveTab('projects')}}/>}
         {activeTab==='teams'&&<Teams items={sItems} projects={sProjects} milestones={sMilestones} ccrs={ccrs} ccrItems={ccrItems}/>}
         {activeTab==='desk'&&<Desk items={items} setItems={setItems} projects={projects} setProjects={setProjects} milestones={milestones} setMilestones={setMilestones} tasks={tasks} setTasks={setTasks} ccrs={ccrs} setCcrs={setCcrs} ccrItems={ccrItems} setCcrItems={setCcrItems} space={space} openAssistant={(t:string)=>{setAsstSeed(t);setAsstOpen(true)}}/>}
-        <Assistant open={asstOpen} setOpen={setAsstOpen} seed={asstSeed} setSeed={setAsstSeed} items={items} setItems={setItems} projects={projects} setProjects={setProjects} milestones={milestones} tasks={tasks} setTasks={setTasks} ccrs={ccrs} setCcrs={setCcrs} ccrItems={ccrItems} setCcrItems={setCcrItems} space={space}/>
+        <Assistant open={asstOpen} setOpen={setAsstOpen} seed={asstSeed} setSeed={setAsstSeed} items={items} setItems={setItems} projects={projects} setProjects={setProjects} milestones={milestones} tasks={tasks} setTasks={setTasks} ccrs={ccrs} setCcrs={setCcrs} ccrItems={ccrItems} setCcrItems={setCcrItems} space={space}
+          epics={epics} setEpics={setEpics} strategies={strategies} tracks={tracks} setTracks={setTracks} goals={trackGoals} setGoals={setTrackGoals} deps={projectDeps} setDeps={setProjectDeps}/>
         {activeTab==='stakeholder'&&<Stakeholder items={sItems} projects={sProjects} milestones={sMilestones}/>}
         {activeTab==='done'&&<DoneTab items={sItems} setItems={setSItems} projects={sProjects} setProjects={setSProjects} ccrs={ccrs} ccrItems={ccrItems} space={space}/>}
         {activeTab==='budget'&&<BudgetTab roles={roles} setRoles={setRoles} people={people} setPeople={setPeople} projects={sProjects} items={sItems} projectRoles={projectRoles} itemAssignments={itemAssignments} qBudgets={qBudgets} setQBudgets={setQBudgets}/>}

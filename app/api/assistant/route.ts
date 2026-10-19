@@ -110,6 +110,111 @@ const TOOLS = [
       required: ['query'],
     },
   },
+  {
+    name: 'get_strategy',
+    description: 'Get a strategy roadmap: fiscal-year window, BAU share, code-freeze months, its tracks with yearly goals and projects (dates, planning state, dependencies), plus active projects not on any track. Call this before drafting or changing a roadmap.',
+    input_schema: {
+      type: 'object',
+      properties: { strategy: { type: 'string', description: 'Strategy name (optional; defaults to the first one)' } },
+    },
+  },
+  {
+    name: 'create_strategy',
+    description: 'Create a new strategy spanning whole fiscal years. FY runs Apr–Mar and is named for the year it ends in (FY27 = Apr 2026–Mar 2027).',
+    input_schema: {
+      type: 'object',
+      properties: {
+        name: { type: 'string' },
+        start_fy: { type: 'integer', description: 'e.g. 2027 for FY27' },
+        end_fy: { type: 'integer' },
+        bau_pct: { type: 'number', description: 'Capacity share reserved for ongoing/BAU work (default 30)' },
+        code_freeze_months: { type: 'array', items: { type: 'integer' }, description: 'Calendar months 1–12 under code freeze (default [10,11,12])' },
+      },
+      required: ['name', 'start_fy', 'end_fy'],
+    },
+  },
+  {
+    name: 'add_track',
+    description: 'Add a track (e.g. Foundation, Revenue) to a strategy.',
+    input_schema: {
+      type: 'object',
+      properties: { strategy: { type: 'string' }, name: { type: 'string' }, description: { type: 'string', description: 'Short subtitle, e.g. "Starts when its foundation is ready"' } },
+      required: ['name'],
+    },
+  },
+  {
+    name: 'set_track_goal',
+    description: "Set a track's goal for one fiscal year (replaces any existing goal for that year).",
+    input_schema: {
+      type: 'object',
+      properties: { strategy: { type: 'string' }, track: { type: 'string' }, fy: { type: 'integer', description: 'e.g. 2028' }, goal: { type: 'string' } },
+      required: ['track', 'fy', 'goal'],
+    },
+  },
+  {
+    name: 'plan_project',
+    description: 'Place or update a project (a bar on the strategy roadmap): its track, start/end dates and planning state. With create_if_missing it adds a new project as proposed. Projects you place are "proposed" unless the user explicitly says they are planned/approved.',
+    input_schema: {
+      type: 'object',
+      properties: {
+        project: { type: 'string', description: 'Project name' },
+        strategy: { type: 'string' },
+        track: { type: 'string', description: 'Track name, or empty string to take it off its track' },
+        start_date: { type: 'string', description: 'YYYY-MM-DD' },
+        end_date: { type: 'string', description: 'YYYY-MM-DD' },
+        planning_state: { type: 'string', enum: ['planned', 'proposed', 'bau'] },
+        team: { type: 'string', description: 'For new projects: Consumer Experience or Operational Efficiency' },
+        description: { type: 'string' },
+        create_if_missing: { type: 'boolean' },
+      },
+      required: ['project'],
+    },
+  },
+  {
+    name: 'add_dependency',
+    description: 'Record that a project cannot start until another one finishes (draws an arrow on the roadmap).',
+    input_schema: {
+      type: 'object',
+      properties: { project: { type: 'string', description: 'The project that waits' }, depends_on: { type: 'string', description: 'The project it waits on' } },
+      required: ['project', 'depends_on'],
+    },
+  },
+  {
+    name: 'remove_dependency',
+    description: 'Remove a dependency between two projects.',
+    input_schema: {
+      type: 'object',
+      properties: { project: { type: 'string' }, depends_on: { type: 'string' } },
+      required: ['project', 'depends_on'],
+    },
+  },
+  {
+    name: 'list_project_items',
+    description: "List a project's backlog items (id, name, type, status, short description, current epic) and its epics. Use before grouping items into epics.",
+    input_schema: {
+      type: 'object',
+      properties: { project: { type: 'string' } },
+      required: ['project'],
+    },
+  },
+  {
+    name: 'create_epic',
+    description: 'Create an epic inside a project. Epics group related backlog items.',
+    input_schema: {
+      type: 'object',
+      properties: { project: { type: 'string' }, name: { type: 'string' }, description: { type: 'string' } },
+      required: ['project', 'name'],
+    },
+  },
+  {
+    name: 'assign_items_to_epic',
+    description: 'Put backlog items (by RTL id) into an epic of the same project.',
+    input_schema: {
+      type: 'object',
+      properties: { project: { type: 'string' }, epic: { type: 'string' }, items: { type: 'array', items: { type: 'string' }, description: 'RTL ids, e.g. ["RTL-042","RTL-051"]' } },
+      required: ['project', 'epic', 'items'],
+    },
+  },
 ]
 
 export async function POST(req: Request) {
@@ -128,6 +233,7 @@ Today's date: ${context?.today || 'unknown'}. Current space: ${context?.space ||
 Projects in this space: ${(context?.projects || []).join('; ') || '(none)'}.
 Teams: ${(context?.teams || []).join('; ') || '(none)'}.
 Valid item statuses in this space: ${(context?.statuses || []).join('; ') || '(none)'}.
+Strategies: ${(context?.strategies || []).join('; ') || '(none yet)'}.
 
 Rules:
 - Deletion is permanent and cannot be undone. Before calling delete_item or delete_task, always state exactly what you're about to delete (its name/id) and get an explicit yes in the same or a following turn — never delete on the first ambiguous mention. If find_items returns more than one plausible match, list them and ask which one.
@@ -137,7 +243,10 @@ Rules:
 - If a project or item reference doesn't match, the tool result will say so and list candidates — ask the user, never guess between candidates.
 - For destructive or sweeping changes, confirm intent in one short question first.
 - When asked for a morning brief or overview, call get_overview and present it tightly: overdue first, then today/this week, milestones, CCRs owed, flags, open tasks. Bullets, not paragraphs. End with one line offering to act on any of it.
-- Never invent data — everything you report must come from tool results.${context?.voice ? `
+- Never invent data — everything you report must come from tool results.
+- Hierarchy: strategy → tracks (each with a goal per fiscal year) → projects (the roadmap bars) → epics → items. FY runs Apr–Mar and is named for the year it ends in (FY27 = Apr 2026–Mar 2027; Q1 Apr–Jun, Q2 Jul–Sep, Q3 Oct–Dec, Q4 Jan–Mar).
+- Drafting a roadmap ("Plan A"): call get_strategy first. Place projects with plan_project so that each starts after everything it depends on ends, no go-live (end date) falls in a code-freeze month, and a team doesn't carry more parallel work than its capacity after the BAU share. Keep everything you place as planning_state "proposed" — the user accepts proposals themselves. Before writing more than a handful of changes, summarise the plan and ask for a go-ahead. Afterwards, list what you placed and any trade-offs.
+- Grouping items into epics: call list_project_items, propose the epics and which item ids go in each, and only create them after the user agrees.${context?.voice ? `
 
 VOICE MODE — the user is speaking with you and your reply will be read aloud:
 - Reply in natural spoken prose, 1–3 short sentences. Contractions are good. Never use bullet points, headers, tables, or markdown.
@@ -152,7 +261,7 @@ VOICE MODE — the user is speaking with you and your reply will be read aloud:
       'x-api-key': key,
       'anthropic-version': '2023-06-01',
     },
-    body: JSON.stringify({ model: MODEL, max_tokens: 1200, system, tools: TOOLS, messages }),
+    body: JSON.stringify({ model: MODEL, max_tokens: 2400, system, tools: TOOLS, messages }),
   })
   const data = await resp.json()
   if (!resp.ok) {
