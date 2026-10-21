@@ -21,6 +21,7 @@ const TRACK_COLORS=['#5B7A99','#E07B2A','#27AE60','#8E44AD','#C8973A','#2E86AB']
 
 const pad=(n:number)=>String(n).padStart(2,'0')
 const CLIP={overflow:'hidden',whiteSpace:'nowrap' as const,textOverflow:'ellipsis',minWidth:0}
+const HDR_BTN={background:'none',border:'none',padding:'0 2px',cursor:'pointer',color:'#0D1B2A',fontSize:10,lineHeight:1,flexShrink:0}
 const daysIn=(y:number,m:number)=>new Date(y,m,0).getDate() // m is 1-12
 function parts(iso:string){const[y,m,d]=iso.split('-').map(Number);return{y,m,d}}
 function addMonths(iso:string,n:number){
@@ -51,6 +52,10 @@ export default function StrategyTab({projects,setProjects,strategies,setStrategi
   const [selId,setSelId]=useState<any>(null)
   const [drag,setDrag]=useState<any>(null) // {id,mode:'move'|'start'|'end',x0,dm}
   const [editGoal,setEditGoal]=useState<any>(null) // {track_id,fy,text}
+  const pref=(k:string,d:any)=>{try{const v=localStorage.getItem('pg_strat_'+k);return v==null?d:JSON.parse(v)}catch{return d}}
+  const [view,setView]=useState<any>(()=>({sortBy:pref('sortBy','start_date'),sortDir:pref('sortDir','asc'),showLoad:pref('showLoad',false),collapsed:pref('collapsed',{})}))
+  function setPref(k:string,v:any){setView((cur:any)=>({...cur,[k]:v}));try{localStorage.setItem('pg_strat_'+k,JSON.stringify(v))}catch{}}
+  const toggleCollapsed=(key:string)=>setPref('collapsed',{...view.collapsed,[key]:!view.collapsed[key]})
   const [narrow,setNarrow]=useState(false)
   useEffect(()=>{
     const q=window.matchMedia('(max-width: 820px)')
@@ -119,7 +124,9 @@ export default function StrategyTab({projects,setProjects,strategies,setStrategi
     const list=tracks.filter((t:any)=>t.strategy_id===strategy.id).sort((a:any,b:any)=>a.sort_order-b.sort_order)
     const i=list.findIndex((t:any)=>t.id===id),j=i+dir
     if(i<0||j<0||j>=list.length)return
-    await Promise.all([updTrack(list[i].id,{sort_order:j}),updTrack(list[j].id,{sort_order:i})])
+    ;[list[i],list[j]]=[list[j],list[i]]
+    // Renumber the whole list so tracks that share a sort_order still move
+    await Promise.all(list.map((t:any,ix:number)=>t.sort_order===ix?null:updTrack(t.id,{sort_order:ix})))
   }
   async function deleteTrack(track:any){
     const n=projects.filter((p:any)=>p.track_id===track.id).length
@@ -185,17 +192,33 @@ export default function StrategyTab({projects,setProjects,strategies,setStrategi
 
   const sTracks=tracks.filter((t:any)=>t.strategy_id===strategy.id).sort((a:any,b:any)=>a.sort_order-b.sort_order)
   const sTrackIds=new Set(sTracks.map((t:any)=>t.id))
-  const allTrackIds=new Set(tracks.map((t:any)=>t.id))
   const live=(projects as any[]).filter(p=>(p.space||'work')==='work')
-  const overlaps=(p:any)=>p.start_date&&p.start_date<=winEnd&&(p.ongoing||!p.end_date||p.end_date>=winStart)
-  const byStart=(a:any,b:any)=>(a.start_date||'9999').localeCompare(b.start_date||'9999')||a.name.localeCompare(b.name)
   const state=(p:any)=>p.planning_state||'planned'
-  const onTrack=(t:any)=>live.filter(p=>p.track_id===t.id&&state(p)!=='bau').sort(byStart)
-  const untracked=live.filter(p=>!p.track_id||!allTrackIds.has(p.track_id))
-    .filter(p=>state(p)!=='bau'&&!PROJECT_TERMINAL.includes(p.status)&&(overlaps(p)||state(p)==='proposed')).sort(byStart)
-  const bau=live.filter(p=>state(p)==='bau'&&(!p.track_id||sTrackIds.has(p.track_id)||!allTrackIds.has(p.track_id))&&!PROJECT_TERMINAL.includes(p.status)).sort(byStart)
+  // Same ordering as the Roadmap tab: start date, end date, name or RAG, either direction,
+  // with ongoing (∞) projects pinned to the bottom. Undated projects sit below dated ones.
+  function sortProjects(list:any[]){
+    const{sortBy,sortDir}=view
+    const key=(p:any)=>sortBy==='end_date'?(p.ongoing?(p.end_date||'9999-12-31'):p.end_date)
+      :sortBy==='name'?p.name.toLowerCase()
+      :sortBy==='rag'?['Red','Amber','Green'].indexOf(p.rag)
+      :p.start_date
+    return[...list].sort((a,b)=>{
+      if(!!a.ongoing!==!!b.ongoing)return a.ongoing?1:-1
+      if(!a.start_date!==!b.start_date)return a.start_date?-1:1
+      const av=key(a),bv=key(b)
+      if(av==null&&bv!=null)return 1
+      if(bv==null&&av!=null)return -1
+      if(av<bv)return sortDir==='asc'?-1:1
+      if(av>bv)return sortDir==='asc'?1:-1
+      return a.name.localeCompare(b.name)
+    })
+  }
+  // Every project sits on one of your tracks, or in the backlog. Completed and cancelled
+  // projects only show if they're on a track.
+  const onTrack=(t:any)=>sortProjects(live.filter(p=>p.track_id===t.id))
+  const backlog=sortProjects(live.filter(p=>!sTrackIds.has(p.track_id)&&!PROJECT_TERMINAL.includes(p.status)))
   const shown=new Map<string,any>()
-  ;[...sTracks.flatMap(onTrack),...untracked,...bau].forEach(p=>shown.set(p.id,p))
+  ;[...sTracks.flatMap(onTrack),...backlog].forEach(p=>shown.set(p.id,p))
   const projById=(id:any)=>(projects as any[]).find(p=>p.id===id)
 
   // Bar extent for a project, with any in-progress drag applied
@@ -252,16 +275,21 @@ export default function StrategyTab({projects,setProjects,strategies,setStrategi
 
   // ── Rows (fixed heights so the arrow overlay can find each bar) ──────────
   const rows:any[]=[]
-  sTracks.forEach((t:any)=>{
-    rows.push({kind:'track',track:t,h:24})
+  sTracks.forEach((t:any,ti:number)=>{
+    const list=onTrack(t),closed=!!view.collapsed[t.id]
+    rows.push({kind:'track',track:t,index:ti,count:list.length,closed,h:24})
+    if(closed)return
     rows.push({kind:'goals',track:t,h:28})
-    onTrack(t).forEach(p=>rows.push({kind:'project',p,h:ROW_H}))
-    if(!onTrack(t).length)rows.push({kind:'hint',text:'No projects yet. Add them in Strategy settings.',h:ROW_H})
+    list.forEach(p=>rows.push({kind:'project',p,h:ROW_H}))
+    if(!list.length)rows.push({kind:'hint',text:'No projects yet. Pick a project and set its track.',h:ROW_H})
   })
-  if(untracked.length){rows.push({kind:'band',label:'IN-FLIGHT WORK, NOT ON A TRACK',color:'#3A4A5E',h:22});untracked.forEach(p=>rows.push({kind:'project',p,h:ROW_H}))}
-  if(bau.length){rows.push({kind:'band',label:`ONGOING BAU (${strategy.bau_pct}% SHARE)`,color:'#3A4A5E',h:22});bau.forEach(p=>rows.push({kind:'project',p,h:ROW_H}))}
-  rows.push({kind:'band',label:`TEAM LOAD VS ${limit}% AVAILABLE`,color:'#243447',h:22})
-  loads.forEach(l=>rows.push({kind:'load',load:l,h:ROW_H}))
+  if(!sTracks.length)rows.push({kind:'hint',text:'No tracks yet. Add your first one in Strategy settings.',h:ROW_H})
+  rows.push({kind:'band',key:'__backlog',label:`BACKLOG · NOT ON A TRACK (${backlog.length})`,closed:!!view.collapsed.__backlog,color:'#3A4A5E',h:22})
+  if(!view.collapsed.__backlog)backlog.forEach(p=>rows.push({kind:'project',p,h:ROW_H}))
+  if(view.showLoad){
+    rows.push({kind:'band',label:`TEAM LOAD VS ${limit}% AVAILABLE`,color:'#243447',h:22})
+    loads.forEach(l=>rows.push({kind:'load',load:l,h:ROW_H}))
+  }
   let yAcc=0
   const yOf=new Map<string,number>()
   rows.forEach(r=>{r.y=yAcc;if(r.kind==='project')yOf.set(r.p.id,yAcc+r.h/2);yAcc+=r.h})
@@ -325,6 +353,19 @@ export default function StrategyTab({projects,setProjects,strategies,setStrategi
           <Chip color="#3A4A5E" label={`${counts.bau} BAU`}/>
           {issues.length>0&&<Chip color="#E74C3C" label={`${issues.length} to check`}/>}
         </div>
+        <div style={{display:'flex',alignItems:'center',gap:6}}>
+          <span style={{fontSize:11,color:'#7A8FA6'}}>Sort</span>
+          <select value={view.sortBy} onChange={e=>setPref('sortBy',e.target.value)} style={{background:'#1E3048',color:'#F4F6F8',border:'1px solid #243447',borderRadius:6,fontSize:11,padding:'4px 8px',cursor:'pointer'}}>
+            <option value="start_date">Start Date</option>
+            <option value="end_date">End Date</option>
+            <option value="name">Name</option>
+            <option value="rag">RAG Status</option>
+          </select>
+          <button onClick={()=>setPref('sortDir',view.sortDir==='asc'?'desc':'asc')} title="Sort direction" style={{background:'#1E3048',color:'#F4F6F8',border:'1px solid #243447',borderRadius:6,fontSize:13,padding:'2px 10px',cursor:'pointer'}}>{view.sortDir==='asc'?'↑':'↓'}</button>
+          <label title="Show each team's planned load per quarter under the roadmap" style={{display:'flex',alignItems:'center',gap:5,fontSize:11,color:'#7A8FA6',cursor:'pointer',whiteSpace:'nowrap' as const}}>
+            <input type="checkbox" checked={view.showLoad} onChange={e=>setPref('showLoad',e.target.checked)} style={{accentColor:'#C8973A'}}/>Team load
+          </label>
+        </div>
         <div style={{marginLeft:'auto',display:'flex',gap:6}}>
           {openAssistant&&<button onClick={()=>openAssistant(`Look at the "${strategy.name}" strategy and draft a Plan A: place the proposed and undated projects by quarter on their tracks, respecting dependencies, the code freeze and team capacity. Keep anything you place as proposed.`)}
             style={{background:'none',border:'1px solid #C8973A',borderRadius:6,color:'#C8973A',fontSize:11,fontWeight:700,padding:'5px 10px',cursor:'pointer'}}>💬 Draft Plan A with the assistant</button>}
@@ -370,8 +411,12 @@ export default function StrategyTab({projects,setProjects,strategies,setStrategi
               {rows.map((r,ri)=>{
                 if(r.kind==='track')return(
                   <div key={ri} style={{display:'flex',height:r.h,position:'relative',zIndex:1}}>
-                    <div style={{...cellLabel,background:r.track.color,borderRight:'none',padding:'0 12px',display:'flex',alignItems:'center',fontSize:11,fontWeight:800,color:'#0D1B2A',letterSpacing:1}}>
-                      <span title={`${r.track.name} track`} style={CLIP}>{r.track.name.toUpperCase()}</span>
+                    <div style={{...cellLabel,background:r.track.color,borderRight:'none',padding:'0 6px 0 8px',display:'flex',alignItems:'center',gap:4,fontSize:11,fontWeight:800,color:'#0D1B2A',letterSpacing:1}}>
+                      <button onClick={()=>toggleCollapsed(r.track.id)} title={r.closed?'Expand':'Collapse'} style={HDR_BTN}>{r.closed?'▸':'▾'}</button>
+                      <span onClick={()=>toggleCollapsed(r.track.id)} title={`${r.track.name} track`} style={{...CLIP,flex:1,cursor:'pointer'}}>{r.track.name.toUpperCase()}</span>
+                      {r.closed&&<span style={{fontSize:10,fontWeight:700,opacity:0.7}}>{r.count}</span>}
+                      <button onClick={()=>moveTrack(r.track.id,-1)} disabled={r.index===0} title="Move track up" style={{...HDR_BTN,opacity:r.index===0?0.3:1}}>▲</button>
+                      <button onClick={()=>moveTrack(r.track.id,1)} disabled={r.index===sTracks.length-1} title="Move track down" style={{...HDR_BTN,opacity:r.index===sTracks.length-1?0.3:1}}>▼</button>
                     </div>
                     <div style={{width:TW,background:r.track.color,display:'flex',alignItems:'center',padding:'0 10px',fontSize:11,color:'#0D1B2A',fontWeight:600}}><span style={{...CLIP,position:'sticky',left:LABEL_W+10}}>{r.track.description||''}</span></div>
                   </div>
@@ -399,7 +444,10 @@ export default function StrategyTab({projects,setProjects,strategies,setStrategi
                 )
                 if(r.kind==='band')return(
                   <div key={ri} style={{display:'flex',height:r.h,position:'relative',zIndex:1}}>
-                    <div style={{...cellLabel,background:r.color,borderRight:'none',padding:'0 12px',display:'flex',alignItems:'center',fontSize:10,fontWeight:800,color:'#F4F6F8',letterSpacing:1}}><span title={r.label} style={CLIP}>{r.label}</span></div>
+                    <div onClick={()=>r.key&&toggleCollapsed(r.key)} style={{...cellLabel,background:r.color,borderRight:'none',padding:'0 12px 0 8px',display:'flex',alignItems:'center',gap:4,fontSize:10,fontWeight:800,color:'#F4F6F8',letterSpacing:1,cursor:r.key?'pointer':'default'}}>
+                      {r.key&&<span style={{...HDR_BTN,color:'#F4F6F8'}}>{r.closed?'▸':'▾'}</span>}
+                      <span title={r.label} style={CLIP}>{r.label}</span>
+                    </div>
                     <div style={{width:TW,background:r.color}}/>
                   </div>
                 )
