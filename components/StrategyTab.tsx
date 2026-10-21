@@ -5,7 +5,8 @@ import { supabase } from '../lib/supabase'
 // ── Strategy roadmap ─────────────────────────────────────────────────────────
 // A strategy spans whole fiscal years (FY runs Apr–Mar; FY27 = Apr 2026–Mar 2027) and
 // holds tracks (Foundation, Revenue…), each with one goal per FY. Projects are the bars:
-// a project joins a track, carries a planning state (planned / proposed / BAU), and can
+// a project joins a track, carries a planning state (planned / proposed) and a work type
+// (new project work vs. sustain: tech debt, stabilization & enhancements), and can
 // depend on other projects (the arrows). Everything here is editable by hand; the
 // assistant writes the same fields, and anything it drafts lands as "proposed".
 
@@ -16,7 +17,11 @@ const ROW_H=26
 const MONTHS=['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec']
 const TEAM_COLORS:any={'Consumer Experience':'#D9E2EC','Operational Efficiency':'#6FA6CB'}
 const PROPOSED='#E07B2A'
-const STATE_LABEL:any={planned:'Planned',proposed:'Proposed',bau:'Ongoing BAU'}
+const STATE_LABEL:any={planned:'Planned',proposed:'Proposed'}
+const WORK_LABEL:any={new:'New project',sustain:'Sustain'}
+const SUSTAIN='#4A5D72'
+// 'bau' was the earlier way to mark sustain work; it still reads as planned + sustain
+const workType=(p:any)=>p?.work_type==='sustain'||p?.planning_state==='bau'?'sustain':'new'
 const TRACK_COLORS=['#5B7A99','#E07B2A','#27AE60','#8E44AD','#C8973A','#2E86AB']
 
 const pad=(n:number)=>String(n).padStart(2,'0')
@@ -166,12 +171,12 @@ export default function StrategyTab({projects,setProjects,strategies,setStrategi
     const{error}=await supabase.from('project_dependencies').delete().eq('id',id)
     if(error)alert('Failed to remove dependency: '+error.message)
   }
-  async function createProject(name:string,team:string,trackId:any){
+  async function createProject(name:string,team:string,trackId:any,wt:string='new'){
     const n=name.trim()
     if(!n)return
     if(projects.some((p:any)=>p.name.toLowerCase()===n.toLowerCase())){alert(`A project called "${n}" already exists. Add it to a track from its row instead.`);return}
     const{data,error}=await supabase.from('projects').insert({name:n,team:team||null,status:'Planning',priority:'P3',rag:'Green',color:PROPOSED,description:'',
-      sort_order:projects.length,space:'work',planning_state:'proposed',track_id:trackId||null}).select().single()
+      sort_order:projects.length,space:'work',planning_state:'proposed',work_type:wt,track_id:trackId||null}).select().single()
     if(error){alert('Failed to create project: '+error.message);return}
     if(data){setProjects((prev:any[])=>[...prev,data]);setSelId(data.id)}
   }
@@ -193,7 +198,7 @@ export default function StrategyTab({projects,setProjects,strategies,setStrategi
   const sTracks=tracks.filter((t:any)=>t.strategy_id===strategy.id).sort((a:any,b:any)=>a.sort_order-b.sort_order)
   const sTrackIds=new Set(sTracks.map((t:any)=>t.id))
   const live=(projects as any[]).filter(p=>(p.space||'work')==='work')
-  const state=(p:any)=>p.planning_state||'planned'
+  const state=(p:any)=>p.planning_state==='proposed'?'proposed':'planned'
   // Same ordering as the Roadmap tab: start date, end date, name or RAG, either direction,
   // with ongoing (∞) projects pinned to the bottom. Undated projects sit below dated ones.
   function sortProjects(list:any[]){
@@ -224,7 +229,6 @@ export default function StrategyTab({projects,setProjects,strategies,setStrategi
   // Bar extent for a project, with any in-progress drag applied
   function extent(p:any){
     let s=p.start_date,e=p.end_date
-    if(state(p)==='bau'){s=s||winStart;e=e||winEnd}
     if(!s)return null
     if(drag?.id===p.id&&drag.dm){
       if(drag.mode==='move'){s=addMonths(s,drag.dm);if(e)e=addMonths(e,drag.dm)}
@@ -248,30 +252,43 @@ export default function StrategyTab({projects,setProjects,strategies,setStrategi
       issues.push({kind:'dep',id:succ.id,text:`${succ.name} depends on ${pred.name}, which has no end date.`})
   }
   for(const p of shown.values()){
-    if(state(p)==='bau'||p.ongoing||!p.end_date)continue
+    if(p.ongoing||!p.end_date)continue
     if(freeze.includes(parts(p.end_date).m))issues.push({kind:'freeze',id:p.id,text:`${p.name} goes live ${fmtMonth(p.end_date)}, inside the code freeze.`})
   }
-  // Team load per quarter: average planned allocation across the team's active people,
-  // against what's left after the BAU share. Only staffed projects count (Budget roster).
+  // Team load per quarter, split by work type: the average planned allocation across the
+  // team's active people on new-project work (against 100% minus the sustain share) and on
+  // sustain work (against the sustain share). Only staffed projects count (Budget roster).
   const quarters:any[]=[]
   fys.forEach(fy=>[1,2,3,4].forEach(q=>{
     const first=winStartAbs+(fy-strategy.start_fy)*12+(q-1)*3
     quarters.push({fy,q,keys:[0,1,2].map(i=>monthStartISO(first+i).slice(0,7)),start:monthStartISO(first),end:monthEndISO(first+2)})
   }))
-  const limit=100-(Number(strategy.bau_pct)||0)
-  const loads=(teams as string[]).map(team=>{
+  const sustainPct=Number(strategy.bau_pct)||0
+  const limits:any={new:100-sustainPct,sustain:sustainPct}
+  const typeByName=new Map((projects as any[]).map(p=>[p.name,workType(p)]))
+  const split:any={new:0,sustain:0}
+  const loads:any[]=[]
+  ;(teams as string[]).forEach(team=>{
     const cells=quarters.map(qt=>{
       const ppl=(people as any[]).filter(p=>p.team===team&&p.active!==false&&(!p.termination_date||p.termination_date>=qt.start))
-      if(!ppl.length)return{v:null}
-      const total=ppl.reduce((s:number,p:any)=>{
-        const m=capacity?.perPerson?.get(p.id)
-        return s+qt.keys.reduce((a:number,k:string)=>a+(m?.get(k)?.pct||0),0)/3
-      },0)
-      return{v:total/ppl.length}
+      if(!ppl.length)return null
+      const sum:any={new:0,sustain:0}
+      for(const person of ppl){
+        const months=capacity?.byProject?.get(person.id)
+        for(const k of qt.keys)for(const c of months?.get(k)||[])sum[typeByName.get(c.project)||'new']+=c.pct/3
+      }
+      if(qt.end>=todayISO()){split.new+=sum.new;split.sustain+=sum.sustain}
+      return{new:sum.new/ppl.length,sustain:sum.sustain/ppl.length}
     })
-    cells.forEach((c:any,i:number)=>{if(c.v!=null&&c.v>limit&&quarters[i].end>=todayISO())issues.push({kind:'capacity',id:null,text:`${team} is planned at ${Math.round(c.v)}% in FY${String(quarters[i].fy).slice(-2)} Q${quarters[i].q}. The limit after BAU is ${limit}%.`})})
-    return{team,cells}
+    for(const wt of ['new','sustain']){
+      const row=cells.map((c:any)=>c?{v:c[wt]}:{v:null})
+      row.forEach((c:any,i:number)=>{if(c.v!=null&&c.v>limits[wt]&&quarters[i].end>=todayISO())issues.push({kind:'capacity',id:null,
+        text:`${team} ${wt==='new'?'new-project':'sustain'} work is planned at ${Math.round(c.v)}% in FY${String(quarters[i].fy).slice(-2)} Q${quarters[i].q}. The target is ${limits[wt]}%.`})})
+      loads.push({team,wt,cells:row})
+    }
   })
+  const splitTotal=split.new+split.sustain
+  const splitNewPct=splitTotal?Math.round(split.new/splitTotal*100):null
 
   // ── Rows (fixed heights so the arrow overlay can find each bar) ──────────
   const rows:any[]=[]
@@ -287,7 +304,7 @@ export default function StrategyTab({projects,setProjects,strategies,setStrategi
   rows.push({kind:'band',key:'__backlog',label:`BACKLOG · NOT ON A TRACK (${backlog.length})`,closed:!!view.collapsed.__backlog,color:'#3A4A5E',h:22})
   if(!view.collapsed.__backlog)backlog.forEach(p=>rows.push({kind:'project',p,h:ROW_H}))
   if(view.showLoad){
-    rows.push({kind:'band',label:`TEAM LOAD VS ${limit}% AVAILABLE`,color:'#243447',h:22})
+    rows.push({kind:'band',label:`TEAM LOAD · NEW ${limits.new}% / SUSTAIN ${limits.sustain}%`,color:'#243447',h:22})
     loads.forEach(l=>rows.push({kind:'load',load:l,h:ROW_H}))
   }
   let yAcc=0
@@ -330,8 +347,8 @@ export default function StrategyTab({projects,setProjects,strategies,setStrategi
   }
 
   const sel=selId?projById(selId):null
-  const counts={planned:0,proposed:0,bau:0} as any
-  shown.forEach(p=>{counts[state(p)]++})
+  const counts={planned:0,proposed:0,sustain:0} as any
+  shown.forEach(p=>{counts[state(p)]++;if(workType(p)==='sustain')counts.sustain++})
   const today=todayISO()
   const todayX=today>=winStart&&today<=winEnd?posStart(today):null
 
@@ -350,7 +367,9 @@ export default function StrategyTab({projects,setProjects,strategies,setStrategi
         <div style={{display:'flex',gap:6,fontSize:11}}>
           <Chip color="#D9E2EC" label={`${counts.planned} planned`}/>
           <Chip color={PROPOSED} outline label={`${counts.proposed} proposed`}/>
-          <Chip color="#3A4A5E" label={`${counts.bau} BAU`}/>
+          <Chip color={SUSTAIN} label={`${counts.sustain} sustain`}/>
+          {splitNewPct!=null&&<span title={`Staffed load from this quarter on, split by work type. Target: ${limits.new}% new projects, ${limits.sustain}% sustain.`}
+            style={{color:Math.abs(splitNewPct-limits.new)>10?'#D4820A':'#C8C8D4'}}>· split {splitNewPct}/{100-splitNewPct} (target {limits.new}/{limits.sustain})</span>}
           {issues.length>0&&<Chip color="#E74C3C" label={`${issues.length} to check`}/>}
         </div>
         <div style={{display:'flex',alignItems:'center',gap:6}}>
@@ -458,10 +477,14 @@ export default function StrategyTab({projects,setProjects,strategies,setStrategi
                 )
                 if(r.kind==='load')return(
                   <div key={ri} style={{display:'flex',height:r.h,position:'relative',zIndex:1}}>
-                    <div style={{...cellLabel,padding:'0 12px',display:'flex',alignItems:'center',fontSize:11,color:'#C8C8D4'}}>{r.load.team} <span style={{marginLeft:6,fontSize:9,color:'#7A8FA6'}}>({teamShort(r.load.team)})</span></div>
+                    <div style={{...cellLabel,padding:'0 12px',display:'flex',alignItems:'center',gap:6,fontSize:11,color:'#C8C8D4'}}>
+                      <span style={{...CLIP,flex:1}} title={r.load.team}>{teamShort(r.load.team)} · {r.load.wt==='new'?'New projects':'Sustain'}</span>
+                      <span style={{fontSize:9,color:'#7A8FA6'}}>of {limits[r.load.wt]}%</span>
+                    </div>
                     {r.load.cells.map((c:any,i:number)=>{
-                      const clr=c.v==null?'#3A4A5E':c.v>limit?'#E74C3C':c.v>limit*0.9?'#D4820A':'#27AE60'
-                      return <div key={i} title={c.v==null?'No one on this team in the roster':`${Math.round(c.v)}% planned of ${limit}% available`}
+                      const lim=limits[r.load.wt]
+                      const clr=c.v==null?'#3A4A5E':c.v>lim?'#E74C3C':c.v>lim*0.9?'#D4820A':'#27AE60'
+                      return <div key={i} title={c.v==null?'No one on this team in the roster':`${Math.round(c.v)}% planned of a ${lim}% target`}
                         style={{width:3*MONTH_W,flexShrink:0,display:'flex',alignItems:'center',justifyContent:'center',fontSize:10,fontWeight:700,color:clr,fontVariantNumeric:'tabular-nums'}}>{c.v==null?'–':Math.round(c.v)+'%'}</div>
                     })}
                   </div>
@@ -469,7 +492,7 @@ export default function StrategyTab({projects,setProjects,strategies,setStrategi
                 // Project row
                 const p=r.p,ex=extent(p),st=state(p)
                 const isSel=sel?.id===p.id
-                const color=st==='proposed'?PROPOSED:st==='bau'?'#4A5D72':(TEAM_COLORS[p.team]||'#7A8FA6')
+                const color=st==='proposed'?PROPOSED:workType(p)==='sustain'?SUSTAIN:(TEAM_COLORS[p.team]||'#7A8FA6')
                 const done=PROJECT_TERMINAL.includes(p.status)
                 return(
                   <div key={ri} style={{display:'flex',height:r.h,position:'relative',zIndex:1}}>
@@ -480,14 +503,14 @@ export default function StrategyTab({projects,setProjects,strategies,setStrategi
                     <div onClick={e=>onRowClick(e,p)} style={{width:TW,position:'relative',cursor:p.start_date?'default':'copy'}}>
                       {!ex&&<span style={{position:'absolute',left:8,top:6,fontSize:10,color:'#3A4A5E',fontStyle:'italic',pointerEvents:'none'}}>No dates. Click a quarter to place it there.</span>}
                       {ex&&(
-                        <div title={`${p.name}\n${STATE_LABEL[st]} · ${fmtDate(ex.s)} → ${ex.e?fmtDate(ex.e):'ongoing'}`}
+                        <div title={`${p.name}\n${STATE_LABEL[st]} · ${WORK_LABEL[workType(p)]} · ${fmtDate(ex.s)} → ${ex.e?fmtDate(ex.e):'ongoing'}`}
                           onPointerDown={e=>onBarDown(e,p,'move')} onPointerMove={onBarMove} onPointerUp={()=>onBarUp(p)} onClick={e=>e.stopPropagation()}
                           style={{position:'absolute',left:ex.x0,width:Math.max(6,ex.x1-ex.x0),top:6,height:r.h-12,boxSizing:'border-box' as const,borderRadius:3,cursor:drag?.id===p.id?'grabbing':'grab',touchAction:'none',
                             background:st==='proposed'?'rgba(224,123,42,0.28)':color,border:st==='proposed'?`1.5px solid ${PROPOSED}`:'none',
                             outline:isSel?'2px solid #C8973A':'none',outlineOffset:1,opacity:done?0.45:1,
                             maskImage:ex.open?'linear-gradient(90deg,#000 85%,transparent)':'none',WebkitMaskImage:ex.open?'linear-gradient(90deg,#000 85%,transparent)':'none'}}>
-                          {st!=='bau'&&<div onPointerDown={e=>onBarDown(e,p,'start')} title="Drag to change the start month" style={{position:'absolute',left:0,top:0,bottom:0,width:6,cursor:'ew-resize'}}/>}
-                          {st!=='bau'&&!ex.open&&<div onPointerDown={e=>onBarDown(e,p,'end')} title="Drag to change the end month" style={{position:'absolute',right:0,top:0,bottom:0,width:6,cursor:'ew-resize'}}/>}
+                          {<div onPointerDown={e=>onBarDown(e,p,'start')} title="Drag to change the start month" style={{position:'absolute',left:0,top:0,bottom:0,width:6,cursor:'ew-resize'}}/>}
+                          {!ex.open&&<div onPointerDown={e=>onBarDown(e,p,'end')} title="Drag to change the end month" style={{position:'absolute',right:0,top:0,bottom:0,width:6,cursor:'ew-resize'}}/>}
                         </div>
                       )}
                     </div>
@@ -520,7 +543,7 @@ export default function StrategyTab({projects,setProjects,strategies,setStrategi
             <Legend swatch={{background:TEAM_COLORS['Consumer Experience']}} label="Consumer Experience (planned)"/>
             <Legend swatch={{background:TEAM_COLORS['Operational Efficiency']}} label="Operational Efficiency (planned)"/>
             <Legend swatch={{background:'rgba(224,123,42,0.28)',border:`1.5px solid ${PROPOSED}`}} label="Proposed, not yet planned"/>
-            <Legend swatch={{background:'#4A5D72'}} label="Ongoing BAU"/>
+            <Legend swatch={{background:SUSTAIN}} label="Sustain: tech debt, stabilization & enhancements"/>
             <Legend swatch={{background:'rgba(255,255,255,0.12)'}} label={`Code freeze (${freeze.map(m=>MONTHS[m-1]).join(', ')||'none'})`}/>
             <span>Drag a bar to move it. Drag its edges to change start or end.</span>
           </div>
@@ -574,7 +597,7 @@ function ProjectPanel({p,state,tracks,projects,deps,shown,issues,updProject,addD
       <div style={SECTION}>
         <div style={H}>PLANNING STATE</div>
         <div style={{display:'flex',gap:4}}>
-          {['planned','proposed','bau'].map(k=>(
+          {['planned','proposed'].map(k=>(
             <button key={k} onClick={()=>updProject(p.id,{planning_state:k})}
               style={{flex:1,background:state===k?(k==='proposed'?PROPOSED:'#C8973A'):'transparent',color:state===k?'#0D1B2A':'#C8C8D4',border:'1px solid '+(state===k?'transparent':'#243447'),borderRadius:5,fontSize:11,fontWeight:700,padding:'5px 0',cursor:'pointer'}}>{STATE_LABEL[k]}</button>
           ))}
@@ -582,6 +605,16 @@ function ProjectPanel({p,state,tracks,projects,deps,shown,issues,updProject,addD
         {state==='proposed'&&<button onClick={()=>updProject(p.id,{planning_state:'planned'})} disabled={!p.start_date}
           title={p.start_date?'Mark this as planned':'Give it dates first'}
           style={{background:'#27AE60',border:'none',borderRadius:5,color:'#fff',fontSize:12,fontWeight:700,padding:'7px 0',cursor:p.start_date?'pointer':'not-allowed',opacity:p.start_date?1:0.5}}>✓ Accept proposal</button>}
+      </div>
+      <div style={SECTION}>
+        <div style={H}>WORK TYPE</div>
+        <div style={{display:'flex',gap:4}}>
+          {['new','sustain'].map(k=>(
+            <button key={k} onClick={()=>updProject(p.id,{work_type:k,...(p.planning_state==='bau'?{planning_state:'planned'}:{})})}
+              style={{flex:1,background:workType(p)===k?(k==='sustain'?SUSTAIN:'#C8973A'):'transparent',color:workType(p)===k?(k==='sustain'?'#F4F6F8':'#0D1B2A'):'#C8C8D4',border:'1px solid '+(workType(p)===k?'transparent':'#243447'),borderRadius:5,fontSize:11,fontWeight:700,padding:'5px 0',cursor:'pointer'}}>{WORK_LABEL[k]}</button>
+          ))}
+        </div>
+        <div style={{fontSize:10,color:'#7A8FA6'}}>Sustain is tech debt, system stabilization and enhancements to existing things. It counts toward the sustain share.</div>
       </div>
       <div style={SECTION}>
         <div style={H}>TRACK</div>
@@ -632,7 +665,7 @@ function SettingsPanel({strategy,tracks,projects,teams,issues,setSelId,updStrate
   const [newTrack,setNewTrack]=useState('')
   const [addPid,setAddPid]=useState('')
   const [addTid,setAddTid]=useState('')
-  const [np,setNp]=useState({name:'',team:teams[0]||'',track:''})
+  const [np,setNp]=useState({name:'',team:teams[0]||'',track:'',wt:'new'})
   const trackIds=new Set(tracks.map((t:any)=>t.id))
   const addable=projects.filter((p:any)=>!trackIds.has(p.track_id)&&!PROJECT_TERMINAL.includes(p.status)).sort((a:any,b:any)=>a.name.localeCompare(b.name))
   const fyOpts:number[]=[];for(let f=2024;f<=2040;f++)fyOpts.push(f)
@@ -656,7 +689,7 @@ function SettingsPanel({strategy,tracks,projects,teams,issues,setSelId,updStrate
           to
           <select value={strategy.end_fy} onChange={e=>updStrategy({end_fy:Math.max(Number(e.target.value),strategy.start_fy)})} style={INPUT}>{fyOpts.filter(f=>f>=strategy.start_fy).map(f=><option key={f} value={f}>FY{String(f).slice(-2)}</option>)}</select>
         </div>
-        <label style={{display:'flex',alignItems:'center',gap:8,fontSize:11,color:'#7A8FA6'}}>BAU share
+        <label title="Share of capacity for tech debt, stabilization and enhancements. New projects get the rest." style={{display:'flex',alignItems:'center',gap:8,fontSize:11,color:'#7A8FA6'}}>Sustain share
           <input type="number" min={0} max={100} value={strategy.bau_pct} onChange={e=>updStrategy({bau_pct:Math.max(0,Math.min(100,Number(e.target.value)||0))})} style={{...INPUT,width:70}}/>%
         </label>
         <div style={{fontSize:11,color:'#7A8FA6'}}>Code-freeze months</div>
@@ -713,7 +746,11 @@ function SettingsPanel({strategy,tracks,projects,teams,issues,setSelId,updStrate
             {tracks.map((t:any)=><option key={t.id} value={t.id}>{t.name}</option>)}
           </select>
         </div>
-        <button disabled={!np.name.trim()} onClick={async()=>{await createProject(np.name,np.team,np.track);setNp({...np,name:''})}}
+        <select value={np.wt} onChange={e=>setNp({...np,wt:e.target.value})} style={INPUT}>
+          <option value="new">New project</option>
+          <option value="sustain">Sustain (tech debt, stabilization & enhancements)</option>
+        </select>
+        <button disabled={!np.name.trim()} onClick={async()=>{await createProject(np.name,np.team,np.track,np.wt);setNp({...np,name:''})}}
           style={{background:PROPOSED,border:'none',borderRadius:5,color:'#0D1B2A',fontWeight:700,fontSize:12,padding:'7px 0',cursor:'pointer',opacity:np.name.trim()?1:0.5}}>+ Add as proposed</button>
         <div style={{fontSize:10,color:'#7A8FA6'}}>It appears on the roadmap without dates. Click a quarter in its row to place it.</div>
       </div>

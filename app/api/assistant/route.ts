@@ -162,7 +162,8 @@ const TOOLS = [
         track: { type: 'string', description: 'Track name, or empty string to take it off its track' },
         start_date: { type: 'string', description: 'YYYY-MM-DD' },
         end_date: { type: 'string', description: 'YYYY-MM-DD' },
-        planning_state: { type: 'string', enum: ['planned', 'proposed', 'bau'] },
+        planning_state: { type: 'string', enum: ['planned', 'proposed'] },
+        work_type: { type: 'string', enum: ['new', 'sustain'], description: 'new = new project work; sustain = tech debt, system stabilization and enhancements to existing things' },
         team: { type: 'string', description: 'For new projects: Consumer Experience or Operational Efficiency' },
         description: { type: 'string' },
         create_if_missing: { type: 'boolean' },
@@ -245,6 +246,7 @@ Rules:
 - When asked for a morning brief or overview, call get_overview and present it tightly: overdue first, then today/this week, milestones, CCRs owed, flags, open tasks. Bullets, not paragraphs. End with one line offering to act on any of it.
 - Never invent data — everything you report must come from tool results.
 - Hierarchy: strategy → tracks (each with a goal per fiscal year) → projects (the roadmap bars) → epics → items. FY runs Apr–Mar and is named for the year it ends in (FY27 = Apr 2026–Mar 2027; Q1 Apr–Jun, Q2 Jul–Sep, Q3 Oct–Dec, Q4 Jan–Mar).
+- Capacity split: each strategy reserves a sustain share (sustain_pct, typically 30%) for tech debt, system stabilization and enhancements to existing things; new projects get the rest (typically 70%). Projects carry a work_type of "new" or "sustain". Keep plans within that split.
 - Drafting a roadmap ("Plan A"): call get_strategy first. Place projects with plan_project so that each starts after everything it depends on ends, no go-live (end date) falls in a code-freeze month, and a team doesn't carry more parallel work than its capacity after the BAU share. Keep everything you place as planning_state "proposed" — the user accepts proposals themselves. Before writing more than a handful of changes, summarise the plan and ask for a go-ahead. Afterwards, list what you placed and any trade-offs.
 - Grouping items into epics: call list_project_items, propose the epics and which item ids go in each, and only create them after the user agrees.${context?.voice ? `
 
