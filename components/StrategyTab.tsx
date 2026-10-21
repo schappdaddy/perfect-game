@@ -28,15 +28,15 @@ const TRACK_COLORS=['#5B7A99','#E07B2A','#27AE60','#8E44AD','#C8973A','#2E86AB']
 
 const pad=(n:number)=>String(n).padStart(2,'0')
 const CLIP={overflow:'hidden',whiteSpace:'nowrap' as const,textOverflow:'ellipsis',minWidth:0}
+const HANDLE={position:'absolute' as const,top:-2,bottom:-2,width:12,cursor:'ew-resize',zIndex:1}
+function DragLabel({s,e}:{s:string,e:string|null}){
+  return <span style={{position:'absolute',left:0,bottom:'calc(100% + 4px)',whiteSpace:'nowrap',background:'#C8973A',color:'#0D1B2A',fontSize:10,fontWeight:700,borderRadius:4,padding:'2px 6px',pointerEvents:'none',zIndex:6}}>
+    {fmtDate(s)} → {e?fmtDate(e):'ongoing'}
+  </span>
+}
 const HDR_BTN={background:'none',border:'none',padding:'0 2px',cursor:'pointer',color:'#0D1B2A',fontSize:10,lineHeight:1,flexShrink:0}
 const daysIn=(y:number,m:number)=>new Date(y,m,0).getDate() // m is 1-12
 function parts(iso:string){const[y,m,d]=iso.split('-').map(Number);return{y,m,d}}
-function addMonths(iso:string,n:number){
-  const{y,m,d}=parts(iso)
-  const idx=y*12+(m-1)+n
-  const ny=Math.floor(idx/12),nm=idx-ny*12+1
-  return `${ny}-${pad(nm)}-${pad(Math.min(d,daysIn(ny,nm)))}`
-}
 const monthStartISO=(abs:number)=>{const y=Math.floor(abs/12),m=abs-y*12+1;return `${y}-${pad(m)}-01`}
 const monthEndISO=(abs:number)=>{const y=Math.floor(abs/12),m=abs-y*12+1;return `${y}-${pad(m)}-${pad(daysIn(y,m))}`}
 const fmtDate=(iso:string)=>{const{y,m,d}=parts(iso);return `${MONTHS[m-1]} ${d}, ${y}`}
@@ -60,7 +60,7 @@ export default function StrategyTab({projects,setProjects,strategies,setStrategi
   const [drag,setDrag]=useState<any>(null) // {id,mode:'move'|'start'|'end',x0,dm}
   const [editGoal,setEditGoal]=useState<any>(null) // {track_id,fy,text}
   const pref=(k:string,d:any)=>{try{const v=localStorage.getItem('pg_strat_'+k);return v==null?d:JSON.parse(v)}catch{return d}}
-  const [view,setView]=useState<any>(()=>({sortBy:pref('sortBy','start_date'),sortDir:pref('sortDir','asc'),showLoad:pref('showLoad',false),showEpics:pref('showEpics',true),collapsed:pref('collapsed',{})}))
+  const [view,setView]=useState<any>(()=>({sortBy:pref('sortBy','start_date'),sortDir:pref('sortDir','asc'),showLoad:pref('showLoad',false),showEpics:pref('showEpics',true),snap:pref('snap','quarter'),collapsed:pref('collapsed',{})}))
   function setPref(k:string,v:any){setView((cur:any)=>({...cur,[k]:v}));try{localStorage.setItem('pg_strat_'+k,JSON.stringify(v))}catch{}}
   const toggleCollapsed=(key:string)=>setPref('collapsed',{...view.collapsed,[key]:!view.collapsed[key]})
   const [narrow,setNarrow]=useState(false)
@@ -228,19 +228,32 @@ export default function StrategyTab({projects,setProjects,strategies,setStrategi
   ;[...sTracks.flatMap(onTrack),...backlog].forEach(p=>shown.set(p.id,p))
   const projById=(id:any)=>(projects as any[]).find(p=>p.id===id)
 
-  // Dates after a drag of `d.dm` months: move both ends, or snap one end to a month boundary
+  // Dates after a drag of `d.dxm` months (fractional, straight from the pointer). The result
+  // snaps to the nearest boundary of a whole period, month or quarter, like a grid:
+  // starts land on the 1st, ends on the last day, and a moved bar keeps its length rounded
+  // to whole periods. Fiscal quarters (Apr–Jun, Jul–Sep, Oct–Dec, Jan–Mar) line up with
+  // calendar quarters, so quarter boundaries are month indexes divisible by 3.
   function shiftDates(s0:string,e0:string|null,d:any){
-    let s=s0,e=e0
-    if(d.mode==='move'){s=addMonths(s,d.dm);if(e)e=addMonths(e,d.dm)}
-    if(d.mode==='start'){const{y,m}=parts(s0);s=monthStartISO(y*12+m-1+d.dm);if(e&&s>e)s=monthStartISO(parts(e).y*12+parts(e).m-1)}
-    if(d.mode==='end'&&e){const{y,m}=parts(e0!);e=monthEndISO(y*12+m-1+d.dm);if(e<s)e=monthEndISO(parts(s).y*12+parts(s).m-1)}
-    return{s,e}
+    const step=d.unit==='quarter'?3:1
+    const snap=(x:number)=>Math.round(x/step)*step
+    const sPos=(iso:string)=>{const{y,m,d:dd}=parts(iso);return y*12+m-1+(dd-1)/daysIn(y,m)}
+    const ePos=(iso:string)=>{const{y,m,d:dd}=parts(iso);return y*12+m-1+dd/daysIn(y,m)} // exclusive end
+    const s1=sPos(s0),e1=e0?ePos(e0):null
+    let ns=snap(s1),ne=e1!=null?snap(e1):null
+    if(d.mode==='move'){
+      ns=snap(s1+d.dxm)
+      if(e1!=null)ne=ns+Math.max(step,snap(e1-s1))
+    }
+    if(d.mode==='start'&&e1!=null){ns=Math.min(snap(s1+d.dxm),Math.max(step,snap(e1))-step);ne=null}
+    if(d.mode==='start'&&e1==null)ns=snap(s1+d.dxm)
+    if(d.mode==='end'&&e1!=null){ne=Math.max(snap(e1+d.dxm),Math.floor(s1/step)*step+step);ns=NaN}
+    return{s:Number.isNaN(ns)?s0:monthStartISO(ns),e:ne==null?e0:monthEndISO(ne-1)}
   }
   // Bar extent for a project, with any in-progress drag applied
   function extent(p:any){
     let s=p.start_date,e=p.end_date
     if(!s)return null
-    if(drag?.id===p.id&&drag.dm)({s,e}=shiftDates(s,e,drag))
+    if(drag?.id===p.id&&drag.moved)({s,e}=shiftDates(s,e,drag))
     const open=!e||p.ongoing
     return{s,e:open?null:e,x0:clampX(posStart(s)),x1:clampX(open?TW:posEnd(e)),open}
   }
@@ -327,22 +340,23 @@ export default function StrategyTab({projects,setProjects,strategies,setStrategi
   function onBarDown(e:any,p:any,mode:string){
     e.stopPropagation()
     e.currentTarget.setPointerCapture(e.pointerId)
-    setDrag({id:p.id,mode,x0:e.clientX,dm:0,moved:false})
+    setDrag({id:p.id,mode,unit:view.snap,x0:e.clientX,dxm:0,moved:false})
   }
   function onBarMove(e:any){
     if(!drag)return
     const dx=e.clientX-drag.x0
-    const dm=Math.round(dx/MONTH_W)
-    if(dm!==drag.dm||(!drag.moved&&Math.abs(dx)>3))setDrag({...drag,dm,moved:drag.moved||Math.abs(dx)>3})
+    const dxm=Math.round(dx/MONTH_W*10)/10 // tenths of a month is plenty for snapping
+    if(dxm!==drag.dxm||(!drag.moved&&Math.abs(dx)>3))setDrag({...drag,dxm,moved:drag.moved||Math.abs(dx)>3})
   }
   async function onBarUp(p:any){
     const d=drag
     setDrag(null)
     if(!d)return
     if(!d.moved){setSelId(p.id);return}
-    if(!d.dm)return
     const{s,e}=shiftDates(p.start_date,p.end_date,d)
-    await updProject(p.id,d.mode==='end'?{end_date:e}:d.mode==='start'?{start_date:s}:{start_date:s,...(p.end_date?{end_date:e}:{})})
+    const fields:any=d.mode==='end'?{end_date:e}:d.mode==='start'?{start_date:s}:{start_date:s,...(p.end_date?{end_date:e}:{})}
+    if(Object.keys(fields).every(k=>fields[k]===p[k]))return
+    await updProject(p.id,fields)
   }
 
   // ── Epics: sub-rows under their project. An epic uses its own dates, or else the span of
@@ -365,8 +379,8 @@ export default function StrategyTab({projects,setProjects,strategies,setStrategi
     const b=epicBase(ep)
     if(!b)return null
     let{s,e}=b as any
-    if(drag?.id===ep.id&&drag.dm)({s,e}=shiftDates(s,e,drag))
-    return{s,e,derived:b.derived&&!(drag?.id===ep.id&&drag.dm),x0:clampX(posStart(s)),x1:clampX(posEnd(e))}
+    if(drag?.id===ep.id&&drag.moved)({s,e}=shiftDates(s,e,drag))
+    return{s,e,derived:b.derived&&!(drag?.id===ep.id&&drag.moved),x0:clampX(posStart(s)),x1:clampX(posEnd(e))}
   }
   async function onEpicUp(ep:any){
     const d=drag
@@ -374,8 +388,9 @@ export default function StrategyTab({projects,setProjects,strategies,setStrategi
     if(!d)return
     if(!d.moved){setSelId('epic:'+ep.id);return}
     const b=epicBase(ep)
-    if(!d.dm||!b)return
+    if(!b)return
     const{s,e}=shiftDates(b.s,b.e,d)
+    if(!b.derived&&s===ep.start_date&&e===ep.end_date)return
     await updEpic(ep.id,{start_date:s,end_date:e})
   }
   function projectEpics(p:any){
@@ -431,6 +446,10 @@ export default function StrategyTab({projects,setProjects,strategies,setStrategi
           <label title="Show each team's planned load per quarter under the roadmap" style={{display:'flex',alignItems:'center',gap:5,fontSize:11,color:'#7A8FA6',cursor:'pointer',whiteSpace:'nowrap' as const}}>
             <input type="checkbox" checked={view.showLoad} onChange={e=>setPref('showLoad',e.target.checked)} style={{accentColor:'#C8973A'}}/>Team load
           </label>
+          <select value={view.snap} onChange={e=>setPref('snap',e.target.value)} title="What dragging snaps to" style={{background:'#1E3048',color:'#F4F6F8',border:'1px solid #243447',borderRadius:6,fontSize:11,padding:'4px 8px',cursor:'pointer'}}>
+            <option value="quarter">Snap to quarters</option>
+            <option value="month">Snap to months</option>
+          </select>
           <label title="Show each project's epics under it" style={{display:'flex',alignItems:'center',gap:5,fontSize:11,color:'#7A8FA6',cursor:'pointer',whiteSpace:'nowrap' as const}}>
             <input type="checkbox" checked={view.showEpics} onChange={e=>setPref('showEpics',e.target.checked)} style={{accentColor:EPIC}}/>Epics
           </label>
@@ -557,8 +576,9 @@ export default function StrategyTab({projects,setProjects,strategies,setStrategi
                             style={{position:'absolute',left:ex.x0,width:Math.max(6,ex.x1-ex.x0),top:6,height:8,boxSizing:'border-box' as const,borderRadius:4,cursor:drag?.id===ep.id?'grabbing':'grab',touchAction:'none',
                               background:ex.derived?'transparent':'rgba(224,123,42,0.65)',border:ex.derived?`1px dashed ${EPIC}`:'none',
                               outline:isSelE?'2px solid #C8973A':'none',outlineOffset:1,opacity:done?0.45:1}}>
-                            <div onPointerDown={e=>onBarDown(e,ep,'start')} style={{position:'absolute',left:0,top:-3,bottom:-3,width:6,cursor:'ew-resize'}}/>
-                            <div onPointerDown={e=>onBarDown(e,ep,'end')} style={{position:'absolute',right:0,top:-3,bottom:-3,width:6,cursor:'ew-resize'}}/>
+                            <div onPointerDown={e=>onBarDown(e,ep,'start')} title="Drag to change the start" style={{...HANDLE,left:-4,top:-5,bottom:-5}}/>
+                            <div onPointerDown={e=>onBarDown(e,ep,'end')} title="Drag to change the end" style={{...HANDLE,right:-4,top:-5,bottom:-5}}/>
+                            {drag?.id===ep.id&&drag.moved&&<DragLabel s={ex.s} e={ex.e}/>}
                           </div>
                         )}
                       </div>
@@ -587,8 +607,9 @@ export default function StrategyTab({projects,setProjects,strategies,setStrategi
                             background:st==='proposed'?'rgba(224,123,42,0.28)':color,border:st==='proposed'?`1.5px solid ${PROPOSED}`:'none',
                             outline:isSel?'2px solid #C8973A':'none',outlineOffset:1,opacity:done?0.45:1,
                             maskImage:ex.open?'linear-gradient(90deg,#000 85%,transparent)':'none',WebkitMaskImage:ex.open?'linear-gradient(90deg,#000 85%,transparent)':'none'}}>
-                          {<div onPointerDown={e=>onBarDown(e,p,'start')} title="Drag to change the start month" style={{position:'absolute',left:0,top:0,bottom:0,width:6,cursor:'ew-resize'}}/>}
-                          {!ex.open&&<div onPointerDown={e=>onBarDown(e,p,'end')} title="Drag to change the end month" style={{position:'absolute',right:0,top:0,bottom:0,width:6,cursor:'ew-resize'}}/>}
+                          <div onPointerDown={e=>onBarDown(e,p,'start')} title="Drag to change the start" style={{...HANDLE,left:-4}}/>
+                          {!ex.open&&<div onPointerDown={e=>onBarDown(e,p,'end')} title="Drag to change the end" style={{...HANDLE,right:-4}}/>}
+                          {drag?.id===p.id&&drag.moved&&<DragLabel s={ex.s} e={ex.e}/>}
                         </div>
                       )}
                     </div>
@@ -625,7 +646,7 @@ export default function StrategyTab({projects,setProjects,strategies,setStrategi
             {view.showEpics&&<Legend swatch={{background:'rgba(224,123,42,0.65)',height:8,borderRadius:4}} label="Epic"/>}
             {view.showEpics&&<Legend swatch={{border:`1px dashed ${EPIC}`,height:8,borderRadius:4}} label="Epic dated by its stories"/>}
             <Legend swatch={{background:'rgba(255,255,255,0.12)'}} label={`Code freeze (${freeze.map(m=>MONTHS[m-1]).join(', ')||'none'})`}/>
-            <span>Drag a bar to move it. Drag its edges to change start or end.</span>
+            <span>Drag a bar to move it, or drag its ends to change its start or end. Bars snap to whole {view.snap==='quarter'?'quarters':'months'}.</span>
           </div>
         </div>
 
