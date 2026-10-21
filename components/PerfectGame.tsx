@@ -1665,7 +1665,7 @@ function Projects({items,setItems,projects,setProjects,milestones,setMilestones,
     if(!form.name.trim()) return
     setSaving(true)
     // Empty strings are invalid for Postgres date columns — send null instead
-    const payload={...form,start_date:form.start_date||null,end_date:form.ongoing?null:(form.end_date||null)}
+    const payload={...form,name:form.name.trim(),start_date:form.start_date||null,end_date:form.ongoing?null:(form.end_date||null)}
     if(editing) {
       const oldName=editing.name
       const newName=payload.name.trim()
@@ -1690,10 +1690,29 @@ function Projects({items,setItems,projects,setProjects,milestones,setMilestones,
   }
 
   async function deleteProject(id) {
-    if(!confirm('Delete this project?')) return
+    const proj=projects.find(p=>p.id===id)
+    if(!proj) return
+    const its=items.filter(i=>i.parent_project===proj.name)
+    const ms=milestones.filter(m=>m.project_id===id).length
+    const tk=tasks.filter(t=>t.project_id===id).length
+    const extras=[ms&&`${ms} milestone${ms!==1?'s':''}`,tk&&`${tk} task${tk!==1?'s':''}`].filter(Boolean)
+    if(!confirm(`Delete "${proj.name}"?`
+      +(its.length?`\n\nIts ${its.length} item${its.length!==1?'s':''} stay in the backlog with no project.`:'')
+      +`\n\nThis also permanently deletes its ${extras.length?extras.join(', ')+', ':''}budget roles, epics and dependencies.`)) return
+    const{error}=await supabase.from('projects').delete().eq('id',id)
+    if(error){alert('Failed to delete project: '+error.message);return}
     setProjects(projects.filter(p=>p.id!==id))
+    setMilestones(milestones.filter(m=>m.project_id!==id))
+    setTasks((prev:any[])=>prev.filter(t=>t.project_id!==id))
+    if(setProjectRoles)setProjectRoles((prev:any[])=>prev.filter(r=>r.project_id!==id))
+    if(setEpics)setEpics((prev:any[])=>prev.filter(e=>e.project_id!==id))
     if(selectedProject?.id===id) setSelectedProject(null)
-    await supabase.from('projects').delete().eq('id',id)
+    // Items link to projects by name, so detach them or they'd point at a project that's gone
+    if(its.length){
+      setItems(items.map(i=>i.parent_project===proj.name?{...i,parent_project:null,epic_id:null}:i))
+      const{error:itemErr}=await supabase.from('items').update({parent_project:null,epic_id:null}).eq('parent_project',proj.name).eq('space',spaceOf(proj))
+      if(itemErr)alert('The project was deleted, but unlinking its items failed: '+itemErr.message)
+    }
   }
 
   async function maybeCloseItems(project:any,newStatus:string){
@@ -8301,7 +8320,7 @@ function Assistant({open,setOpen,seed,setSeed,items:itemsProp,setItems,projects:
         if(!pr){
           if(!inp.create_if_missing)return{error:`No project matched "${inp.project}". Set create_if_missing to add it as a new proposed project.`,projects:L.projects.filter((p:any)=>spaceOf(p)==='work'&&!PROJECT_TERMINAL.includes(p.status)).map((p:any)=>p.name)}
           const team=inp.team?TEAMS.find(x=>x.toLowerCase().includes(String(inp.team).toLowerCase()))||null:null
-          const{data,error}=await supabase.from('projects').insert({name:inp.project,team,status:'Planning',priority:'P3',rag:'Green',color:'#E07B2A',description:inp.description||'',
+          const{data,error}=await supabase.from('projects').insert({name:String(inp.project).trim(),team,status:'Planning',priority:'P3',rag:'Green',color:'#E07B2A',description:inp.description||'',
             sort_order:L.projects.length,space:'work',planning_state:'proposed',...fields}).select().single()
           if(error)return{error:error.message}
           setProjects((prev:any[])=>[...prev,data]);pushLive('projects',data)
@@ -8533,28 +8552,9 @@ useEffect(()=>{
     if(goalData) setTrackGoals(goalData)
     if(depData) setProjectDeps(depData)
 
-    // Auto-create any missing projects from parent_project values
-    if(itemData&&projectData){
-      const existingNames=new Set(projectData.map(p=>p.name))
-      const missingNames=[...new Set(itemData.map(i=>i.parent_project).filter(Boolean))].filter(n=>!existingNames.has(n))
-      if(missingNames.length>0){
-        const newProjects=missingNames.map((name,i)=>({
-          name,
-          description:'',
-          priority:'P3',
-          status:'Planning',
-          rag:'Green',
-          team:'Consumer Experience',
-          color:'#2E86AB',
-          sort_order:(projectData.length+i),
-        }))
-        const{data:created}=await supabase.from('projects').insert(newProjects).select()
-        const allProjects=[...projectData,...(created||[])]
-        setProjects(allProjects)
-      } else {
-        setProjects(projectData)
-      }
-    }
+    // Items that name a project that doesn't exist are shown as-is. (This used to recreate the
+    // project, which brought deleted projects back and made duplicates during bulk adds.)
+    if(projectData) setProjects(projectData)
     setLoading(false)
   }
   load()
