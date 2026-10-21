@@ -1,6 +1,7 @@
 'use client'
-import { useState, useEffect, Fragment } from 'react'
+import { useState, useEffect, useRef, Fragment } from 'react'
 import { supabase } from '../lib/supabase'
+import { DependencyLayer, DepHandle, createDependency, deleteDependency, depKey } from './DependencyLayer'
 
 // ── Strategy roadmap ─────────────────────────────────────────────────────────
 // A strategy spans whole fiscal years (FY runs Apr–Mar; FY27 = Apr 2026–Mar 2027) and
@@ -161,18 +162,27 @@ export default function StrategyTab({projects,setProjects,strategies,setStrategi
     if(error){alert('Failed to save goal: '+error.message);return}
     if(data)setGoals((prev:any[])=>[...prev.filter(g=>!(g.track_id===track_id&&g.fy===fy)),data])
   }
-  async function addDep(projectId:any,dependsOnId:any){
-    if(!dependsOnId||projectId===dependsOnId)return
-    if(deps.some((d:any)=>d.project_id===projectId&&d.depends_on_id===dependsOnId))return
-    const{data,error}=await supabase.from('project_dependencies').insert({project_id:projectId,depends_on_id:dependsOnId}).select().single()
-    if(error){alert('Failed to add dependency: '+error.message);return}
-    if(data)setDeps((prev:any[])=>[...prev,data])
+  const addDep=(blocker:string,blocked:string)=>createDependency(blocker,blocked,deps,setDeps)
+  const removeDep=(d:any)=>{if(confirm(`Remove the dependency ${keyName(depKey(d.blocker_type,d.blocker_id))} → ${keyName(depKey(d.blocked_type,d.blocked_id))}?`))deleteDependency(d,setDeps)}
+  // Names and dates for anything a dependency can point at
+  function keyName(key:string){
+    const[t,id]=key.split(':')
+    if(t==='project')return projById(id)?.name||'(deleted project)'
+    if(t==='epic')return '◆ '+((epics as any[]).find(e=>e.id===id)?.name||'(deleted epic)')
+    const it=(items as any[]).find(i=>i.id===id)
+    return it?`${it.item_id} ${it.name}`:'(deleted item)'
   }
-  async function removeDep(id:any){
-    setDeps((prev:any[])=>prev.filter(d=>d.id!==id))
-    const{error}=await supabase.from('project_dependencies').delete().eq('id',id)
-    if(error)alert('Failed to remove dependency: '+error.message)
+  function keyDates(key:string):{s:string|null,e:string|null,open?:boolean}|null{
+    const[t,id]=key.split(':')
+    if(t==='project'){const p=projById(id);return p?{s:p.start_date,e:p.ongoing?null:p.end_date,open:!!p.ongoing}:null}
+    if(t==='epic'){const ep=(epics as any[]).find(e=>e.id===id);const b=ep&&epicBase(ep);return b?{s:b.s,e:b.e}:null}
+    const it=(items as any[]).find(i=>i.id===id);return it?{s:it.start_date,e:it.end_date}:null
   }
+  const depBad=(d:any)=>{
+    const a=keyDates(depKey(d.blocker_type,d.blocker_id)),b=keyDates(depKey(d.blocked_type,d.blocked_id))
+    return !!(a?.e&&b?.s&&b.s<=a.e)
+  }
+  const gridRef=useRef<HTMLDivElement>(null)
   async function createProject(name:string,team:string,trackId:any,wt:string='new'){
     const n=name.trim()
     if(!n)return
@@ -260,15 +270,15 @@ export default function StrategyTab({projects,setProjects,strategies,setStrategi
 
   // ── Checks: dependencies, code freeze, team capacity ─────────────────────
   const issues:any[]=[]
-  const sDeps=(deps as any[]).filter(d=>shown.has(d.project_id)||shown.has(d.depends_on_id))
-  for(const d of sDeps){
-    const succ=projById(d.project_id),pred=projById(d.depends_on_id)
-    if(!succ||!pred)continue
-    if(succ.start_date&&pred.start_date&&!pred.end_date&&!pred.ongoing)continue
-    if(succ.start_date&&pred.end_date&&!pred.ongoing&&succ.start_date<=pred.end_date)
-      issues.push({kind:'dep',id:succ.id,text:`${succ.name} starts ${fmtDate(succ.start_date)}, before ${pred.name} finishes ${fmtDate(pred.end_date)}.`})
-    if(succ.start_date&&pred.ongoing)
-      issues.push({kind:'dep',id:succ.id,text:`${succ.name} depends on ${pred.name}, which has no end date.`})
+  const shownKeys=new Set<string>()
+  shown.forEach(p=>{shownKeys.add(depKey('project',p.id));if(view.showEpics)projectEpics(p).forEach(e=>shownKeys.add(depKey('epic',e.id)))})
+  for(const d of deps as any[]){
+    const from=depKey(d.blocker_type,d.blocker_id),to=depKey(d.blocked_type,d.blocked_id)
+    if(!shownKeys.has(from)&&!shownKeys.has(to))continue
+    const a=keyDates(from),b=keyDates(to)
+    const sel=d.blocked_type==='project'?d.blocked_id:d.blocked_type==='epic'?'epic:'+d.blocked_id:null
+    if(a?.e&&b?.s&&b.s<=a.e)issues.push({kind:'dep',id:sel,text:`${keyName(to)} starts ${fmtDate(b.s)}, before ${keyName(from)} finishes ${fmtDate(a.e)}.`})
+    else if(a?.open&&b?.s)issues.push({kind:'dep',id:sel,text:`${keyName(to)} depends on ${keyName(from)}, which has no end date.`})
   }
   for(const p of shown.values()){
     if(p.ongoing||!p.end_date)continue
@@ -332,8 +342,7 @@ export default function StrategyTab({projects,setProjects,strategies,setStrategi
     loads.forEach(l=>rows.push({kind:'load',load:l,h:ROW_H}))
   }
   let yAcc=0
-  const yOf=new Map<string,number>()
-  rows.forEach(r=>{r.y=yAcc;if(r.kind==='project')yOf.set(r.p.id,yAcc+r.h/2);yAcc+=r.h})
+  rows.forEach(r=>{r.y=yAcc;yAcc+=r.h})
   const bodyH=yAcc
 
   // ── Drag & place ──────────────────────────────────────────────────────────
@@ -464,7 +473,7 @@ export default function StrategyTab({projects,setProjects,strategies,setStrategi
       <div style={{flex:1,display:'flex',flexDirection:narrow?'column':'row',minHeight:0}}>
         {/* Roadmap grid */}
         <div style={{flex:1,overflow:'auto',minWidth:0,position:'relative'}}>
-          <div style={{width:LABEL_W+TW,position:'relative'}}>
+          <div ref={gridRef} style={{width:LABEL_W+TW,position:'relative'}}>
             {/* Header: fiscal years and quarters */}
             <div style={{position:'sticky',top:0,zIndex:5,background:'#162436',borderBottom:'1px solid #243447'}}>
               <div style={{display:'flex'}}>
@@ -571,7 +580,7 @@ export default function StrategyTab({projects,setProjects,strategies,setStrategi
                       <div style={{width:TW,position:'relative'}}>
                         {!ex&&<span style={{position:'absolute',left:8,top:3,fontSize:9.5,color:'#3A4A5E',fontStyle:'italic'}}>No dates on the epic or its stories</span>}
                         {ex&&(
-                          <div title={`◆ ${ep.name}\n${fmtDate(ex.s)} → ${fmtDate(ex.e)}${ex.derived?'\nDates from its stories. Drag to give the epic its own dates.':''}`}
+                          <div data-dep-key={depKey('epic',ep.id)} title={`◆ ${ep.name}\n${fmtDate(ex.s)} → ${fmtDate(ex.e)}${ex.derived?'\nDates from its stories. Drag to give the epic its own dates.':''}`}
                             onPointerDown={e=>onBarDown(e,ep,'move')} onPointerMove={onBarMove} onPointerUp={()=>onEpicUp(ep)} onClick={e=>e.stopPropagation()}
                             style={{position:'absolute',left:ex.x0,width:Math.max(6,ex.x1-ex.x0),top:6,height:8,boxSizing:'border-box' as const,borderRadius:4,cursor:drag?.id===ep.id?'grabbing':'grab',touchAction:'none',
                               background:ex.derived?'transparent':'rgba(224,123,42,0.65)',border:ex.derived?`1px dashed ${EPIC}`:'none',
@@ -579,6 +588,7 @@ export default function StrategyTab({projects,setProjects,strategies,setStrategi
                             <div onPointerDown={e=>onBarDown(e,ep,'start')} title="Drag to change the start" style={{...HANDLE,left:-4,top:-5,bottom:-5}}/>
                             <div onPointerDown={e=>onBarDown(e,ep,'end')} title="Drag to change the end" style={{...HANDLE,right:-4,top:-5,bottom:-5}}/>
                             {drag?.id===ep.id&&drag.moved&&<DragLabel s={ex.s} e={ex.e}/>}
+                            {!drag&&<DepHandle k={depKey('epic',ep.id)} size={8}/>}
                           </div>
                         )}
                       </div>
@@ -601,7 +611,7 @@ export default function StrategyTab({projects,setProjects,strategies,setStrategi
                     <div onClick={e=>onRowClick(e,p)} style={{width:TW,position:'relative',cursor:p.start_date?'default':'copy'}}>
                       {!ex&&<span style={{position:'absolute',left:8,top:6,fontSize:10,color:'#3A4A5E',fontStyle:'italic',pointerEvents:'none'}}>No dates. Click a quarter to place it there.</span>}
                       {ex&&(
-                        <div title={`${p.name}\n${STATE_LABEL[st]} · ${WORK_LABEL[workType(p)]} · ${fmtDate(ex.s)} → ${ex.e?fmtDate(ex.e):'ongoing'}`}
+                        <div data-dep-key={depKey('project',p.id)} title={`${p.name}\n${STATE_LABEL[st]} · ${WORK_LABEL[workType(p)]} · ${fmtDate(ex.s)} → ${ex.e?fmtDate(ex.e):'ongoing'}`}
                           onPointerDown={e=>onBarDown(e,p,'move')} onPointerMove={onBarMove} onPointerUp={()=>onBarUp(p)} onClick={e=>e.stopPropagation()}
                           style={{position:'absolute',left:ex.x0,width:Math.max(6,ex.x1-ex.x0),top:6,height:r.h-12,boxSizing:'border-box' as const,borderRadius:3,cursor:drag?.id===p.id?'grabbing':'grab',touchAction:'none',
                             background:st==='proposed'?'rgba(224,123,42,0.28)':color,border:st==='proposed'?`1.5px solid ${PROPOSED}`:'none',
@@ -610,6 +620,7 @@ export default function StrategyTab({projects,setProjects,strategies,setStrategi
                           <div onPointerDown={e=>onBarDown(e,p,'start')} title="Drag to change the start" style={{...HANDLE,left:-4}}/>
                           {!ex.open&&<div onPointerDown={e=>onBarDown(e,p,'end')} title="Drag to change the end" style={{...HANDLE,right:-4}}/>}
                           {drag?.id===p.id&&drag.moved&&<DragLabel s={ex.s} e={ex.e}/>}
+                          {!drag&&<DepHandle k={depKey('project',p.id)}/>}
                         </div>
                       )}
                     </div>
@@ -617,24 +628,8 @@ export default function StrategyTab({projects,setProjects,strategies,setStrategi
                 )
               })}
 
-              {/* Dependency arrows */}
-              <svg width={TW} height={bodyH} style={{position:'absolute',left:LABEL_W,top:0,pointerEvents:'none',zIndex:2,overflow:'visible'}}>
-                <defs>
-                  <marker id="pg-arrow" viewBox="0 0 8 8" refX="7" refY="4" markerWidth="7" markerHeight="7" orient="auto"><path d="M0,0 L8,4 L0,8 z" fill={PROPOSED}/></marker>
-                  <marker id="pg-arrow-bad" viewBox="0 0 8 8" refX="7" refY="4" markerWidth="7" markerHeight="7" orient="auto"><path d="M0,0 L8,4 L0,8 z" fill="#E74C3C"/></marker>
-                </defs>
-                {sDeps.map(d=>{
-                  const succ=projById(d.project_id),pred=projById(d.depends_on_id)
-                  if(!succ||!pred||!yOf.has(succ.id)||!yOf.has(pred.id))return null
-                  const es=extent(succ),ep=extent(pred)
-                  if(!es||!ep)return null
-                  const x1=ep.x1,y1=yOf.get(pred.id)!,x2=es.x0,y2=yOf.get(succ.id)!
-                  const bad=issues.some(i=>i.kind==='dep'&&i.id===succ.id&&i.text.includes(pred.name))
-                  const c=Math.max(24,Math.abs(x2-x1)/2)
-                  return <path key={d.id} d={`M${x1},${y1} C${x1+c},${y1} ${x2-c},${y2} ${x2},${y2}`} fill="none" stroke={bad?'#E74C3C':PROPOSED} strokeWidth={1.4} strokeOpacity={0.85}
-                    markerEnd={`url(#${bad?'pg-arrow-bad':'pg-arrow'})`}/>
-                })}
-              </svg>
+              <DependencyLayer containerRef={gridRef} deps={(deps as any[]).filter(d=>shownKeys.has(depKey(d.blocker_type,d.blocker_id))&&shownKeys.has(depKey(d.blocked_type,d.blocked_id)))}
+                isBad={depBad} label={keyName} onCreate={addDep} onDelete={removeDep}/>
             </div>
           </div>
           {/* Legend */}
@@ -646,6 +641,7 @@ export default function StrategyTab({projects,setProjects,strategies,setStrategi
             {view.showEpics&&<Legend swatch={{background:'rgba(224,123,42,0.65)',height:8,borderRadius:4}} label="Epic"/>}
             {view.showEpics&&<Legend swatch={{border:`1px dashed ${EPIC}`,height:8,borderRadius:4}} label="Epic dated by its stories"/>}
             <Legend swatch={{background:'rgba(255,255,255,0.12)'}} label={`Code freeze (${freeze.map(m=>MONTHS[m-1]).join(', ')||'none'})`}/>
+            <span>Drag the dot at a bar&apos;s end onto another bar to add a dependency, and click a line to remove it.</span>
             <span>Drag a bar to move it, or drag its ends to change its start or end. Bars snap to whole {view.snap==='quarter'?'quarters':'months'}.</span>
           </div>
         </div>
@@ -659,7 +655,7 @@ export default function StrategyTab({projects,setProjects,strategies,setStrategi
               onOpenProject={onOpenProject}/>
           ):sel?(
             <ProjectPanel p={sel} state={state(sel)} tracks={sTracks} projects={live} deps={deps} shown={shown} issues={issues.filter(i=>i.id===sel.id)}
-              updProject={updProject} addDep={addDep} removeDep={removeDep} onClose={()=>setSelId(null)} onOpenProject={onOpenProject}/>
+              updProject={updProject} addDep={addDep} removeDep={removeDep} keyName={keyName} onClose={()=>setSelId(null)} onOpenProject={onOpenProject}/>
           ):(
             <SettingsPanel strategy={strategy} tracks={sTracks} projects={live} teams={teams} issues={issues} setSelId={setSelId}
               updStrategy={updStrategy} deleteStrategy={deleteStrategy} addTrack={addTrack} updTrack={updTrack} moveTrack={moveTrack} deleteTrack={deleteTrack}
@@ -683,11 +679,11 @@ const H={fontSize:10,fontWeight:700,color:'#7A8FA6',letterSpacing:1,marginBottom
 const INPUT={width:'100%',boxSizing:'border-box' as const,background:'#1E3048',border:'1px solid #243447',borderRadius:5,color:'#F4F6F8',fontSize:12,padding:'6px 8px'}
 const SECTION={padding:'14px 16px',borderBottom:'1px solid #243447',display:'flex',flexDirection:'column' as const,gap:8}
 
-function ProjectPanel({p,state,tracks,projects,deps,shown,issues,updProject,addDep,removeDep,onClose,onOpenProject}:any){
-  const waitsOn=deps.filter((d:any)=>d.project_id===p.id)
-  const blocks=deps.filter((d:any)=>d.depends_on_id===p.id)
-  const name=(id:any)=>projects.find((x:any)=>x.id===id)?.name||'(deleted project)'
-  const candidates=projects.filter((x:any)=>x.id!==p.id&&shown.has(x.id)&&!waitsOn.some((d:any)=>d.depends_on_id===x.id)).sort((a:any,b:any)=>a.name.localeCompare(b.name))
+function ProjectPanel({p,state,tracks,projects,deps,shown,issues,updProject,addDep,removeDep,keyName,onClose,onOpenProject}:any){
+  const me='project:'+p.id
+  const waitsOn=deps.filter((d:any)=>`${d.blocked_type}:${d.blocked_id}`===me)
+  const blocks=deps.filter((d:any)=>`${d.blocker_type}:${d.blocker_id}`===me)
+  const candidates=projects.filter((x:any)=>x.id!==p.id&&shown.has(x.id)&&!waitsOn.some((d:any)=>d.blocker_type==='project'&&d.blocker_id===x.id)).sort((a:any,b:any)=>a.name.localeCompare(b.name))
   return(
     <div>
       <div style={{...SECTION,flexDirection:'row',alignItems:'center',background:'#162436'}}>
@@ -739,11 +735,11 @@ function ProjectPanel({p,state,tracks,projects,deps,shown,issues,updProject,addD
         {waitsOn.length===0&&<div style={{fontSize:11,color:'#3A4A5E',fontStyle:'italic'}}>Nothing</div>}
         {waitsOn.map((d:any)=>(
           <div key={d.id} style={{display:'flex',alignItems:'center',gap:6,fontSize:12,color:'#F4F6F8'}}>
-            <span style={{color:PROPOSED}}>←</span><span style={{flex:1}}>{name(d.depends_on_id)}</span>
-            <button onClick={()=>removeDep(d.id)} title="Remove dependency" style={{background:'none',border:'none',color:'#7A8FA6',cursor:'pointer'}}>✕</button>
+            <span style={{color:PROPOSED}}>←</span><span style={{flex:1}}>{keyName(`${d.blocker_type}:${d.blocker_id}`)}</span>
+            <button onClick={()=>removeDep(d)} title="Remove dependency" style={{background:'none',border:'none',color:'#7A8FA6',cursor:'pointer'}}>✕</button>
           </div>
         ))}
-        {candidates.length>0&&<select value="" onChange={e=>addDep(p.id,e.target.value)} style={{...INPUT,color:'#7A8FA6',borderStyle:'dashed'}}>
+        {candidates.length>0&&<select value="" onChange={e=>e.target.value&&addDep('project:'+e.target.value,me)} style={{...INPUT,color:'#7A8FA6',borderStyle:'dashed'}}>
           <option value="">+ Add a project it depends on…</option>
           {candidates.map((x:any)=><option key={x.id} value={x.id}>{x.name}</option>)}
         </select>}
@@ -751,8 +747,8 @@ function ProjectPanel({p,state,tracks,projects,deps,shown,issues,updProject,addD
           <div style={{...H,marginTop:8}}>WAITING ON THIS PROJECT</div>
           {blocks.map((d:any)=>(
             <div key={d.id} style={{display:'flex',alignItems:'center',gap:6,fontSize:12,color:'#F4F6F8'}}>
-              <span style={{color:PROPOSED}}>→</span><span style={{flex:1}}>{name(d.project_id)}</span>
-              <button onClick={()=>removeDep(d.id)} title="Remove dependency" style={{background:'none',border:'none',color:'#7A8FA6',cursor:'pointer'}}>✕</button>
+              <span style={{color:PROPOSED}}>→</span><span style={{flex:1}}>{keyName(`${d.blocked_type}:${d.blocked_id}`)}</span>
+              <button onClick={()=>removeDep(d)} title="Remove dependency" style={{background:'none',border:'none',color:'#7A8FA6',cursor:'pointer'}}>✕</button>
             </div>
           ))}
         </>}

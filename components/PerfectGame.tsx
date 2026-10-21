@@ -4,6 +4,7 @@ import { supabase } from '../lib/supabase'
 import * as XLSX from 'xlsx'
 import StrategyTab from './StrategyTab'
 import { EpicsSection } from './Epics'
+import { DependencyLayer, DepHandle, createDependency, deleteDependency, depKey } from './DependencyLayer'
 import { EpicRow, EpicPanel, epicProject, epicWorkType, convertStoryToEpic, convertEpicToStory } from './BacklogEpics'
 
 const T = {
@@ -3118,7 +3119,7 @@ const sorted=items.filter(i=>!isItemDone(i)).sort((a,b)=>{
 }
 
 // ── ROADMAP ───────────────────────────────────────────────────────────────
-function Roadmap({items,setItems,projects,setProjects,milestones,setMilestones,tasks=[],setTasks,sprints=[],itemAssignments=[],projectRoles=[],people=[],roles=[],onOpenProject}:{items:any[],projects:any[],setItems:any,setProjects:any,milestones:any[],setMilestones?:any,tasks?:any[],setTasks?:any,sprints?:any[],itemAssignments?:any[],projectRoles?:any[],people?:any[],roles?:any[],onOpenProject?:(p:any)=>void}) {
+function Roadmap({items,setItems,projects,setProjects,milestones,setMilestones,tasks=[],setTasks,sprints=[],itemAssignments=[],projectRoles=[],people=[],roles=[],onOpenProject,deps=[],setDeps}:{items:any[],projects:any[],setItems:any,setProjects:any,milestones:any[],setMilestones?:any,tasks?:any[],setTasks?:any,sprints?:any[],itemAssignments?:any[],projectRoles?:any[],people?:any[],roles?:any[],onOpenProject?:(p:any)=>void,deps?:any[],setDeps?:any}) {
   const [showSprints,setShowSprints]=useState(false)
   const [sprintPopover,setSprintPopover]=useState<any>(null) // {start_date,end_date} of clicked band
   const [view,setView]=useState('quarter')
@@ -3246,6 +3247,12 @@ function Roadmap({items,setItems,projects,setProjects,milestones,setMilestones,t
   const [dragTooltip,setDragTooltip]=useState(null)
   const [backlogHover,setBacklogHover]=useState(false)
   const ganttRef=useRef(null)
+  const depRef=useRef<HTMLDivElement>(null)
+  // Dependency lines between projects and items (same table the Strategy roadmap draws)
+  const depName=(key:string)=>{const[t,id]=key.split(':');if(t==='project')return projects.find((p:any)=>p.id===id)?.name||'(project)';const it=items.find((i:any)=>i.id===id);return it?`${it.item_id} ${it.name}`:'(item)'}
+  const depDates=(key:string)=>{const[t,id]=key.split(':');const x=t==='project'?projects.find((p:any)=>p.id===id):items.find((i:any)=>i.id===id);return x?{s:x.start_date,e:x.ongoing?null:x.end_date}:null}
+  const depBad=(d:any)=>{const a=depDates(depKey(d.blocker_type,d.blocker_id)),b=depDates(depKey(d.blocked_type,d.blocked_id));return !!(a?.e&&b?.s&&b.s<=a.e)}
+  const roadmapDeps=(deps as any[]).filter(d=>d.blocker_type!=='epic'&&d.blocked_type!=='epic')
   const labelRef=useRef(null)
   const scrollAnchorRef=useRef<string|null>(null) // ISO date the view was centered on, captured just before a zoom change
   const barDragState=useRef(null)
@@ -3551,7 +3558,7 @@ function Roadmap({items,setItems,projects,setProjects,milestones,setMilestones,t
     const leftPx=pct(item.start_date)
     const widthPx=barPx(item.start_date,item.end_date)
     return(
-      <div style={{position:'absolute',top:6,height:28,left:leftPx,width:widthPx,zIndex:3,minWidth:8,opacity:isDragging?0.6:isTerminal?0.75:1}}>
+      <div data-dep-key={depKey('item',item.id)} style={{position:'absolute',top:6,height:28,left:leftPx,width:widthPx,zIndex:3,minWidth:8,opacity:isDragging?0.6:isTerminal?0.75:1}}>
         <div onMouseDown={e=>startBarDrag(e,item,'left')} style={{position:'absolute',left:0,top:0,bottom:0,width:8,cursor:'ew-resize',zIndex:5,background:'rgba(255,255,255,0.2)',borderRadius:'4px 0 0 4px'}}/>
         <div draggable onDragStart={e=>{e.dataTransfer.setData('itemId',item.id);e.dataTransfer.effectAllowed='move'}}
           onMouseDown={e=>startBarDrag(e,item,'move')}
@@ -3566,6 +3573,7 @@ function Roadmap({items,setItems,projects,setProjects,milestones,setMilestones,t
           {item.name}
         </div>
         <div onMouseDown={e=>startBarDrag(e,item,'right')} style={{position:'absolute',right:0,top:0,bottom:0,width:8,cursor:'ew-resize',zIndex:5,background:'rgba(255,255,255,0.2)',borderRadius:'0 4px 4px 0'}}/>
+        {setDeps&&!isDragging&&<DepHandle k={depKey('item',item.id)}/>}
       </div>
     )
   }
@@ -3810,7 +3818,10 @@ function Roadmap({items,setItems,projects,setProjects,milestones,setMilestones,t
                 </div>
               </div>
             )}
-            <div style={{minWidth:TOTAL_W,position:'relative'}}>
+            <div ref={depRef} style={{minWidth:TOTAL_W,position:'relative'}}>
+              {setDeps&&<DependencyLayer containerRef={depRef} deps={roadmapDeps} isBad={depBad} label={depName}
+                onCreate={(a:string,b:string)=>createDependency(a,b,deps as any[],setDeps)}
+                onDelete={(d:any)=>{if(confirm(`Remove the dependency ${depName(depKey(d.blocker_type,d.blocker_id))} → ${depName(depKey(d.blocked_type,d.blocked_id))}?`))deleteDependency(d,setDeps)}}/>}
               {showSprints&&sprintBands.map(({key,start,end,ix}:any)=>{
                 const x1=pct(start),x2=pct(end)
                 return(
@@ -3866,7 +3877,7 @@ function Roadmap({items,setItems,projects,setProjects,milestones,setMilestones,t
                           onDrop={e=>handleGanttDrop(e,group.name,col)}/>
                       ))}
                       {group.bar_start&&group.bar_end&&(
-                        <div style={{position:'absolute',top:10,height:32,left:pct(group.bar_start),width:group.ongoing?Math.max(cols.length*COL_W-pct(group.bar_start),8):barPx(group.bar_start,group.bar_end),zIndex:3,minWidth:8}}>
+                        <div data-dep-key={depKey('project',group.id)} style={{position:'absolute',top:10,height:32,left:pct(group.bar_start),width:group.ongoing?Math.max(cols.length*COL_W-pct(group.bar_start),8):barPx(group.bar_start,group.bar_end),zIndex:3,minWidth:8}}>
                           <div onMouseDown={e=>startProjectBarDrag(e,group,'left')} style={{position:'absolute',left:0,top:0,bottom:0,width:10,cursor:'ew-resize',zIndex:5,background:'rgba(255,255,255,0.2)',borderRadius:'4px 0 0 4px'}}/>
                           <div draggable onDragStart={e=>{e.dataTransfer.setData('projectId',group.id);e.dataTransfer.effectAllowed='move'}}
                             onMouseDown={e=>startProjectBarDrag(e,group,'move')}
@@ -3875,6 +3886,7 @@ function Roadmap({items,setItems,projects,setProjects,milestones,setMilestones,t
                             {!PROJECT_TERMINAL.includes(group.status)&&group.violations.length>0&&<span style={{marginLeft:6,fontSize:10}}>⚠️</span>}
                           </div>
                           <div onMouseDown={e=>startProjectBarDrag(e,group,'right')} style={{position:'absolute',right:0,top:0,bottom:0,width:10,cursor:'ew-resize',zIndex:5,background:'rgba(255,255,255,0.2)',borderRadius:'0 4px 4px 0'}}/>
+                          {setDeps&&!group.ongoing&&<DepHandle k={depKey('project',group.id)}/>}
                         </div>
                       )}
                       {milestones.filter(m=>m.project_id===group.id&&m.date).map(m=>{
@@ -8266,7 +8278,7 @@ function Assistant({open,setOpen,seed,setSeed,items:itemsProp,setItems,projects:
         const trIds=new Set(trs.map((t:any)=>t.id))
         const work=L.projects.filter((p:any)=>spaceOf(p)==='work')
         const fmtP=(p:any)=>({name:p.name,team:p.team,status:p.status,state:p.planning_state==='proposed'?'proposed':'planned',work_type:workTypeOfProject(p),start:p.start_date,end:p.ongoing?'ongoing':p.end_date,
-          depends_on:L.deps.filter((d:any)=>d.project_id===p.id).map((d:any)=>pname(d.depends_on_id)).filter(Boolean)})
+          depends_on:L.deps.filter((d:any)=>d.blocked_type==='project'&&d.blocked_id===p.id&&d.blocker_type==='project').map((d:any)=>pname(d.blocker_id)).filter(Boolean)})
         return{
           strategy:{name:st.name,fiscal_years:`FY${st.start_fy}–FY${st.end_fy} (FY runs Apr–Mar; FY${st.start_fy} starts ${st.start_fy-1}-04-01)`,sustain_pct:st.bau_pct,new_project_pct:100-Number(st.bau_pct),code_freeze_months:st.freeze_months},
           tracks:trs.map((t:any)=>({name:t.name,description:t.description,
@@ -8337,17 +8349,17 @@ function Assistant({open,setOpen,seed,setSeed,items:itemsProp,setItems,projects:
         const a=findProject(inp.project),b=findProject(inp.depends_on)
         if(!a||!b)return{error:`No project matched "${!a?inp.project:inp.depends_on}"`}
         if(a.id===b.id)return{error:'A project cannot depend on itself'}
-        const existing=L.deps.find((d:any)=>d.project_id===a.id&&d.depends_on_id===b.id)
+        const existing=L.deps.find((d:any)=>d.blocked_type==='project'&&d.blocked_id===a.id&&d.blocker_type==='project'&&d.blocker_id===b.id)
         if(name==='remove_dependency'){
           if(!existing)return{error:`${a.name} does not depend on ${b.name}`}
           setDeps((prev:any[])=>prev.filter((d:any)=>d.id!==existing.id))
           live.current={...live.current,deps:live.current.deps.filter((d:any)=>d.id!==existing.id)}
-          const{error}=await supabase.from('project_dependencies').delete().eq('id',existing.id)
+          const{error}=await supabase.from('work_dependencies').delete().eq('id',existing.id)
           if(error)return{error:error.message}
           return{removed:{project:a.name,depended_on:b.name}}
         }
         if(existing)return{unchanged:`${a.name} already depends on ${b.name}`}
-        const{data,error}=await supabase.from('project_dependencies').insert({project_id:a.id,depends_on_id:b.id}).select().single()
+        const{data,error}=await supabase.from('work_dependencies').insert({blocker_type:'project',blocker_id:b.id,blocked_type:'project',blocked_id:a.id}).select().single()
         if(error)return{error:error.message}
         setDeps((prev:any[])=>[...prev,data]);pushLive('deps',data)
         return{created:{project:a.name,depends_on:b.name}}
@@ -8531,7 +8543,7 @@ useEffect(()=>{
       supabase.from('strategies').select('*').order('sort_order',{ascending:true}),
       supabase.from('tracks').select('*').order('sort_order',{ascending:true}),
       supabase.from('track_goals').select('*'),
-      supabase.from('project_dependencies').select('*'),
+      supabase.from('work_dependencies').select('*'),
     ])
     if(itemData) setItems(itemData)
     if(milestoneData) setMilestones(milestoneData)
@@ -8631,7 +8643,7 @@ useEffect(()=>{
           onOpenProject={(p:any)=>{setSelectedProject(p);setActiveTab('projects')}} openAssistant={(t:string)=>{setAsstSeed(t);setAsstOpen(true)}}
           items={items.filter(inSpace)} epics={epics} setEpics={setEpics}/>}
         {activeTab==='projects'&&<Projects items={sItems} setItems={setSItems} projects={sProjects} setProjects={setSProjects} milestones={sMilestones} setMilestones={setSMilestones} tasks={tasks} setTasks={setTasks} space={space} ccrs={ccrs} ccrItems={ccrItems} roles={roles} people={people} projectRoles={projectRoles} setProjectRoles={setProjectRoles} itemAssignments={itemAssignments} setItemAssignments={setItemAssignments} sprints={sprints} selectedProject={selectedProject} setSelectedProject={setSelectedProject} epics={epics} setEpics={setEpics}/>}
-{activeTab==='roadmap'&&<Roadmap items={sItems} setItems={setSItems} projects={sProjects} setProjects={setSProjects} milestones={sMilestones} setMilestones={setSMilestones} tasks={tasks} setTasks={setTasks} sprints={sprints} itemAssignments={itemAssignments} projectRoles={projectRoles} people={people} roles={roles} onOpenProject={(p:any)=>{setSelectedProject(p);setActiveTab('projects')}}/>}
+{activeTab==='roadmap'&&<Roadmap deps={projectDeps} setDeps={setProjectDeps} items={sItems} setItems={setSItems} projects={sProjects} setProjects={setSProjects} milestones={sMilestones} setMilestones={setSMilestones} tasks={tasks} setTasks={setTasks} sprints={sprints} itemAssignments={itemAssignments} projectRoles={projectRoles} people={people} roles={roles} onOpenProject={(p:any)=>{setSelectedProject(p);setActiveTab('projects')}}/>}
         {activeTab==='teams'&&<Teams items={sItems} projects={sProjects} milestones={sMilestones} ccrs={ccrs} ccrItems={ccrItems}/>}
         {activeTab==='desk'&&<Desk items={items} setItems={setItems} projects={projects} setProjects={setProjects} milestones={milestones} setMilestones={setMilestones} tasks={tasks} setTasks={setTasks} ccrs={ccrs} setCcrs={setCcrs} ccrItems={ccrItems} setCcrItems={setCcrItems} space={space} openAssistant={(t:string)=>{setAsstSeed(t);setAsstOpen(true)}}/>}
         <Assistant open={asstOpen} setOpen={setAsstOpen} seed={asstSeed} setSeed={setAsstSeed} items={items} setItems={setItems} projects={projects} setProjects={setProjects} milestones={milestones} tasks={tasks} setTasks={setTasks} ccrs={ccrs} setCcrs={setCcrs} ccrItems={ccrItems} setCcrItems={setCcrItems} space={space}
