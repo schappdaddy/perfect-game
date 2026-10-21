@@ -4,6 +4,7 @@ import { supabase } from '../lib/supabase'
 import * as XLSX from 'xlsx'
 import StrategyTab from './StrategyTab'
 import { EpicsSection } from './Epics'
+import { EpicRow, EpicPanel, epicProject, epicWorkType, convertStoryToEpic, convertEpicToStory } from './BacklogEpics'
 
 const T = {
   navy:'#0D1B2A',navyMid:'#162436',navyLt:'#1E3048',
@@ -2034,7 +2035,7 @@ function PanelField({label,field,type='text',selected,upd}:{label:string,field:s
   )
 }
 
-function Backlog({items,setItems,projects,setProjects,space,ccrs=[],ccrItems=[],setCcrItems,epics=[],sustainPct=30}:{items:any[],setItems:any,projects:any[],setProjects:any,space:string,ccrs?:any[],ccrItems?:any[],setCcrItems?:any,epics?:any[],sustainPct?:number}) {
+function Backlog({items,setItems,projects,setProjects,space,ccrs=[],ccrItems=[],setCcrItems,epics=[],setEpics,sustainPct=30}:{items:any[],setItems:any,projects:any[],setProjects:any,space:string,ccrs?:any[],ccrItems?:any[],setCcrItems?:any,epics?:any[],setEpics?:any,sustainPct?:number}) {
   // CCR membership helpers — the link is a junction row, edited from either side
   const itemCcrLink=(itemId:any)=>{const l=(ccrItems as any[]).find((x:any)=>x.item_id===itemId);return l?{link:l,ccr:(ccrs as any[]).find((c:any)=>c.id===l.ccr_id)}:null}
   async function detachItemCcr(itemId:any){
@@ -2061,14 +2062,18 @@ function Backlog({items,setItems,projects,setProjects,space,ccrs=[],ccrItems=[],
   const wtOf=(item:any)=>workTypeOfItem(item,projects)
   const [groupBy,setGroupByState]=useState<string>(()=>{try{return localStorage.getItem('pg_backlog_group')||'none'}catch{return 'none'}})
   const setGroupBy=(v:string)=>{setGroupByState(v);try{localStorage.setItem('pg_backlog_group',v)}catch{}}
-  // Epics only belong to one project, so an item's epic is only valid while it's still in that project
+  // An epic with a project only holds stories from that project; an epic with no project yet holds any
   const epicOf=(item:any)=>{
     if(!item.epic_id)return null
     const e=(epics as any[]).find(x=>x.id===item.epic_id)
     if(!e)return null
+    if(!e.project_id)return e
     const pr=projects.find((p:any)=>p.id===e.project_id)
     return pr&&pr.name===item.parent_project?e:null
   }
+  const [selEpicId,setSelEpicId]=useState<any>(null)
+  const [kind,setKindState]=useState<string>(()=>{try{return localStorage.getItem('pg_backlog_kind')||'all'}catch{return 'all'}}) // 'all' | 'epics' | 'stories'
+  const setKind=(v:string)=>{setKindState(v);try{localStorage.setItem('pg_backlog_kind',v)}catch{}}
   const [frt,setFrt]=useState('All')
   const [frg,setFrg]=useState('All')
   const [fvn,setFvn]=useState('All')
@@ -2395,6 +2400,67 @@ const sorted=items.filter(i=>!isItemDone(i)).sort((a,b)=>{
   const segTotal=segPts.new+segPts.sustain
   const segNewPct=segTotal?Math.round(segPts.new/segTotal*100):null
 
+  // Epics shown alongside stories. Filters that only stories carry (swimlane, type, region,
+  // vendor, flagged) hide epics while they're set.
+  const epicProjName=(e:any)=>epicProject(e,projects)?.name||''
+  const visibleEpics=kind==='stories'||fs!=='All'||frt!=='All'||frg!=='All'||fvn!=='All'||sf||fep==='__none'?[]
+    :(epics as any[]).filter(e=>spaceOf(e)===space&&!ITEM_TERMINAL.includes(e.status)
+      &&(ft==='All'||e.team===ft)&&(fp==='All'||e.priority===fp)&&(fst==='All'||e.status===fst)&&(fef==='All'||e.effort===fef)
+      &&(fpp==='All'||epicProjName(e)===fpp)&&(fep==='All'||fep===e.id)
+      &&(seg==='all'||epicWorkType(e,projects)===seg)
+      &&(!srch||e.name.toLowerCase().includes(srch.toLowerCase())))
+      .sort((a,b)=>(PRIORITY_ORDER[a.priority]??4)-(PRIORITY_ORDER[b.priority]??4)||epicProjName(a).localeCompare(epicProjName(b))||(a.sort_order??0)-(b.sort_order??0))
+  const selEpic=selEpicId?(epics as any[]).find(e=>e.id===selEpicId)||null:null
+  const displayRows:any[]=(()=>{
+    const stories=kind==='epics'?[]:filtered
+    const eps=visibleEpics
+    if(groupBy==='none'){
+      if(!eps.length)return stories
+      if(!stories.length)return eps.map(e=>({__epic:e}))
+      return[{__hdr:'section',key:'s:e',label:'Epics',count:eps.length,noun:'epic'},...eps.map(e=>({__epic:e})),{__hdr:'section',key:'s:s',label:'Stories',count:stories.length,noun:'story'},...stories]
+    }
+    const out:any[]=[]
+    const keys=[...new Set([...stories.map(i=>i.parent_project||''),...eps.map(epicProjName)])].sort((a,b)=>!a?1:!b?-1:a.localeCompare(b))
+    for(const k of keys){
+      const list=stories.filter(i=>(i.parent_project||'')===k)
+      const pe=eps.filter(e=>epicProjName(e)===k)
+      out.push({__hdr:'project',key:'p:'+k,label:k||'No project',count:list.length,epicCount:pe.length})
+      if(groupBy!=='epic'){out.push(...pe.map(e=>({__epic:e})),...list);continue}
+      // Every epic of this project that's shown, or that holds a shown story, followed by its stories
+      const pr=projects.find((p:any)=>p.name===k)
+      const groupEpics=(epics as any[]).filter(e=>pr?e.project_id===pr.id:(!e.project_id&&spaceOf(e)===space)).sort((a,b)=>(a.sort_order??0)-(b.sort_order??0))
+      const used=new Set<any>()
+      for(const e of groupEpics){
+        const its=list.filter(i=>epicOf(i)?.id===e.id)
+        const shown=pe.includes(e)
+        if(!shown&&!its.length)continue
+        its.forEach(i=>used.add(i.id))
+        out.push(shown?{__epic:e}:{__hdr:'epic',key:'e:'+e.id,label:e.name,count:its.length})
+        out.push(...its.map(i=>({...i,__indent:true})))
+      }
+      const rest=list.filter(i=>!used.has(i.id))
+      if(rest.length&&used.size+pe.length>0)out.push({__hdr:'epic',key:'e:none:'+k,label:'No epic',count:rest.length,none:true})
+      out.push(...rest)
+    }
+    return out
+  })()
+  async function addEpic(){
+    const pr=fpp!=='All'?projects.find((p:any)=>p.name===fpp):null
+    const{data,error}=await supabase.from('epics').insert({name:'New epic',project_id:pr?.id||null,team:pr?.team||null,space,status:space==='home'?'To Do':'New',
+      sort_order:(epics as any[]).filter(e=>e.project_id===(pr?.id||null)).length}).select().single()
+    if(error||!data){alert('Failed to add epic: '+(error?.message||'no row returned'));return}
+    setEpics((prev:any[])=>[...prev,data]);setSelected(null);setSelEpicId(data.id)
+  }
+  async function deleteEpic(e:any){
+    const n=items.filter(i=>i.epic_id===e.id).length
+    if(!confirm(`Delete the epic "${e.name}"?${n?`\n\nIts ${n} stor${n!==1?'ies':'y'} stay in the backlog without an epic.`:''}`))return
+    setEpics((prev:any[])=>prev.filter(x=>x.id!==e.id))
+    setItems((prev:any[])=>prev.map(i=>i.epic_id===e.id?{...i,epic_id:null}:i))
+    setSelEpicId(null)
+    const{error}=await supabase.from('epics').delete().eq('id',e.id)
+    if(error)alert('Failed to delete epic: '+error.message)
+  }
+
   // Export current filtered view to Excel, always in ranked order (P1/P2 first, then committed rank)
   function exportExcel(){
     const ordered=[...filtered].sort((a,b)=>{
@@ -2659,14 +2725,19 @@ const sorted=items.filter(i=>!isItemDone(i)).sort((a,b)=>{
         <select value={fep} onChange={e=>setFep(e.target.value)} style={sel}>
           <option value="All">All Epics</option>
           <option value="__none">No epic</option>
-          {(epics as any[]).map(e=>({e,pr:projects.find((p:any)=>p.id===e.project_id)})).filter(({pr})=>pr&&(fpp==='All'||pr.name===fpp))
-            .sort((a,b)=>a.pr.name.localeCompare(b.pr.name)||(a.e.sort_order??0)-(b.e.sort_order??0))
-            .map(({e,pr})=><option key={e.id} value={e.id}>{fpp==='All'?`${pr.name} › ${e.name}`:e.name}</option>)}
+          {(epics as any[]).filter(e=>spaceOf(e)===space).map(e=>({e,pn:projects.find((p:any)=>p.id===e.project_id)?.name||''})).filter(({e,pn})=>(fpp==='All'||pn===fpp)&&(!e.project_id||pn))
+            .sort((a,b)=>(a.pn||'~').localeCompare(b.pn||'~')||(a.e.sort_order??0)-(b.e.sort_order??0))
+            .map(({e,pn})=><option key={e.id} value={e.id}>{fpp==='All'?`${pn||'No project'} › ${e.name}`:e.name}</option>)}
         </select>
         <select value={groupBy} onChange={e=>setGroupBy(e.target.value)} title="Group the list by project, or by project and epic" style={{...sel,color:groupBy==='none'?'#7A8FA6':'#E07B2A',border:`1px solid ${groupBy==='none'?'#243447':'#E07B2A'}`}}>
           <option value="none">No grouping</option>
           <option value="project">Group by project</option>
           <option value="epic">Group by project › epic</option>
+        </select>
+        <select value={kind} onChange={e=>setKind(e.target.value)} title="Show epics, stories or both" style={{...sel,color:kind==='all'?'#7A8FA6':'#E07B2A',border:`1px solid ${kind==='all'?'#243447':'#E07B2A'}`}}>
+          <option value="all">Epics & stories</option>
+          <option value="epics">Epics only</option>
+          <option value="stories">Stories only</option>
         </select>
         <select value={frt} onChange={e=>setFrt(e.target.value)} style={sel}><option value="All">All Types</option>{rtOpts.map(r=><option key={r}>{r}</option>)}</select>
         <select value={frg} onChange={e=>setFrg(e.target.value)} style={sel}><option value="All">All Regions</option>{regionOpts.map(r=><option key={r}>{r}</option>)}</select>
@@ -2679,6 +2750,7 @@ const sorted=items.filter(i=>!isItemDone(i)).sort((a,b)=>{
           <button onClick={exportExcel} title="Export current view to Excel in ranked order" style={{...sel,color:'#27AE60',border:'1px solid rgba(39,174,96,0.4)'}}>⬇ Excel</button>
           <button onClick={()=>{setJrOpen(true);setJrRows([]);setJrErr('');setJrDone('')}} title="Import CSV — Jira exports or hand-built files; matches by RTL ID or Jira Key to update, inserts the rest" style={{...sel,color:'#5DADE2',border:'1px solid rgba(93,173,226,0.4)'}}>⬆ Import CSV</button>
           <button onClick={()=>setSac(true)} style={{...sel,color:'#7A8FA6'}}>+ Column</button>
+          {setEpics&&<button onClick={addEpic} title={fpp!=='All'?`New epic in ${fpp}`:'New epic (set its project in the panel)'} style={{...sel,color:'#E07B2A',border:'1px solid rgba(224,123,42,0.5)',fontWeight:700}}>+ Epic</button>}
           <button onClick={()=>setAi(true)} style={{background:'#C8973A',color:'#0D1B2A',border:'none',borderRadius:6,padding:'5px 14px',fontSize:12,fontWeight:700,cursor:'pointer'}}>+ Add Item</button>
         </div>
       </div>
@@ -2719,36 +2791,16 @@ const sorted=items.filter(i=>!isItemDone(i)).sort((a,b)=>{
               </tr>
             </thead>
             <tbody>
-              {(()=>{
-                if(groupBy==='none')return filtered
-                const out:any[]=[]
-                const byProject=new Map<string,any[]>()
-                filtered.forEach(i=>{const k=i.parent_project||'';if(!byProject.has(k))byProject.set(k,[]);byProject.get(k)!.push(i)})
-                const keys=[...byProject.keys()].sort((a,b)=>!a?1:!b?-1:a.localeCompare(b))
-                for(const k of keys){
-                  const list=byProject.get(k)!
-                  out.push({__hdr:'project',key:'p:'+k,label:k||'No project',count:list.length})
-                  if(groupBy!=='epic'){out.push(...list);continue}
-                  const pr=projects.find((p:any)=>p.name===k)
-                  const pe=pr?(epics as any[]).filter(e=>e.project_id===pr.id).sort((a,b)=>(a.sort_order??0)-(b.sort_order??0)):[]
-                  for(const e of pe){
-                    const its=list.filter(i=>epicOf(i)?.id===e.id)
-                    if(!its.length)continue
-                    out.push({__hdr:'epic',key:'e:'+e.id,label:e.name,count:its.length})
-                    out.push(...its)
-                  }
-                  const rest=list.filter(i=>!epicOf(i))
-                  if(rest.length&&pe.length){out.push({__hdr:'epic',key:'e:none:'+k,label:'No epic',count:rest.length,none:true});out.push(...rest)}
-                  else out.push(...rest)
-                }
-                return out
-              })().map((item:any,idx:number)=>{
+              {displayRows.map((item:any,idx:number)=>{
+                if(item.__epic)return <EpicRow key={'epic:'+item.__epic.id} epic={item.__epic} projects={projects} items={items} ccCount={cc.length}
+                  isSel={selEpicId===item.__epic.id} onSelect={()=>{setSelected(null);setSelEpicId(selEpicId===item.__epic.id?null:item.__epic.id)}}/>
                 if(item.__hdr)return(
                   <tr key={item.key}>
-                    <td colSpan={100} style={{padding:item.__hdr==='project'?'9px 12px 7px':'6px 12px 5px 34px',background:item.__hdr==='project'?'#1E3048':'#132232',borderBottom:'1px solid #243447',position:'sticky',left:0}}>
+                    <td colSpan={100} style={{padding:item.__hdr==='project'||item.__hdr==='section'?'9px 12px 7px':'6px 12px 5px 34px',background:item.__hdr==='project'?'#1E3048':item.__hdr==='section'?'#101C29':'#132232',borderBottom:'1px solid #243447',position:'sticky',left:0}}>
                       <span style={{display:'inline-flex',alignItems:'center',gap:8,fontSize:item.__hdr==='project'?12:11,fontWeight:700,color:item.__hdr==='project'?'#F4F6F8':item.none?'#7A8FA6':'#E07B2A'}}>
-                        {item.__hdr==='project'?'◈':item.none?'◇':'◆'} {item.label}
-                        <span style={{fontSize:10,fontWeight:400,color:'#7A8FA6'}}>{item.count} item{item.count!==1?'s':''}</span>
+                        {item.__hdr==='project'?'◈':item.__hdr==='section'?'':item.none?'◇':'◆'} {item.__hdr==='section'?item.label.toUpperCase():item.label}
+                        <span style={{fontSize:10,fontWeight:400,color:'#7A8FA6'}}>{item.__hdr==='section'?`${item.count} ${item.noun==='epic'?(item.count!==1?'epics':'epic'):(item.count!==1?'stories':'story')}`
+                          :`${item.count} stor${item.count!==1?'ies':'y'}${item.epicCount?` · ${item.epicCount} epic${item.epicCount!==1?'s':''}`:''}`}</span>
                       </span>
                     </td>
                   </tr>
@@ -2763,7 +2815,7 @@ const sorted=items.filter(i=>!isItemDone(i)).sort((a,b)=>{
                   <tr key={item.id} draggable
                     onDragStart={e=>ds(e,item.id)} onDragOver={e=>dov(e,item.id)}
                     onDrop={e=>drop(e,item.id)} onDragEnd={()=>{setDid(null);setDoid(null)}}
-                    onClick={()=>setSelected(isSel?null:item)}
+                    onClick={()=>{setSelEpicId(null);setSelected(isSel?null:item)}}
                     style={{background:bg,cursor:'pointer',borderLeft:isSel?'3px solid #C8973A':violation?'3px solid #E74C3C':'3px solid transparent'}}>
                     <td style={{...TD,color:'#243447',textAlign:'center' as const,cursor:'grab',padding:'0 4px'}} onClick={e=>e.stopPropagation()}>
                       <div style={{display:'flex',flexDirection:'column',alignItems:'center',gap:2}}>
@@ -2784,7 +2836,7 @@ const sorted=items.filter(i=>!isItemDone(i)).sort((a,b)=>{
                       </div>
                     </td>
                     <td style={{...TD,color:'#7A8FA6',fontFamily:'monospace',fontSize:10}}>{item.item_id}</td>
-                    <td style={{...TD,minWidth:240}}>
+                    <td style={{...TD,minWidth:240,paddingLeft:item.__indent?30:12,borderLeft:item.__indent?'2px solid rgba(224,123,42,0.35)':undefined}}>
                       <div style={{display:'flex',alignItems:'center',gap:6}}>
                         <div style={{fontSize:12,color:'#F4F6F8',fontWeight:isSel?700:400}}>{rt(item.request_type)} {item.name}</div>
                         {item.start_date&&item.end_date
@@ -2855,10 +2907,14 @@ const sorted=items.filter(i=>!isItemDone(i)).sort((a,b)=>{
               })}
             </tbody>
           </table>
-          {filtered.length===0&&<div style={{textAlign:'center',padding:60,color:'#7A8FA6'}}>No items match your filters.</div>}
+          {displayRows.length===0&&<div style={{textAlign:'center',padding:60,color:'#7A8FA6'}}>No epics or stories match your filters.</div>}
         </div>
 
-        {selected&&(
+        {selEpic&&<EpicPanel key={selEpic.id} epic={selEpic} projects={projects} items={items} setItems={setItems} setEpics={setEpics}
+          statusOpts={statusOpts} priorities={['P1','P2','P3','P4']} teams={TEAMS} efforts={EFFORTS}
+          onClose={()=>setSelEpicId(null)} onDelete={()=>deleteEpic(selEpic)}
+          onConvert={async()=>{const it=await convertEpicToStory(selEpic,{projects,items,setItems,setEpics,nextId:nextItemId(items)});if(it){setSelEpicId(null);setSelected(it)}}}/>}
+        {selected&&!selEpic&&(
           <div style={{width:320,borderLeft:'1px solid #243447',background:'#162436',overflowY:'auto',flexShrink:0,display:'flex',flexDirection:'column'}}>
             <div style={{padding:'14px 16px',borderBottom:'1px solid #243447',display:'flex',alignItems:'center',gap:8,flexShrink:0}}>
               <div style={{flex:1}}>
@@ -2920,6 +2976,9 @@ const sorted=items.filter(i=>!isItemDone(i)).sort((a,b)=>{
                   </div>
                 )
               })()}
+              <button onClick={async()=>{const e=await convertStoryToEpic(selected,{projects,setItems,setEpics,epics});if(e){setSelected(null);setSelEpicId(e.id)}}}
+                title="Turn this story into an epic that can hold other stories"
+                style={{background:'none',border:'1px solid rgba(224,123,42,0.5)',borderRadius:6,color:'#E07B2A',fontSize:12,fontWeight:700,padding:'7px 0',cursor:'pointer'}}>◆ Convert to an epic</button>
               <PanelField selected={selected} upd={upd} label="Owner" field="owner"/>
               <PanelField selected={selected} upd={upd} label="Dependency" field="dependency"/>
               <PanelField selected={selected} upd={upd} label="Vendor Delivery Date" field="vendor_delivery_date" type="date"/>
@@ -8566,10 +8625,11 @@ useEffect(()=>{
         </div>}
       </div>
       <div style={{flex:1,overflow:'hidden'}}>
-        {activeTab==='backlog'&&<Backlog items={sItems} setItems={setSItems} projects={sProjects} setProjects={setSProjects} space={space} ccrs={ccrs} ccrItems={ccrItems} setCcrItems={setCcrItems} epics={epics} sustainPct={Number(strategies[0]?.bau_pct??30)}/>}
+        {activeTab==='backlog'&&<Backlog items={sItems} setItems={setSItems} projects={sProjects} setProjects={setSProjects} space={space} ccrs={ccrs} ccrItems={ccrItems} setCcrItems={setCcrItems} epics={epics} setEpics={setEpics} sustainPct={Number(strategies[0]?.bau_pct??30)}/>}
         {activeTab==='strategy'&&<StrategyTab projects={projects} setProjects={setProjects} strategies={strategies} setStrategies={setStrategies} tracks={tracks} setTracks={setTracks} goals={trackGoals} setGoals={setTrackGoals} deps={projectDeps} setDeps={setProjectDeps}
           people={people} teams={TEAMS} capacity={capacityByMonth(projects.filter(inSpace),projectRoles,people,roles,items.filter(inSpace))}
-          onOpenProject={(p:any)=>{setSelectedProject(p);setActiveTab('projects')}} openAssistant={(t:string)=>{setAsstSeed(t);setAsstOpen(true)}}/>}
+          onOpenProject={(p:any)=>{setSelectedProject(p);setActiveTab('projects')}} openAssistant={(t:string)=>{setAsstSeed(t);setAsstOpen(true)}}
+          items={items.filter(inSpace)} epics={epics} setEpics={setEpics}/>}
         {activeTab==='projects'&&<Projects items={sItems} setItems={setSItems} projects={sProjects} setProjects={setSProjects} milestones={sMilestones} setMilestones={setSMilestones} tasks={tasks} setTasks={setTasks} space={space} ccrs={ccrs} ccrItems={ccrItems} roles={roles} people={people} projectRoles={projectRoles} setProjectRoles={setProjectRoles} itemAssignments={itemAssignments} setItemAssignments={setItemAssignments} sprints={sprints} selectedProject={selectedProject} setSelectedProject={setSelectedProject} epics={epics} setEpics={setEpics}/>}
 {activeTab==='roadmap'&&<Roadmap items={sItems} setItems={setSItems} projects={sProjects} setProjects={setSProjects} milestones={sMilestones} setMilestones={setSMilestones} tasks={tasks} setTasks={setTasks} sprints={sprints} itemAssignments={itemAssignments} projectRoles={projectRoles} people={people} roles={roles} onOpenProject={(p:any)=>{setSelectedProject(p);setActiveTab('projects')}}/>}
         {activeTab==='teams'&&<Teams items={sItems} projects={sProjects} milestones={sMilestones} ccrs={ccrs} ccrItems={ccrItems}/>}

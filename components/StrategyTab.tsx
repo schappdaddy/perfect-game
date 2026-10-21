@@ -11,6 +11,8 @@ import { supabase } from '../lib/supabase'
 // assistant writes the same fields, and anything it drafts lands as "proposed".
 
 const PROJECT_TERMINAL=['Complete','Cancelled','Done']
+const ITEM_TERMINAL=['Done','Will Not Implement',"Won't Do"]
+const EPIC='#E07B2A'
 const MONTH_W=34          // px per month; a quarter is 3× this
 const LABEL_W_DESKTOP=250
 const ROW_H=26
@@ -51,14 +53,14 @@ const TEMPLATE={
   ],
 }
 
-export default function StrategyTab({projects,setProjects,strategies,setStrategies,tracks,setTracks,goals,setGoals,deps,setDeps,people,capacity,teams,onOpenProject,openAssistant}:any){
+export default function StrategyTab({projects,setProjects,strategies,setStrategies,tracks,setTracks,goals,setGoals,deps,setDeps,people,capacity,teams,onOpenProject,openAssistant,items=[],epics=[],setEpics}:any){
   const [stratId,setStratId]=useState<any>(()=>{try{return localStorage.getItem('pg_strategy')}catch{return null}})
   const strategy=(strategies as any[]).find(s=>s.id===stratId)||strategies[0]||null
   const [selId,setSelId]=useState<any>(null)
   const [drag,setDrag]=useState<any>(null) // {id,mode:'move'|'start'|'end',x0,dm}
   const [editGoal,setEditGoal]=useState<any>(null) // {track_id,fy,text}
   const pref=(k:string,d:any)=>{try{const v=localStorage.getItem('pg_strat_'+k);return v==null?d:JSON.parse(v)}catch{return d}}
-  const [view,setView]=useState<any>(()=>({sortBy:pref('sortBy','start_date'),sortDir:pref('sortDir','asc'),showLoad:pref('showLoad',false),collapsed:pref('collapsed',{})}))
+  const [view,setView]=useState<any>(()=>({sortBy:pref('sortBy','start_date'),sortDir:pref('sortDir','asc'),showLoad:pref('showLoad',false),showEpics:pref('showEpics',true),collapsed:pref('collapsed',{})}))
   function setPref(k:string,v:any){setView((cur:any)=>({...cur,[k]:v}));try{localStorage.setItem('pg_strat_'+k,JSON.stringify(v))}catch{}}
   const toggleCollapsed=(key:string)=>setPref('collapsed',{...view.collapsed,[key]:!view.collapsed[key]})
   const [narrow,setNarrow]=useState(false)
@@ -226,15 +228,19 @@ export default function StrategyTab({projects,setProjects,strategies,setStrategi
   ;[...sTracks.flatMap(onTrack),...backlog].forEach(p=>shown.set(p.id,p))
   const projById=(id:any)=>(projects as any[]).find(p=>p.id===id)
 
+  // Dates after a drag of `d.dm` months: move both ends, or snap one end to a month boundary
+  function shiftDates(s0:string,e0:string|null,d:any){
+    let s=s0,e=e0
+    if(d.mode==='move'){s=addMonths(s,d.dm);if(e)e=addMonths(e,d.dm)}
+    if(d.mode==='start'){const{y,m}=parts(s0);s=monthStartISO(y*12+m-1+d.dm);if(e&&s>e)s=monthStartISO(parts(e).y*12+parts(e).m-1)}
+    if(d.mode==='end'&&e){const{y,m}=parts(e0!);e=monthEndISO(y*12+m-1+d.dm);if(e<s)e=monthEndISO(parts(s).y*12+parts(s).m-1)}
+    return{s,e}
+  }
   // Bar extent for a project, with any in-progress drag applied
   function extent(p:any){
     let s=p.start_date,e=p.end_date
     if(!s)return null
-    if(drag?.id===p.id&&drag.dm){
-      if(drag.mode==='move'){s=addMonths(s,drag.dm);if(e)e=addMonths(e,drag.dm)}
-      if(drag.mode==='start'){const{y,m}=parts(p.start_date);s=monthStartISO(y*12+m-1+drag.dm);if(e&&s>e)s=monthStartISO(parts(e).y*12+parts(e).m-1)}
-      if(drag.mode==='end'&&e){const{y,m}=parts(e);e=monthEndISO(y*12+m-1+drag.dm);if(e<s)e=monthEndISO(parts(s).y*12+parts(s).m-1)}
-    }
+    if(drag?.id===p.id&&drag.dm)({s,e}=shiftDates(s,e,drag))
     const open=!e||p.ongoing
     return{s,e:open?null:e,x0:clampX(posStart(s)),x1:clampX(open?TW:posEnd(e)),open}
   }
@@ -292,17 +298,22 @@ export default function StrategyTab({projects,setProjects,strategies,setStrategi
 
   // ── Rows (fixed heights so the arrow overlay can find each bar) ──────────
   const rows:any[]=[]
+  function pushProject(p:any){
+    const eps=view.showEpics?projectEpics(p):[]
+    rows.push({kind:'project',p,epicCount:eps.length,h:ROW_H})
+    if(eps.length&&!view.collapsed['pe:'+p.id])eps.forEach(e=>rows.push({kind:'epic',e,p,h:20}))
+  }
   sTracks.forEach((t:any,ti:number)=>{
     const list=onTrack(t),closed=!!view.collapsed[t.id]
     rows.push({kind:'track',track:t,index:ti,count:list.length,closed,h:24})
     if(closed)return
     rows.push({kind:'goals',track:t,h:28})
-    list.forEach(p=>rows.push({kind:'project',p,h:ROW_H}))
+    list.forEach(pushProject)
     if(!list.length)rows.push({kind:'hint',text:'No projects yet. Pick a project and set its track.',h:ROW_H})
   })
   if(!sTracks.length)rows.push({kind:'hint',text:'No tracks yet. Add your first one in Strategy settings.',h:ROW_H})
   rows.push({kind:'band',key:'__backlog',label:`BACKLOG · NOT ON A TRACK (${backlog.length})`,closed:!!view.collapsed.__backlog,color:'#3A4A5E',h:22})
-  if(!view.collapsed.__backlog)backlog.forEach(p=>rows.push({kind:'project',p,h:ROW_H}))
+  if(!view.collapsed.__backlog)backlog.forEach(pushProject)
   if(view.showLoad){
     rows.push({kind:'band',label:`TEAM LOAD · NEW ${limits.new}% / SUSTAIN ${limits.sustain}%`,color:'#243447',h:22})
     loads.forEach(l=>rows.push({kind:'load',load:l,h:ROW_H}))
@@ -330,11 +341,46 @@ export default function StrategyTab({projects,setProjects,strategies,setStrategi
     if(!d)return
     if(!d.moved){setSelId(p.id);return}
     if(!d.dm)return
-    const fields:any={}
-    if(d.mode==='move'){fields.start_date=addMonths(p.start_date,d.dm);if(p.end_date)fields.end_date=addMonths(p.end_date,d.dm)}
-    if(d.mode==='start'){const{y,m}=parts(p.start_date);let s=monthStartISO(y*12+m-1+d.dm);if(p.end_date&&s>p.end_date)s=monthStartISO(parts(p.end_date).y*12+parts(p.end_date).m-1);fields.start_date=s}
-    if(d.mode==='end'){const{y,m}=parts(p.end_date);let e=monthEndISO(y*12+m-1+d.dm);if(e<p.start_date)e=monthEndISO(parts(p.start_date).y*12+parts(p.start_date).m-1);fields.end_date=e}
-    await updProject(p.id,fields)
+    const{s,e}=shiftDates(p.start_date,p.end_date,d)
+    await updProject(p.id,d.mode==='end'?{end_date:e}:d.mode==='start'?{start_date:s}:{start_date:s,...(p.end_date?{end_date:e}:{})})
+  }
+
+  // ── Epics: sub-rows under their project. An epic uses its own dates, or else the span of
+  // its stories' dates (drawn dashed). Dragging a story-dated epic gives it its own dates.
+  async function updEpic(id:any,fields:any){
+    setEpics((prev:any[])=>prev.map(e=>e.id===id?{...e,...fields}:e))
+    const{error}=await supabase.from('epics').update(fields).eq('id',id)
+    if(error)alert('Failed to save epic: '+error.message)
+  }
+  function epicBase(ep:any){
+    if(ep.start_date)return{s:ep.start_date,e:ep.end_date||ep.start_date,derived:false}
+    const pr=projById(ep.project_id)
+    const its=(items as any[]).filter(i=>i.epic_id===ep.id&&(!pr||i.parent_project===pr.name)&&i.start_date)
+    if(!its.length)return null
+    const s=its.map(i=>i.start_date).sort()[0]
+    const e=its.map(i=>i.end_date||i.start_date).sort().slice(-1)[0]
+    return{s,e,derived:true}
+  }
+  function epicExtent(ep:any){
+    const b=epicBase(ep)
+    if(!b)return null
+    let{s,e}=b as any
+    if(drag?.id===ep.id&&drag.dm)({s,e}=shiftDates(s,e,drag))
+    return{s,e,derived:b.derived&&!(drag?.id===ep.id&&drag.dm),x0:clampX(posStart(s)),x1:clampX(posEnd(e))}
+  }
+  async function onEpicUp(ep:any){
+    const d=drag
+    setDrag(null)
+    if(!d)return
+    if(!d.moved){setSelId('epic:'+ep.id);return}
+    const b=epicBase(ep)
+    if(!d.dm||!b)return
+    const{s,e}=shiftDates(b.s,b.e,d)
+    await updEpic(ep.id,{start_date:s,end_date:e})
+  }
+  function projectEpics(p:any){
+    return(epics as any[]).filter(e=>e.project_id===p.id)
+      .sort((a,b)=>(epicBase(a)?.s||'9999').localeCompare(epicBase(b)?.s||'9999')||a.name.localeCompare(b.name))
   }
   // Clicking an empty row places an undated project into the clicked quarter
   async function onRowClick(e:any,p:any){
@@ -347,6 +393,7 @@ export default function StrategyTab({projects,setProjects,strategies,setStrategi
   }
 
   const sel=selId?projById(selId):null
+  const selEpic=typeof selId==='string'&&selId.startsWith('epic:')?(epics as any[]).find(e=>'epic:'+e.id===selId)||null:null
   const counts={planned:0,proposed:0,sustain:0} as any
   shown.forEach(p=>{counts[state(p)]++;if(workType(p)==='sustain')counts.sustain++})
   const today=todayISO()
@@ -383,6 +430,9 @@ export default function StrategyTab({projects,setProjects,strategies,setStrategi
           <button onClick={()=>setPref('sortDir',view.sortDir==='asc'?'desc':'asc')} title="Sort direction" style={{background:'#1E3048',color:'#F4F6F8',border:'1px solid #243447',borderRadius:6,fontSize:13,padding:'2px 10px',cursor:'pointer'}}>{view.sortDir==='asc'?'↑':'↓'}</button>
           <label title="Show each team's planned load per quarter under the roadmap" style={{display:'flex',alignItems:'center',gap:5,fontSize:11,color:'#7A8FA6',cursor:'pointer',whiteSpace:'nowrap' as const}}>
             <input type="checkbox" checked={view.showLoad} onChange={e=>setPref('showLoad',e.target.checked)} style={{accentColor:'#C8973A'}}/>Team load
+          </label>
+          <label title="Show each project's epics under it" style={{display:'flex',alignItems:'center',gap:5,fontSize:11,color:'#7A8FA6',cursor:'pointer',whiteSpace:'nowrap' as const}}>
+            <input type="checkbox" checked={view.showEpics} onChange={e=>setPref('showEpics',e.target.checked)} style={{accentColor:EPIC}}/>Epics
           </label>
         </div>
         <div style={{marginLeft:'auto',display:'flex',gap:6}}>
@@ -491,6 +541,30 @@ export default function StrategyTab({projects,setProjects,strategies,setStrategi
                     })}
                   </div>
                 )
+                if(r.kind==='epic'){
+                  const ep=r.e,ex=epicExtent(ep),isSelE=selId==='epic:'+ep.id,done=ITEM_TERMINAL.includes(ep.status)
+                  return(
+                    <div key={ri} style={{display:'flex',height:r.h,position:'relative',zIndex:1}}>
+                      <div onClick={()=>setSelId('epic:'+ep.id)} style={{...cellLabel,padding:'0 12px 0 28px',display:'flex',alignItems:'center',gap:5,cursor:'pointer',background:isSelE?'#2A2418':'#0D1B2A'}}>
+                        <span style={{fontSize:9,color:EPIC}}>◆</span>
+                        <span title={ep.name} style={{...CLIP,fontSize:10.5,color:done?'#7A8FA6':'#C8C8D4',textDecoration:done?'line-through':'none'}}>{ep.name}</span>
+                      </div>
+                      <div style={{width:TW,position:'relative'}}>
+                        {!ex&&<span style={{position:'absolute',left:8,top:3,fontSize:9.5,color:'#3A4A5E',fontStyle:'italic'}}>No dates on the epic or its stories</span>}
+                        {ex&&(
+                          <div title={`◆ ${ep.name}\n${fmtDate(ex.s)} → ${fmtDate(ex.e)}${ex.derived?'\nDates from its stories. Drag to give the epic its own dates.':''}`}
+                            onPointerDown={e=>onBarDown(e,ep,'move')} onPointerMove={onBarMove} onPointerUp={()=>onEpicUp(ep)} onClick={e=>e.stopPropagation()}
+                            style={{position:'absolute',left:ex.x0,width:Math.max(6,ex.x1-ex.x0),top:6,height:8,boxSizing:'border-box' as const,borderRadius:4,cursor:drag?.id===ep.id?'grabbing':'grab',touchAction:'none',
+                              background:ex.derived?'transparent':'rgba(224,123,42,0.65)',border:ex.derived?`1px dashed ${EPIC}`:'none',
+                              outline:isSelE?'2px solid #C8973A':'none',outlineOffset:1,opacity:done?0.45:1}}>
+                            <div onPointerDown={e=>onBarDown(e,ep,'start')} style={{position:'absolute',left:0,top:-3,bottom:-3,width:6,cursor:'ew-resize'}}/>
+                            <div onPointerDown={e=>onBarDown(e,ep,'end')} style={{position:'absolute',right:0,top:-3,bottom:-3,width:6,cursor:'ew-resize'}}/>
+                          </div>
+                        )}
+                      </div>
+                    </div>
+                  )
+                }
                 // Project row
                 const p=r.p,ex=extent(p),st=state(p)
                 const isSel=sel?.id===p.id
@@ -498,7 +572,9 @@ export default function StrategyTab({projects,setProjects,strategies,setStrategi
                 const done=PROJECT_TERMINAL.includes(p.status)
                 return(
                   <div key={ri} style={{display:'flex',height:r.h,position:'relative',zIndex:1}}>
-                    <div onClick={()=>setSelId(p.id)} style={{...cellLabel,padding:'0 12px',display:'flex',alignItems:'center',gap:6,cursor:'pointer',background:isSel?'#1E3048':'#0D1B2A'}}>
+                    <div onClick={()=>setSelId(p.id)} style={{...cellLabel,padding:r.epicCount?'0 12px 0 6px':'0 12px',display:'flex',alignItems:'center',gap:6,cursor:'pointer',background:isSel?'#1E3048':'#0D1B2A'}}>
+                      {r.epicCount>0&&<button onClick={e=>{e.stopPropagation();toggleCollapsed('pe:'+p.id)}} title={`${view.collapsed['pe:'+p.id]?'Show':'Hide'} ${r.epicCount} epic${r.epicCount!==1?'s':''}`}
+                        style={{...HDR_BTN,color:EPIC,fontSize:9}}>{view.collapsed['pe:'+p.id]?'▸':'▾'}</button>}
                       <span style={{fontSize:11,color:done?'#7A8FA6':'#F4F6F8',fontWeight:isSel?700:400,overflow:'hidden',whiteSpace:'nowrap' as const,textOverflow:'ellipsis',flex:1,textDecoration:done?'line-through':'none'}}>{p.name}</span>
                       {p.team&&<span style={{fontSize:9,color:'#7A8FA6'}}>{teamShort(p.team)}</span>}
                     </div>
@@ -546,6 +622,8 @@ export default function StrategyTab({projects,setProjects,strategies,setStrategi
             <Legend swatch={{background:TEAM_COLORS['Operational Efficiency']}} label="Operational Efficiency (planned)"/>
             <Legend swatch={{background:'rgba(224,123,42,0.28)',border:`1.5px solid ${PROPOSED}`}} label="Proposed, not yet planned"/>
             <Legend swatch={{background:SUSTAIN}} label="Sustain: tech debt, stabilization & enhancements"/>
+            {view.showEpics&&<Legend swatch={{background:'rgba(224,123,42,0.65)',height:8,borderRadius:4}} label="Epic"/>}
+            {view.showEpics&&<Legend swatch={{border:`1px dashed ${EPIC}`,height:8,borderRadius:4}} label="Epic dated by its stories"/>}
             <Legend swatch={{background:'rgba(255,255,255,0.12)'}} label={`Code freeze (${freeze.map(m=>MONTHS[m-1]).join(', ')||'none'})`}/>
             <span>Drag a bar to move it. Drag its edges to change start or end.</span>
           </div>
@@ -555,6 +633,9 @@ export default function StrategyTab({projects,setProjects,strategies,setStrategi
         <div style={{width:narrow?'100%':320,maxHeight:narrow?'45%':'none',flexShrink:0,borderLeft:narrow?'none':'1px solid #243447',borderTop:narrow?'1px solid #243447':'none',background:'#0F1C2B',overflowY:'auto'}}>
           {selId==='__new'?(
             <NewStrategy onCreate={async(t:any)=>{await createStrategy(t);setSelId(null)}} onCancel={()=>setSelId(null)}/>
+          ):selEpic?(
+            <EpicSidePanel key={selEpic.id} epic={selEpic} project={projById(selEpic.project_id)} items={items} base={epicBase(selEpic)} updEpic={updEpic} onClose={()=>setSelId(null)}
+              onOpenProject={onOpenProject}/>
           ):sel?(
             <ProjectPanel p={sel} state={state(sel)} tracks={sTracks} projects={live} deps={deps} shown={shown} issues={issues.filter(i=>i.id===sel.id)}
               updProject={updProject} addDep={addDep} removeDep={removeDep} onClose={()=>setSelId(null)} onOpenProject={onOpenProject}/>
@@ -657,6 +738,48 @@ function ProjectPanel({p,state,tracks,projects,deps,shown,issues,updProject,addD
       </div>
       {onOpenProject&&<div style={SECTION}>
         <button onClick={()=>onOpenProject(p)} style={{background:'#1E3048',border:'1px solid #243447',borderRadius:5,color:'#F4F6F8',fontSize:12,padding:'7px 0',cursor:'pointer'}}>Open project, epics and items →</button>
+      </div>}
+    </div>
+  )
+}
+
+function EpicSidePanel({epic,project,items,base,updEpic,onClose,onOpenProject}:any){
+  const its=(items as any[]).filter(i=>i.epic_id===epic.id&&(!project||i.parent_project===project.name))
+  const done=its.filter(i=>ITEM_TERMINAL.includes(i.status)).length
+  return(
+    <div>
+      <div style={{...SECTION,flexDirection:'row',alignItems:'center',background:'#162436',borderTop:`3px solid ${EPIC}`}}>
+        <div style={{flex:1,minWidth:0}}>
+          <div style={{fontSize:10,fontWeight:800,color:EPIC,letterSpacing:1}}>◆ EPIC</div>
+          <div style={{fontSize:14,fontWeight:700,color:'#F4F6F8'}}>{epic.name}</div>
+          <div style={{fontSize:11,color:'#7A8FA6'}}>{[project?.name,epic.status].filter(Boolean).join(' · ')}</div>
+        </div>
+        <button onClick={onClose} style={{background:'none',border:'none',color:'#7A8FA6',fontSize:20,cursor:'pointer'}}>×</button>
+      </div>
+      <div style={SECTION}>
+        <div style={H}>DATES</div>
+        <div style={{display:'flex',gap:6}}>
+          <label style={{flex:1,fontSize:10,color:'#7A8FA6'}}>Start<input type="date" value={epic.start_date||''} onChange={e=>updEpic(epic.id,{start_date:e.target.value||null})} style={{...INPUT,marginTop:3}}/></label>
+          <label style={{flex:1,fontSize:10,color:'#7A8FA6'}}>End<input type="date" value={epic.end_date||''} onChange={e=>updEpic(epic.id,{end_date:e.target.value||null})} style={{...INPUT,marginTop:3}}/></label>
+        </div>
+        {epic.start_date
+          ?<button onClick={()=>updEpic(epic.id,{start_date:null,end_date:null})} style={{background:'none',border:'1px solid #243447',borderRadius:5,color:'#7A8FA6',fontSize:11,padding:'5px 0',cursor:'pointer'}}>Use its stories&apos; dates instead</button>
+          :<div style={{fontSize:11,color:'#7A8FA6'}}>{base?`Using its stories' dates: ${fmtDate(base.s)} → ${fmtDate(base.e)}.`:'No dates yet. Set them here, or commit its stories.'}</div>}
+      </div>
+      <div style={SECTION}>
+        <div style={H}>STORIES ({done}/{its.length} DONE)</div>
+        {its.length===0&&<div style={{fontSize:11,color:'#3A4A5E',fontStyle:'italic'}}>No stories in this epic yet</div>}
+        {its.map((i:any)=>(
+          <div key={i.id} style={{display:'flex',gap:6,fontSize:11}}>
+            <span style={{fontFamily:'monospace',fontSize:10,color:'#7A8FA6'}}>{i.item_id}</span>
+            <span style={{flex:1,color:ITEM_TERMINAL.includes(i.status)?'#7A8FA6':'#C8C8D4',overflow:'hidden',whiteSpace:'nowrap',textOverflow:'ellipsis'}}>{i.name}</span>
+            <span style={{fontSize:9,color:'#7A8FA6'}}>{i.status}</span>
+          </div>
+        ))}
+        <div style={{fontSize:10,color:'#7A8FA6'}}>Edit the epic and its stories in the Backlog tab.</div>
+      </div>
+      {onOpenProject&&project&&<div style={SECTION}>
+        <button onClick={()=>onOpenProject(project)} style={{background:'#1E3048',border:'1px solid #243447',borderRadius:5,color:'#F4F6F8',fontSize:12,padding:'7px 0',cursor:'pointer'}}>Open {project.name} →</button>
       </div>}
     </div>
   )
