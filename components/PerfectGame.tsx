@@ -2035,6 +2035,17 @@ function Backlog({items,setItems,projects,setProjects,space,ccrs=[],ccrItems=[],
   const [fs,setFs]=useState('All')
   const [fst,setFst]=useState('All')
   const [fpp,setFpp]=useState('All')
+  const [fep,setFep]=useState('All') // epic filter: 'All' | '__none' | epic id
+  const [groupBy,setGroupByState]=useState<string>(()=>{try{return localStorage.getItem('pg_backlog_group')||'none'}catch{return 'none'}})
+  const setGroupBy=(v:string)=>{setGroupByState(v);try{localStorage.setItem('pg_backlog_group',v)}catch{}}
+  // Epics only belong to one project, so an item's epic is only valid while it's still in that project
+  const epicOf=(item:any)=>{
+    if(!item.epic_id)return null
+    const e=(epics as any[]).find(x=>x.id===item.epic_id)
+    if(!e)return null
+    const pr=projects.find((p:any)=>p.id===e.project_id)
+    return pr&&pr.name===item.parent_project?e:null
+  }
   const [frt,setFrt]=useState('All')
   const [frg,setFrg]=useState('All')
   const [fvn,setFvn]=useState('All')
@@ -2251,6 +2262,7 @@ function Backlog({items,setItems,projects,setProjects,space,ccrs=[],ccrItems=[],
       case 'team': return item.team?.toLowerCase()||''
       case 'effort': return ['S','M','L','XL'].indexOf(item.effort)
       case 'parent_project': return item.parent_project?.toLowerCase()||'zzz'
+      case 'epic': return epicOf(item)?.name.toLowerCase()||'zzz'
       case 'request_type': return item.request_type?.toLowerCase()||''
       case 'region': return item.region?.toLowerCase()||''
       case 'vendor': return item.vendor?.toLowerCase()||''
@@ -2341,6 +2353,8 @@ const sorted=items.filter(i=>!isItemDone(i)).sort((a,b)=>{
     if(fs!=='All'&&item.swimlane!==fs) return false
     if(fst!=='All'&&item.status!==fst) return false
     if(fpp!=='All'&&item.parent_project!==fpp) return false
+    if(fep==='__none'&&epicOf(item)) return false
+    if(fep!=='All'&&fep!=='__none'&&epicOf(item)?.id!==fep) return false
     if(frt!=='All'&&item.request_type!==frt) return false
     if(frg!=='All'&&item.region!==frg) return false
     if(fvn!=='All'&&item.vendor!==fvn) return false
@@ -2364,7 +2378,7 @@ const sorted=items.filter(i=>!isItemDone(i)).sort((a,b)=>{
       'ID':i.item_id,'Item Name':i.name,'Description':i.description||'',
       'Priority':i.priority,'Rank':i.committed_priority??'',
       'Swimlane':i.swimlane||'','Status':i.status||'','Team':i.team||'',
-      'Effort':i.effort||'','Parent Project':i.parent_project||'',
+      'Effort':i.effort||'','Parent Project':i.parent_project||'','Epic':epicOf(i)?.name||'',
       'Request Type':i.request_type||'','Region':i.region||'','Vendor':i.vendor||'',
       'Vendor Date':i.vendor_delivery_date||'','WSJF':i.wsjf?parseFloat(i.wsjf):'',
       'RICE':rice(i)||'','Reach':i.reach||'','Impact':i.impact||'','Confidence':i.confidence??'',
@@ -2587,7 +2601,19 @@ const sorted=items.filter(i=>!isItemDone(i)).sort((a,b)=>{
         <select value={fp} onChange={e=>setFp(e.target.value)} style={sel}><option value="All">All Priorities</option>{PRIORITIES.map(p=><option key={p}>{p}</option>)}</select>
         <select value={fs} onChange={e=>setFs(e.target.value)} style={sel}><option value="All">All Swimlanes</option>{swimlaneOpts.map(s=><option key={s}>{s}</option>)}</select>
         <select value={fst} onChange={e=>setFst(e.target.value)} style={sel}><option value="All">All Statuses</option>{statusOpts.map(s=><option key={s}>{s}</option>)}</select>
-        <select value={fpp} onChange={e=>setFpp(e.target.value)} style={sel}><option value="All">All Projects</option>{[...new Set(items.map(i=>i.parent_project).filter(Boolean))].sort().map(p=><option key={p}>{p}</option>)}</select>
+        <select value={fpp} onChange={e=>{setFpp(e.target.value);setFep('All')}} style={sel}><option value="All">All Projects</option>{[...new Set(items.map(i=>i.parent_project).filter(Boolean))].sort().map(p=><option key={p}>{p}</option>)}</select>
+        <select value={fep} onChange={e=>setFep(e.target.value)} style={sel}>
+          <option value="All">All Epics</option>
+          <option value="__none">No epic</option>
+          {(epics as any[]).map(e=>({e,pr:projects.find((p:any)=>p.id===e.project_id)})).filter(({pr})=>pr&&(fpp==='All'||pr.name===fpp))
+            .sort((a,b)=>a.pr.name.localeCompare(b.pr.name)||(a.e.sort_order??0)-(b.e.sort_order??0))
+            .map(({e,pr})=><option key={e.id} value={e.id}>{fpp==='All'?`${pr.name} › ${e.name}`:e.name}</option>)}
+        </select>
+        <select value={groupBy} onChange={e=>setGroupBy(e.target.value)} title="Group the list by project, or by project and epic" style={{...sel,color:groupBy==='none'?'#7A8FA6':'#E07B2A',border:`1px solid ${groupBy==='none'?'#243447':'#E07B2A'}`}}>
+          <option value="none">No grouping</option>
+          <option value="project">Group by project</option>
+          <option value="epic">Group by project › epic</option>
+        </select>
         <select value={frt} onChange={e=>setFrt(e.target.value)} style={sel}><option value="All">All Types</option>{rtOpts.map(r=><option key={r}>{r}</option>)}</select>
         <select value={frg} onChange={e=>setFrg(e.target.value)} style={sel}><option value="All">All Regions</option>{regionOpts.map(r=><option key={r}>{r}</option>)}</select>
         <select value={fvn} onChange={e=>setFvn(e.target.value)} style={sel}><option value="All">All Vendors</option>{vendors.map(v=><option key={v}>{v}</option>)}</select>
@@ -2610,9 +2636,10 @@ const sorted=items.filter(i=>!isItemDone(i)).sort((a,b)=>{
           <tr>
                 <th style={{...TH,width:32}}></th>
                 {[
-                  ['item_id','ID',85],['name','Item Name',200],['priority','Priority',70],['committed_priority','Rank',55],
+                  ['item_id','ID',85],['name','Item Name',200],['parent_project','Project',130],['epic','Epic',130],
+                  ['priority','Priority',70],['committed_priority','Rank',55],
                   ['swimlane','Swimlane',110],['status','Status',130],['team','Team',50],
-                  ['effort','Effort',55],['parent_project','Parent Project',130],
+                  ['effort','Effort',55],
                   ['request_type','Request Type',110],['region','Region',100],
                   ['vendor','Vendor',90],['vendor_delivery_date','Vendor Date',100],
                   ['wsjf','WSJF',65],['rice','RICE',65],['reach','Reach',55],
@@ -2638,7 +2665,40 @@ const sorted=items.filter(i=>!isItemDone(i)).sort((a,b)=>{
               </tr>
             </thead>
             <tbody>
-              {filtered.map((item,idx)=>{
+              {(()=>{
+                if(groupBy==='none')return filtered
+                const out:any[]=[]
+                const byProject=new Map<string,any[]>()
+                filtered.forEach(i=>{const k=i.parent_project||'';if(!byProject.has(k))byProject.set(k,[]);byProject.get(k)!.push(i)})
+                const keys=[...byProject.keys()].sort((a,b)=>!a?1:!b?-1:a.localeCompare(b))
+                for(const k of keys){
+                  const list=byProject.get(k)!
+                  out.push({__hdr:'project',key:'p:'+k,label:k||'No project',count:list.length})
+                  if(groupBy!=='epic'){out.push(...list);continue}
+                  const pr=projects.find((p:any)=>p.name===k)
+                  const pe=pr?(epics as any[]).filter(e=>e.project_id===pr.id).sort((a,b)=>(a.sort_order??0)-(b.sort_order??0)):[]
+                  for(const e of pe){
+                    const its=list.filter(i=>epicOf(i)?.id===e.id)
+                    if(!its.length)continue
+                    out.push({__hdr:'epic',key:'e:'+e.id,label:e.name,count:its.length})
+                    out.push(...its)
+                  }
+                  const rest=list.filter(i=>!epicOf(i))
+                  if(rest.length&&pe.length){out.push({__hdr:'epic',key:'e:none:'+k,label:'No epic',count:rest.length,none:true});out.push(...rest)}
+                  else out.push(...rest)
+                }
+                return out
+              })().map((item:any,idx:number)=>{
+                if(item.__hdr)return(
+                  <tr key={item.key}>
+                    <td colSpan={100} style={{padding:item.__hdr==='project'?'9px 12px 7px':'6px 12px 5px 34px',background:item.__hdr==='project'?'#1E3048':'#132232',borderBottom:'1px solid #243447',position:'sticky',left:0}}>
+                      <span style={{display:'inline-flex',alignItems:'center',gap:8,fontSize:item.__hdr==='project'?12:11,fontWeight:700,color:item.__hdr==='project'?'#F4F6F8':item.none?'#7A8FA6':'#E07B2A'}}>
+                        {item.__hdr==='project'?'◈':item.none?'◇':'◆'} {item.label}
+                        <span style={{fontSize:10,fontWeight:400,color:'#7A8FA6'}}>{item.count} item{item.count!==1?'s':''}</span>
+                      </span>
+                    </td>
+                  </tr>
+                )
                 const r=rice(item)
                 const p12=item.priority==='P1'||item.priority==='P2'
                 const isSel=selected?.id===item.id
@@ -2670,7 +2730,7 @@ const sorted=items.filter(i=>!isItemDone(i)).sort((a,b)=>{
                       </div>
                     </td>
                     <td style={{...TD,color:'#7A8FA6',fontFamily:'monospace',fontSize:10}}>{item.item_id}</td>
-                    <td style={TD}>
+                    <td style={{...TD,minWidth:240}}>
                       <div style={{display:'flex',alignItems:'center',gap:6}}>
                         <div style={{fontSize:12,color:'#F4F6F8',fontWeight:isSel?700:400}}>{rt(item.request_type)} {item.name}</div>
                         {item.start_date&&item.end_date
@@ -2697,6 +2757,10 @@ const sorted=items.filter(i=>!isItemDone(i)).sort((a,b)=>{
                       )}
                       {item.description&&<div style={{color:'#7A8FA6',fontSize:10,marginTop:1,maxWidth:220,overflow:'hidden',whiteSpace:'nowrap',textOverflow:'ellipsis'}}>{item.description}</div>}
                     </td>
+                    <td style={{...TD,fontSize:11,color:item.parent_project?'#F4F6F8':'#7A8FA6',minWidth:110}}>{item.parent_project||'—'}</td>
+                    <td style={TD}>{(()=>{const ep=epicOf(item);return ep
+                      ?<span title={`Epic: ${ep.name}`} style={{display:'inline-flex',alignItems:'center',gap:4,fontSize:11,color:'#E07B2A',border:'1px solid rgba(224,123,42,0.45)',background:'rgba(224,123,42,0.1)',borderRadius:4,padding:'1px 6px',maxWidth:150,overflow:'hidden',whiteSpace:'nowrap' as const,textOverflow:'ellipsis'}}>◆ {ep.name}</span>
+                      :<span style={{fontSize:11,color:'#3A4A5E'}}>—</span>})()}</td>
                     <td style={TD}><span style={{background:pclr.bg,color:pclr.text,borderRadius:4,padding:'2px 8px',fontSize:10,fontWeight:700,whiteSpace:'nowrap' as const}}>{item.priority}</span></td>
                     <td style={{...TD,textAlign:'center' as const,padding:'0 4px'}} onClick={e=>e.stopPropagation()}>
                       {(item.priority==='P1'||item.priority==='P2')
@@ -2710,7 +2774,6 @@ const sorted=items.filter(i=>!isItemDone(i)).sort((a,b)=>{
                     <td style={TD}><span style={{color:sc(item.status),fontSize:11,fontWeight:600}}>{item.status}</span></td>
                     <td style={{...TD,fontSize:10,color:'#7A8FA6'}}>{item.team==='Consumer Experience'?'CE':'OE'}</td>
                     <td style={{...TD,textAlign:'center' as const,fontSize:11}}>{item.effort}</td>
-                    <td style={{...TD,fontSize:11,color:item.parent_project?'#F4F6F8':'#7A8FA6'}}>{item.parent_project||'—'}</td>
                     <td style={{...TD,fontSize:11,color:'#7A8FA6'}}>{item.request_type}</td>
                     <td style={{...TD,fontSize:11,color:'#7A8FA6'}}>{item.region}</td>
                     <td style={{...TD,fontSize:11,color:'#7A8FA6'}}>{item.vendor}</td>
