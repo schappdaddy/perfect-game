@@ -429,15 +429,17 @@ export default function StrategyTab({projects,setProjects,strategies,setStrategi
 
               {rows.map((r,ri)=>{
                 if(r.kind==='track')return(
-                  <div key={ri} style={{display:'flex',height:r.h,position:'relative',zIndex:1}}>
-                    <div style={{...cellLabel,background:r.track.color,borderRight:'none',padding:'0 6px 0 8px',display:'flex',alignItems:'center',gap:4,fontSize:11,fontWeight:800,color:'#0D1B2A',letterSpacing:1}}>
+                  <div key={ri} style={{display:'flex',height:r.h,position:'relative',zIndex:4}}>
+                    {/* The name and subtitle run across the band rather than being clipped to the label column */}
+                    <div style={{...cellLabel,overflow:'visible',background:r.track.color,borderRight:'none',padding:'0 6px 0 8px',display:'flex',alignItems:'center',gap:4,fontSize:11,fontWeight:800,color:'#0D1B2A',letterSpacing:1,whiteSpace:'nowrap' as const}}>
                       <button onClick={()=>toggleCollapsed(r.track.id)} title={r.closed?'Expand':'Collapse'} style={HDR_BTN}>{r.closed?'▸':'▾'}</button>
-                      <span onClick={()=>toggleCollapsed(r.track.id)} title={`${r.track.name} track`} style={{...CLIP,flex:1,cursor:'pointer'}}>{r.track.name.toUpperCase()}</span>
-                      {r.closed&&<span style={{fontSize:10,fontWeight:700,opacity:0.7}}>{r.count}</span>}
                       <button onClick={()=>moveTrack(r.track.id,-1)} disabled={r.index===0} title="Move track up" style={{...HDR_BTN,opacity:r.index===0?0.3:1}}>▲</button>
                       <button onClick={()=>moveTrack(r.track.id,1)} disabled={r.index===sTracks.length-1} title="Move track down" style={{...HDR_BTN,opacity:r.index===sTracks.length-1?0.3:1}}>▼</button>
+                      <span onClick={()=>toggleCollapsed(r.track.id)} title={`${r.track.name} track`} style={{cursor:'pointer',marginLeft:4}}>{r.track.name.toUpperCase()}</span>
+                      {r.closed&&<span style={{fontSize:10,fontWeight:700,opacity:0.7}}>· {r.count} project{r.count!==1?'s':''}</span>}
+                      {r.track.description&&<span style={{fontSize:11,fontWeight:600,letterSpacing:0,marginLeft:14,opacity:0.85}}>{r.track.description}</span>}
                     </div>
-                    <div style={{width:TW,background:r.track.color,display:'flex',alignItems:'center',padding:'0 10px',fontSize:11,color:'#0D1B2A',fontWeight:600}}><span style={{...CLIP,position:'sticky',left:LABEL_W+10}}>{r.track.description||''}</span></div>
+                    <div style={{width:TW,background:r.track.color}}/>
                   </div>
                 )
                 if(r.kind==='goals')return(
