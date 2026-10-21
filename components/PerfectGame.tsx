@@ -40,6 +40,19 @@ function pc(p) {
 const ITEM_TERMINAL=['Done','Will Not Implement',"Won't Do"]
 const PROJECT_TERMINAL=['Complete','Cancelled','Done'] // 'Done' is the home-space project terminal
 const isItemDone=(i:any)=>ITEM_TERMINAL.includes(i?.status)
+// Capacity split: new-project work vs. sustain work (tech debt, system stabilization and
+// enhancements to existing things). A project carries its work type; an item follows its
+// project unless overridden, and items with no project fall back to their request type.
+const WORK_TYPES=[{key:'new',label:'New projects'},{key:'sustain',label:'Tech debt / Stabilization & Enhancements'}]
+const SUSTAIN_REQUEST_TYPES=['Bug','Tech Debt','Enhancement','Testing']
+const workTypeOfProject=(p:any)=>p?.work_type==='sustain'||p?.planning_state==='bau'?'sustain':'new'
+function workTypeOfItem(item:any,projects:any[]){
+  if(item.work_type==='new'||item.work_type==='sustain')return item.work_type
+  const pr=item.parent_project&&projects.find((p:any)=>p.name===item.parent_project)
+  if(pr)return workTypeOfProject(pr)
+  return SUSTAIN_REQUEST_TYPES.includes(item.request_type)?'sustain':'new'
+}
+const EFFORT_POINTS:any={XS:0.5,S:1,M:2,L:3,XL:5}
 const isProjectDone=(p:any)=>PROJECT_TERMINAL.includes(p?.status)
 // Set an item's status; if terminal, retire its rank and compact remaining ranks
 async function applyItemStatus(items:any[],setItems:any,id:any,v:string){
@@ -1157,6 +1170,13 @@ function ProjectDetail({project,items,setItems,projects,setProjects,milestones,s
                       style={{background:bType===k?'#1E3048':'transparent',color:bType===k?'#F4F6F8':'#7A8FA6',border:'1px solid '+(bType===k?'#3A4A5E':'#243447'),borderRadius:5,padding:'2px 8px',fontSize:9,fontWeight:700,cursor:'pointer'}}>{label}</button>
                   ))}
                 </div>
+                <div style={{display:'flex',gap:3}} title="Work type for the capacity split: new project work, or sustain (tech debt, stabilization & enhancements)">
+                  {[['new','✦ New'],['sustain','⟳ Sustain']].map(([k,label])=>{
+                    const on=workTypeOfProject(project)===k
+                    return <button key={k} onClick={()=>updProjectField({work_type:k,...(project.planning_state==='bau'?{planning_state:'planned'}:{})})}
+                      style={{background:on?(k==='sustain'?'#4A5D72':'#1E3048'):'transparent',color:on?'#F4F6F8':'#7A8FA6',border:'1px solid '+(on?'#3A4A5E':'#243447'),borderRadius:5,padding:'2px 8px',fontSize:9,fontWeight:700,cursor:'pointer'}}>{label}</button>
+                  })}
+                </div>
                 <select value={project.effort||''} onChange={e=>changeEffort(e.target.value)} title="Effort — sets the default allocation % for roster rows below. Changing it also updates any existing row still at the old default."
                   style={{background:project.effort?'#1E3048':'rgba(231,76,60,0.12)',border:'1px solid '+(project.effort?'#3A4A5E':'#E74C3C'),borderRadius:5,color:'#F4F6F8',fontSize:9,fontWeight:700,padding:'2px 6px',cursor:'pointer'}}>
                   <option value="">Effort not set — 0%</option>
@@ -2014,7 +2034,7 @@ function PanelField({label,field,type='text',selected,upd}:{label:string,field:s
   )
 }
 
-function Backlog({items,setItems,projects,setProjects,space,ccrs=[],ccrItems=[],setCcrItems,epics=[]}:{items:any[],setItems:any,projects:any[],setProjects:any,space:string,ccrs?:any[],ccrItems?:any[],setCcrItems?:any,epics?:any[]}) {
+function Backlog({items,setItems,projects,setProjects,space,ccrs=[],ccrItems=[],setCcrItems,epics=[],sustainPct=30}:{items:any[],setItems:any,projects:any[],setProjects:any,space:string,ccrs?:any[],ccrItems?:any[],setCcrItems?:any,epics?:any[],sustainPct?:number}) {
   // CCR membership helpers — the link is a junction row, edited from either side
   const itemCcrLink=(itemId:any)=>{const l=(ccrItems as any[]).find((x:any)=>x.item_id===itemId);return l?{link:l,ccr:(ccrs as any[]).find((c:any)=>c.id===l.ccr_id)}:null}
   async function detachItemCcr(itemId:any){
@@ -2035,6 +2055,20 @@ function Backlog({items,setItems,projects,setProjects,space,ccrs=[],ccrItems=[],
   const [fs,setFs]=useState('All')
   const [fst,setFst]=useState('All')
   const [fpp,setFpp]=useState('All')
+  const [fep,setFep]=useState('All') // epic filter: 'All' | '__none' | epic id
+  const [seg,setSegState]=useState<string>(()=>{try{return localStorage.getItem('pg_backlog_seg')||'all'}catch{return 'all'}}) // 'all' | 'new' | 'sustain'
+  const setSeg=(v:string)=>{setSegState(v);try{localStorage.setItem('pg_backlog_seg',v)}catch{}}
+  const wtOf=(item:any)=>workTypeOfItem(item,projects)
+  const [groupBy,setGroupByState]=useState<string>(()=>{try{return localStorage.getItem('pg_backlog_group')||'none'}catch{return 'none'}})
+  const setGroupBy=(v:string)=>{setGroupByState(v);try{localStorage.setItem('pg_backlog_group',v)}catch{}}
+  // Epics only belong to one project, so an item's epic is only valid while it's still in that project
+  const epicOf=(item:any)=>{
+    if(!item.epic_id)return null
+    const e=(epics as any[]).find(x=>x.id===item.epic_id)
+    if(!e)return null
+    const pr=projects.find((p:any)=>p.id===e.project_id)
+    return pr&&pr.name===item.parent_project?e:null
+  }
   const [frt,setFrt]=useState('All')
   const [frg,setFrg]=useState('All')
   const [fvn,setFvn]=useState('All')
@@ -2251,6 +2285,8 @@ function Backlog({items,setItems,projects,setProjects,space,ccrs=[],ccrItems=[],
       case 'team': return item.team?.toLowerCase()||''
       case 'effort': return ['S','M','L','XL'].indexOf(item.effort)
       case 'parent_project': return item.parent_project?.toLowerCase()||'zzz'
+      case 'epic': return epicOf(item)?.name.toLowerCase()||'zzz'
+      case 'work_type': return wtOf(item)
       case 'request_type': return item.request_type?.toLowerCase()||''
       case 'region': return item.region?.toLowerCase()||''
       case 'vendor': return item.vendor?.toLowerCase()||''
@@ -2335,12 +2371,14 @@ const sorted=items.filter(i=>!isItemDone(i)).sort((a,b)=>{
   }
 
 
-  const filtered=sorted.filter(item=>{
+  const preSeg=sorted.filter(item=>{
     if(ft!=='All'&&item.team!==ft) return false
     if(fp!=='All'&&item.priority!==fp) return false
     if(fs!=='All'&&item.swimlane!==fs) return false
     if(fst!=='All'&&item.status!==fst) return false
     if(fpp!=='All'&&item.parent_project!==fpp) return false
+    if(fep==='__none'&&epicOf(item)) return false
+    if(fep!=='All'&&fep!=='__none'&&epicOf(item)?.id!==fep) return false
     if(frt!=='All'&&item.request_type!==frt) return false
     if(frg!=='All'&&item.region!==frg) return false
     if(fvn!=='All'&&item.vendor!==fvn) return false
@@ -2349,6 +2387,13 @@ const sorted=items.filter(i=>!isItemDone(i)).sort((a,b)=>{
     if(srch&&!item.name?.toLowerCase().includes(srch.toLowerCase())&&!item.item_id?.toLowerCase().includes(srch.toLowerCase())) return false
     return true
   })
+  const filtered=seg==='all'?preSeg:preSeg.filter(i=>wtOf(i)===seg)
+  const segCount=(k:string)=>k==='all'?preSeg.length:preSeg.filter(i=>wtOf(i)===k).length
+  // Effort-weighted split of open work in the current filters, against the sustain share
+  const segPts:any={new:0,sustain:0}
+  preSeg.filter(i=>!ITEM_TERMINAL.includes(i.status)).forEach(i=>{segPts[wtOf(i)]+=EFFORT_POINTS[i.effort]??2})
+  const segTotal=segPts.new+segPts.sustain
+  const segNewPct=segTotal?Math.round(segPts.new/segTotal*100):null
 
   // Export current filtered view to Excel, always in ranked order (P1/P2 first, then committed rank)
   function exportExcel(){
@@ -2364,7 +2409,7 @@ const sorted=items.filter(i=>!isItemDone(i)).sort((a,b)=>{
       'ID':i.item_id,'Item Name':i.name,'Description':i.description||'',
       'Priority':i.priority,'Rank':i.committed_priority??'',
       'Swimlane':i.swimlane||'','Status':i.status||'','Team':i.team||'',
-      'Effort':i.effort||'','Parent Project':i.parent_project||'',
+      'Effort':i.effort||'','Parent Project':i.parent_project||'','Epic':epicOf(i)?.name||'','Work Type':wtOf(i)==='sustain'?'Sustain':'New project',
       'Request Type':i.request_type||'','Region':i.region||'','Vendor':i.vendor||'',
       'Vendor Date':i.vendor_delivery_date||'','WSJF':i.wsjf?parseFloat(i.wsjf):'',
       'RICE':rice(i)||'','Reach':i.reach||'','Impact':i.impact||'','Confidence':i.confidence??'',
@@ -2581,13 +2626,48 @@ const sorted=items.filter(i=>!isItemDone(i)).sort((a,b)=>{
           </div>
         </div>
       )}
+      {space==='work'&&<div style={{display:'flex',alignItems:'center',gap:4,padding:'8px 20px 0',background:'#162436',flexWrap:'wrap' as const}}>
+        {[{key:'all',label:'All'},...WORK_TYPES].map(t=>(
+          <button key={t.key} onClick={()=>setSeg(t.key)}
+            style={{background:seg===t.key?'#0D1B2A':'transparent',color:seg===t.key?'#F4F6F8':'#7A8FA6',border:'1px solid '+(seg===t.key?'#243447':'transparent'),borderBottom:seg===t.key?'2px solid '+(t.key==='sustain'?'#8FA6BC':'#C8973A'):'2px solid transparent',borderRadius:'6px 6px 0 0',padding:'6px 14px',fontSize:12,fontWeight:seg===t.key?700:400,cursor:'pointer'}}>
+            {t.label} <span style={{fontSize:10,color:'#7A8FA6',marginLeft:4}}>{segCount(t.key)}</span>
+          </button>
+        ))}
+        {segNewPct!=null&&(()=>{
+          const target=100-sustainPct,off=Math.abs(segNewPct-target)>10
+          return(
+            <div title={`Open items in the current filters, weighted by effort (S=1, M=2, L=3, XL=5). Target: ${target}% new projects, ${sustainPct}% sustain.`}
+              style={{marginLeft:'auto',display:'flex',alignItems:'center',gap:8,fontSize:11,color:'#7A8FA6',padding:'0 0 4px'}}>
+              <span>Effort split</span>
+              <div style={{position:'relative',width:160,height:8,borderRadius:4,background:'#4A5D72',overflow:'hidden'}}>
+                <div style={{width:segNewPct+'%',height:'100%',background:'#C8973A'}}/>
+                <div style={{position:'absolute',left:target+'%',top:-2,bottom:-2,width:2,background:'#F4F6F8'}}/>
+              </div>
+              <span style={{color:off?'#D4820A':'#C8C8D4',fontWeight:700,fontVariantNumeric:'tabular-nums'}}>{segNewPct} / {100-segNewPct}</span>
+              <span>target {target} / {sustainPct}</span>
+            </div>
+          )
+        })()}
+      </div>}
       <div style={{display:'flex',gap:8,padding:'10px 20px',borderBottom:'1px solid #243447',flexWrap:'wrap',alignItems:'center',background:'#162436'}}>
         <input placeholder="Search..." value={srch} onChange={e=>setSrch(e.target.value)} style={{...sel,width:160}}/>
         <select value={ft} onChange={e=>setFt(e.target.value)} style={sel}><option value="All">All Teams</option>{TEAMS.map(t=><option key={t}>{t}</option>)}</select>
         <select value={fp} onChange={e=>setFp(e.target.value)} style={sel}><option value="All">All Priorities</option>{PRIORITIES.map(p=><option key={p}>{p}</option>)}</select>
         <select value={fs} onChange={e=>setFs(e.target.value)} style={sel}><option value="All">All Swimlanes</option>{swimlaneOpts.map(s=><option key={s}>{s}</option>)}</select>
         <select value={fst} onChange={e=>setFst(e.target.value)} style={sel}><option value="All">All Statuses</option>{statusOpts.map(s=><option key={s}>{s}</option>)}</select>
-        <select value={fpp} onChange={e=>setFpp(e.target.value)} style={sel}><option value="All">All Projects</option>{[...new Set(items.map(i=>i.parent_project).filter(Boolean))].sort().map(p=><option key={p}>{p}</option>)}</select>
+        <select value={fpp} onChange={e=>{setFpp(e.target.value);setFep('All')}} style={sel}><option value="All">All Projects</option>{[...new Set(items.map(i=>i.parent_project).filter(Boolean))].sort().map(p=><option key={p}>{p}</option>)}</select>
+        <select value={fep} onChange={e=>setFep(e.target.value)} style={sel}>
+          <option value="All">All Epics</option>
+          <option value="__none">No epic</option>
+          {(epics as any[]).map(e=>({e,pr:projects.find((p:any)=>p.id===e.project_id)})).filter(({pr})=>pr&&(fpp==='All'||pr.name===fpp))
+            .sort((a,b)=>a.pr.name.localeCompare(b.pr.name)||(a.e.sort_order??0)-(b.e.sort_order??0))
+            .map(({e,pr})=><option key={e.id} value={e.id}>{fpp==='All'?`${pr.name} › ${e.name}`:e.name}</option>)}
+        </select>
+        <select value={groupBy} onChange={e=>setGroupBy(e.target.value)} title="Group the list by project, or by project and epic" style={{...sel,color:groupBy==='none'?'#7A8FA6':'#E07B2A',border:`1px solid ${groupBy==='none'?'#243447':'#E07B2A'}`}}>
+          <option value="none">No grouping</option>
+          <option value="project">Group by project</option>
+          <option value="epic">Group by project › epic</option>
+        </select>
         <select value={frt} onChange={e=>setFrt(e.target.value)} style={sel}><option value="All">All Types</option>{rtOpts.map(r=><option key={r}>{r}</option>)}</select>
         <select value={frg} onChange={e=>setFrg(e.target.value)} style={sel}><option value="All">All Regions</option>{regionOpts.map(r=><option key={r}>{r}</option>)}</select>
         <select value={fvn} onChange={e=>setFvn(e.target.value)} style={sel}><option value="All">All Vendors</option>{vendors.map(v=><option key={v}>{v}</option>)}</select>
@@ -2610,9 +2690,10 @@ const sorted=items.filter(i=>!isItemDone(i)).sort((a,b)=>{
           <tr>
                 <th style={{...TH,width:32}}></th>
                 {[
-                  ['item_id','ID',85],['name','Item Name',200],['priority','Priority',70],['committed_priority','Rank',55],
+                  ['item_id','ID',85],['name','Item Name',200],['parent_project','Project',130],['epic','Epic',130],['work_type','Work',80],
+                  ['priority','Priority',70],['committed_priority','Rank',55],
                   ['swimlane','Swimlane',110],['status','Status',130],['team','Team',50],
-                  ['effort','Effort',55],['parent_project','Parent Project',130],
+                  ['effort','Effort',55],
                   ['request_type','Request Type',110],['region','Region',100],
                   ['vendor','Vendor',90],['vendor_delivery_date','Vendor Date',100],
                   ['wsjf','WSJF',65],['rice','RICE',65],['reach','Reach',55],
@@ -2638,7 +2719,40 @@ const sorted=items.filter(i=>!isItemDone(i)).sort((a,b)=>{
               </tr>
             </thead>
             <tbody>
-              {filtered.map((item,idx)=>{
+              {(()=>{
+                if(groupBy==='none')return filtered
+                const out:any[]=[]
+                const byProject=new Map<string,any[]>()
+                filtered.forEach(i=>{const k=i.parent_project||'';if(!byProject.has(k))byProject.set(k,[]);byProject.get(k)!.push(i)})
+                const keys=[...byProject.keys()].sort((a,b)=>!a?1:!b?-1:a.localeCompare(b))
+                for(const k of keys){
+                  const list=byProject.get(k)!
+                  out.push({__hdr:'project',key:'p:'+k,label:k||'No project',count:list.length})
+                  if(groupBy!=='epic'){out.push(...list);continue}
+                  const pr=projects.find((p:any)=>p.name===k)
+                  const pe=pr?(epics as any[]).filter(e=>e.project_id===pr.id).sort((a,b)=>(a.sort_order??0)-(b.sort_order??0)):[]
+                  for(const e of pe){
+                    const its=list.filter(i=>epicOf(i)?.id===e.id)
+                    if(!its.length)continue
+                    out.push({__hdr:'epic',key:'e:'+e.id,label:e.name,count:its.length})
+                    out.push(...its)
+                  }
+                  const rest=list.filter(i=>!epicOf(i))
+                  if(rest.length&&pe.length){out.push({__hdr:'epic',key:'e:none:'+k,label:'No epic',count:rest.length,none:true});out.push(...rest)}
+                  else out.push(...rest)
+                }
+                return out
+              })().map((item:any,idx:number)=>{
+                if(item.__hdr)return(
+                  <tr key={item.key}>
+                    <td colSpan={100} style={{padding:item.__hdr==='project'?'9px 12px 7px':'6px 12px 5px 34px',background:item.__hdr==='project'?'#1E3048':'#132232',borderBottom:'1px solid #243447',position:'sticky',left:0}}>
+                      <span style={{display:'inline-flex',alignItems:'center',gap:8,fontSize:item.__hdr==='project'?12:11,fontWeight:700,color:item.__hdr==='project'?'#F4F6F8':item.none?'#7A8FA6':'#E07B2A'}}>
+                        {item.__hdr==='project'?'◈':item.none?'◇':'◆'} {item.label}
+                        <span style={{fontSize:10,fontWeight:400,color:'#7A8FA6'}}>{item.count} item{item.count!==1?'s':''}</span>
+                      </span>
+                    </td>
+                  </tr>
+                )
                 const r=rice(item)
                 const p12=item.priority==='P1'||item.priority==='P2'
                 const isSel=selected?.id===item.id
@@ -2670,7 +2784,7 @@ const sorted=items.filter(i=>!isItemDone(i)).sort((a,b)=>{
                       </div>
                     </td>
                     <td style={{...TD,color:'#7A8FA6',fontFamily:'monospace',fontSize:10}}>{item.item_id}</td>
-                    <td style={TD}>
+                    <td style={{...TD,minWidth:240}}>
                       <div style={{display:'flex',alignItems:'center',gap:6}}>
                         <div style={{fontSize:12,color:'#F4F6F8',fontWeight:isSel?700:400}}>{rt(item.request_type)} {item.name}</div>
                         {item.start_date&&item.end_date
@@ -2697,6 +2811,13 @@ const sorted=items.filter(i=>!isItemDone(i)).sort((a,b)=>{
                       )}
                       {item.description&&<div style={{color:'#7A8FA6',fontSize:10,marginTop:1,maxWidth:220,overflow:'hidden',whiteSpace:'nowrap',textOverflow:'ellipsis'}}>{item.description}</div>}
                     </td>
+                    <td style={{...TD,fontSize:11,color:item.parent_project?'#F4F6F8':'#7A8FA6',minWidth:110}}>{item.parent_project||'—'}</td>
+                    <td style={TD}>{(()=>{const ep=epicOf(item);return ep
+                      ?<span title={`Epic: ${ep.name}`} style={{display:'inline-flex',alignItems:'center',gap:4,fontSize:11,color:'#E07B2A',border:'1px solid rgba(224,123,42,0.45)',background:'rgba(224,123,42,0.1)',borderRadius:4,padding:'1px 6px',maxWidth:150,overflow:'hidden',whiteSpace:'nowrap' as const,textOverflow:'ellipsis'}}>◆ {ep.name}</span>
+                      :<span style={{fontSize:11,color:'#3A4A5E'}}>—</span>})()}</td>
+                    <td style={TD}>{wtOf(item)==='sustain'
+                      ?<span title="Sustain: tech debt, stabilization & enhancements" style={{fontSize:10,fontWeight:700,color:'#C8D4E0',background:'#4A5D72',borderRadius:4,padding:'2px 7px',whiteSpace:'nowrap' as const}}>⟳ Sustain</span>
+                      :<span title="New project work" style={{fontSize:10,fontWeight:700,color:'#C8973A',border:'1px solid rgba(200,151,58,0.5)',borderRadius:4,padding:'1px 7px',whiteSpace:'nowrap' as const}}>✦ New</span>}</td>
                     <td style={TD}><span style={{background:pclr.bg,color:pclr.text,borderRadius:4,padding:'2px 8px',fontSize:10,fontWeight:700,whiteSpace:'nowrap' as const}}>{item.priority}</span></td>
                     <td style={{...TD,textAlign:'center' as const,padding:'0 4px'}} onClick={e=>e.stopPropagation()}>
                       {(item.priority==='P1'||item.priority==='P2')
@@ -2710,7 +2831,6 @@ const sorted=items.filter(i=>!isItemDone(i)).sort((a,b)=>{
                     <td style={TD}><span style={{color:sc(item.status),fontSize:11,fontWeight:600}}>{item.status}</span></td>
                     <td style={{...TD,fontSize:10,color:'#7A8FA6'}}>{item.team==='Consumer Experience'?'CE':'OE'}</td>
                     <td style={{...TD,textAlign:'center' as const,fontSize:11}}>{item.effort}</td>
-                    <td style={{...TD,fontSize:11,color:item.parent_project?'#F4F6F8':'#7A8FA6'}}>{item.parent_project||'—'}</td>
                     <td style={{...TD,fontSize:11,color:'#7A8FA6'}}>{item.request_type}</td>
                     <td style={{...TD,fontSize:11,color:'#7A8FA6'}}>{item.region}</td>
                     <td style={{...TD,fontSize:11,color:'#7A8FA6'}}>{item.vendor}</td>
@@ -2780,6 +2900,22 @@ const sorted=items.filter(i=>!isItemDone(i)).sort((a,b)=>{
                       style={{width:'100%',background:'#1E3048',color:'#F4F6F8',border:'1px solid #243447',borderRadius:6,padding:'7px 10px',fontSize:13,cursor:proj?'pointer':'not-allowed',opacity:proj?1:0.5}}>
                       <option value="">{!proj?'Set a parent project first':opts.length?'No epic':'No epics in this project yet'}</option>
                       {opts.map(e=><option key={e.id} value={e.id}>{e.name}</option>)}
+                    </select>
+                  </div>
+                )
+              })()}
+              {space==='work'&&(()=>{
+                const proj=projects.find((p:any)=>p.name===selected.parent_project)
+                const auto=proj?workTypeOfProject(proj):(SUSTAIN_REQUEST_TYPES.includes(selected.request_type)?'sustain':'new')
+                const name=(k:string)=>k==='sustain'?'Sustain (tech debt, stabilization & enhancements)':'New project'
+                return(
+                  <div>
+                    <div style={{fontSize:11,color:'#7A8FA6',marginBottom:4,letterSpacing:0.5}}>WORK TYPE</div>
+                    <select value={selected.work_type||''} onChange={e=>upd(selected.id,'work_type',e.target.value||null)}
+                      style={{width:'100%',background:'#1E3048',color:'#F4F6F8',border:'1px solid #243447',borderRadius:6,padding:'7px 10px',fontSize:13,cursor:'pointer'}}>
+                      <option value="">Automatic: {name(auto)}{proj?' (from project)':' (from request type)'}</option>
+                      <option value="new">New project</option>
+                      <option value="sustain">Sustain (tech debt, stabilization & enhancements)</option>
                     </select>
                   </div>
                 )
@@ -8051,10 +8187,10 @@ function Assistant({open,setOpen,seed,setSeed,items:itemsProp,setItems,projects:
         const trs=L.tracks.filter((t:any)=>t.strategy_id===st.id).sort((a:any,b:any)=>a.sort_order-b.sort_order)
         const trIds=new Set(trs.map((t:any)=>t.id))
         const work=L.projects.filter((p:any)=>spaceOf(p)==='work')
-        const fmtP=(p:any)=>({name:p.name,team:p.team,status:p.status,state:p.planning_state||'planned',start:p.start_date,end:p.ongoing?'ongoing':p.end_date,
+        const fmtP=(p:any)=>({name:p.name,team:p.team,status:p.status,state:p.planning_state==='proposed'?'proposed':'planned',work_type:workTypeOfProject(p),start:p.start_date,end:p.ongoing?'ongoing':p.end_date,
           depends_on:L.deps.filter((d:any)=>d.project_id===p.id).map((d:any)=>pname(d.depends_on_id)).filter(Boolean)})
         return{
-          strategy:{name:st.name,fiscal_years:`FY${st.start_fy}–FY${st.end_fy} (FY runs Apr–Mar; FY${st.start_fy} starts ${st.start_fy-1}-04-01)`,bau_pct:st.bau_pct,code_freeze_months:st.freeze_months},
+          strategy:{name:st.name,fiscal_years:`FY${st.start_fy}–FY${st.end_fy} (FY runs Apr–Mar; FY${st.start_fy} starts ${st.start_fy-1}-04-01)`,sustain_pct:st.bau_pct,new_project_pct:100-Number(st.bau_pct),code_freeze_months:st.freeze_months},
           tracks:trs.map((t:any)=>({name:t.name,description:t.description,
             goals:L.goals.filter((g:any)=>g.track_id===t.id).sort((a:any,b:any)=>a.fy-b.fy).map((g:any)=>({fy:g.fy,goal:g.goal})),
             projects:work.filter((p:any)=>p.track_id===t.id).map(fmtP)})),
@@ -8100,7 +8236,8 @@ function Assistant({open,setOpen,seed,setSeed,items:itemsProp,setItems,projects:
         }
         if(inp.start_date!==undefined)fields.start_date=inp.start_date||null
         if(inp.end_date!==undefined){fields.end_date=inp.end_date||null;if(inp.end_date)fields.ongoing=false}
-        if(inp.planning_state)fields.planning_state=inp.planning_state
+        if(inp.planning_state)fields.planning_state=inp.planning_state==='bau'?'planned':inp.planning_state
+        if(inp.work_type==='new'||inp.work_type==='sustain')fields.work_type=inp.work_type
         if(fields.start_date&&fields.end_date&&fields.end_date<fields.start_date)return{error:'end_date is before start_date'}
         if(!pr){
           if(!inp.create_if_missing)return{error:`No project matched "${inp.project}". Set create_if_missing to add it as a new proposed project.`,projects:L.projects.filter((p:any)=>spaceOf(p)==='work'&&!PROJECT_TERMINAL.includes(p.status)).map((p:any)=>p.name)}
@@ -8109,14 +8246,14 @@ function Assistant({open,setOpen,seed,setSeed,items:itemsProp,setItems,projects:
             sort_order:L.projects.length,space:'work',planning_state:'proposed',...fields}).select().single()
           if(error)return{error:error.message}
           setProjects((prev:any[])=>[...prev,data]);pushLive('projects',data)
-          return{created:{project:data.name,team:data.team||'none',track:inp.track||'none',state:data.planning_state,start:data.start_date,end:data.end_date}}
+          return{created:{project:data.name,team:data.team||'none',track:inp.track||'none',state:data.planning_state,work_type:data.work_type,start:data.start_date,end:data.end_date}}
         }
         if(!Object.keys(fields).length)return{error:'Nothing to change'}
         setProjects((prev:any[])=>prev.map((p:any)=>p.id===pr.id?{...p,...fields}:p));patchLive('projects',pr.id,fields)
         const{error}=await supabase.from('projects').update(fields).eq('id',pr.id)
         if(error)return{error:error.message}
         const now={...pr,...fields}
-        return{updated:{project:pr.name,track:L.tracks.find((t:any)=>t.id===now.track_id)?.name||'none',state:now.planning_state||'planned',start:now.start_date,end:now.ongoing?'ongoing':now.end_date}}
+        return{updated:{project:pr.name,track:L.tracks.find((t:any)=>t.id===now.track_id)?.name||'none',state:now.planning_state==='proposed'?'proposed':'planned',work_type:workTypeOfProject(now),start:now.start_date,end:now.ongoing?'ongoing':now.end_date}}
       }
       if(name==='add_dependency'||name==='remove_dependency'){
         const a=findProject(inp.project),b=findProject(inp.depends_on)
@@ -8429,7 +8566,7 @@ useEffect(()=>{
         </div>}
       </div>
       <div style={{flex:1,overflow:'hidden'}}>
-        {activeTab==='backlog'&&<Backlog items={sItems} setItems={setSItems} projects={sProjects} setProjects={setSProjects} space={space} ccrs={ccrs} ccrItems={ccrItems} setCcrItems={setCcrItems} epics={epics}/>}
+        {activeTab==='backlog'&&<Backlog items={sItems} setItems={setSItems} projects={sProjects} setProjects={setSProjects} space={space} ccrs={ccrs} ccrItems={ccrItems} setCcrItems={setCcrItems} epics={epics} sustainPct={Number(strategies[0]?.bau_pct??30)}/>}
         {activeTab==='strategy'&&<StrategyTab projects={projects} setProjects={setProjects} strategies={strategies} setStrategies={setStrategies} tracks={tracks} setTracks={setTracks} goals={trackGoals} setGoals={setTrackGoals} deps={projectDeps} setDeps={setProjectDeps}
           people={people} teams={TEAMS} capacity={capacityByMonth(projects.filter(inSpace),projectRoles,people,roles,items.filter(inSpace))}
           onOpenProject={(p:any)=>{setSelectedProject(p);setActiveTab('projects')}} openAssistant={(t:string)=>{setAsstSeed(t);setAsstOpen(true)}}/>}
