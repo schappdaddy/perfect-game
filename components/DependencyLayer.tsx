@@ -46,12 +46,16 @@ export function DependencyLayer({containerRef,deps,isBad,onCreate,onDelete,label
   const linkRef=useRef<any>(null)
   const onCreateRef=useRef(onCreate)
   const measureRef=useRef<()=>void>(()=>{})
+  const svgRef=useRef<SVGSVGElement>(null)
 
   // Measure every bar after each render; only update state when something actually moved
   function measure(){
     const c=containerRef.current as HTMLElement|null
-    if(!c)return
-    const cr=c.getBoundingClientRect()
+    const svg=svgRef.current
+    if(!c||!svg)return
+    // Positions are taken from the drawing surface itself, so lines line up wherever the
+    // layer sits inside the container (e.g. below a sticky header)
+    const cr=svg.getBoundingClientRect()
     const next:Record<string,Box>={}
     c.querySelectorAll<HTMLElement>('[data-dep-key]').forEach(el=>{
       const r=el.getBoundingClientRect()
@@ -80,7 +84,7 @@ export function DependencyLayer({containerRef,deps,isBad,onCreate,onDelete,label
   useEffect(()=>{
     const c=containerRef.current as HTMLElement|null
     if(!c)return
-    const pos=(e:PointerEvent)=>{const cr=c.getBoundingClientRect();return{x:e.clientX-cr.left,y:e.clientY-cr.top}}
+    const pos=(e:PointerEvent)=>{const cr=(svgRef.current||c).getBoundingClientRect();return{x:e.clientX-cr.left,y:e.clientY-cr.top}}
     const targetKey=(e:PointerEvent)=>{
       const el=document.elementFromPoint(e.clientX,e.clientY) as HTMLElement|null
       const bar=el?.closest('[data-dep-key]') as HTMLElement|null
@@ -124,7 +128,7 @@ export function DependencyLayer({containerRef,deps,isBad,onCreate,onDelete,label
     <>
       <style>{`[data-dep-handle]{opacity:0;transition:opacity .12s}[data-dep-key]:hover [data-dep-handle],[data-dep-handle]:hover{opacity:1}`}</style>
       {/* Sized to the container rather than measured, so drawing never changes what's measured */}
-      <svg style={{position:'absolute',left:0,top:0,width:'100%',height:'100%',pointerEvents:'none',zIndex:7,overflow:'visible'}}>
+      <svg ref={svgRef} style={{position:'absolute',left:0,top:0,width:'100%',height:'100%',pointerEvents:'none',zIndex:7,overflow:'visible'}}>
         <defs>
           <marker id="dep-arrow" viewBox="0 0 8 8" refX="7" refY="4" markerWidth="7" markerHeight="7" orient="auto"><path d="M0,0 L8,4 L0,8 z" fill={LINE}/></marker>
           <marker id="dep-arrow-bad" viewBox="0 0 8 8" refX="7" refY="4" markerWidth="7" markerHeight="7" orient="auto"><path d="M0,0 L8,4 L0,8 z" fill={BAD}/></marker>

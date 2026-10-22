@@ -407,13 +407,24 @@ export default function StrategyTab({projects,setProjects,strategies,setStrategi
       .sort((a,b)=>(epicBase(a)?.s||'9999').localeCompare(epicBase(b)?.s||'9999')||a.name.localeCompare(b.name))
   }
   // Clicking an empty row places an undated project into the clicked quarter
-  async function onRowClick(e:any,p:any){
-    if(p.start_date){setSelId(p.id);return}
+  // Clicking an empty row places undated work into the clicked quarter (or month, when
+  // snapping to months)
+  function clickedPeriod(e:any){
     const rect=e.currentTarget.getBoundingClientRect()
     const month=Math.floor((e.clientX-rect.left)/MONTH_W)
-    const qStart=winStartAbs+Math.floor(month/3)*3
+    const step=view.snap==='month'?1:3
+    const first=winStartAbs+Math.floor(month/step)*step
+    return{start_date:monthStartISO(first),end_date:monthEndISO(first+step-1)}
+  }
+  async function onRowClick(e:any,p:any){
+    if(p.start_date){setSelId(p.id);return}
     setSelId(p.id)
-    await updProject(p.id,{start_date:monthStartISO(qStart),end_date:monthEndISO(qStart+2),ongoing:false})
+    await updProject(p.id,{...clickedPeriod(e),ongoing:false})
+  }
+  async function onEpicRowClick(e:any,ep:any){
+    setSelId('epic:'+ep.id)
+    if(epicBase(ep))return
+    await updEpic(ep.id,clickedPeriod(e))
   }
 
   const sel=selId?projById(selId):null
@@ -577,8 +588,8 @@ export default function StrategyTab({projects,setProjects,strategies,setStrategi
                         <span style={{fontSize:9,color:EPIC}}>◆</span>
                         <span title={ep.name} style={{...CLIP,fontSize:10.5,color:done?'#7A8FA6':'#C8C8D4',textDecoration:done?'line-through':'none'}}>{ep.name}</span>
                       </div>
-                      <div style={{width:TW,position:'relative'}}>
-                        {!ex&&<span style={{position:'absolute',left:8,top:3,fontSize:9.5,color:'#3A4A5E',fontStyle:'italic'}}>No dates on the epic or its stories</span>}
+                      <div onClick={e=>onEpicRowClick(e,ep)} style={{width:TW,position:'relative',cursor:ex?'default':'copy'}}>
+                        {!ex&&<span style={{position:'absolute',left:8,top:3,fontSize:9.5,color:'#3A4A5E',fontStyle:'italic',pointerEvents:'none'}}>No dates. Click a {view.snap==='month'?'month':'quarter'} to place it there.</span>}
                         {ex&&(
                           <div data-dep-key={depKey('epic',ep.id)} title={`◆ ${ep.name}\n${fmtDate(ex.s)} → ${fmtDate(ex.e)}${ex.derived?'\nDates from its stories. Drag to give the epic its own dates.':''}`}
                             onPointerDown={e=>onBarDown(e,ep,'move')} onPointerMove={onBarMove} onPointerUp={()=>onEpicUp(ep)} onClick={e=>e.stopPropagation()}
@@ -609,7 +620,7 @@ export default function StrategyTab({projects,setProjects,strategies,setStrategi
                       {p.team&&<span style={{fontSize:9,color:'#7A8FA6'}}>{teamShort(p.team)}</span>}
                     </div>
                     <div onClick={e=>onRowClick(e,p)} style={{width:TW,position:'relative',cursor:p.start_date?'default':'copy'}}>
-                      {!ex&&<span style={{position:'absolute',left:8,top:6,fontSize:10,color:'#3A4A5E',fontStyle:'italic',pointerEvents:'none'}}>No dates. Click a quarter to place it there.</span>}
+                      {!ex&&<span style={{position:'absolute',left:8,top:6,fontSize:10,color:'#3A4A5E',fontStyle:'italic',pointerEvents:'none'}}>No dates. Click a {view.snap==='month'?'month':'quarter'} to place it there.</span>}
                       {ex&&(
                         <div data-dep-key={depKey('project',p.id)} title={`${p.name}\n${STATE_LABEL[st]} · ${WORK_LABEL[workType(p)]} · ${fmtDate(ex.s)} → ${ex.e?fmtDate(ex.e):'ongoing'}`}
                           onPointerDown={e=>onBarDown(e,p,'move')} onPointerMove={onBarMove} onPointerUp={()=>onBarUp(p)} onClick={e=>e.stopPropagation()}
