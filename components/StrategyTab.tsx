@@ -54,9 +54,38 @@ const TEMPLATE={
   ],
 }
 
-export default function StrategyTab({projects,setProjects,strategies,setStrategies,tracks,setTracks,goals,setGoals,deps,setDeps,people,capacity,teams,onOpenProject,openAssistant,items=[],epics=[],setEpics}:any){
+export default function StrategyTab({projects:mainProjects,setProjects,strategies,setStrategies,tracks,setTracks,goals,setGoals,deps:allDeps,setDeps,people,computeCapacity,teams,onOpenProject,openAssistant,items=[],epics:mainEpics=[],setEpics,strategyItems=[],setStrategyItems}:any){
   const [stratId,setStratId]=useState<any>(()=>{try{return localStorage.getItem('pg_strategy')}catch{return null}})
   const strategy=(strategies as any[]).find(s=>s.id===stratId)||strategies[0]||null
+  // ── Sandbox: this strategy's own placement of projects and epics (track, dates, planning
+  // state) and its own dependencies. Anything it hasn't touched shows the main roadmap's
+  // values. Nothing here changes the main roadmap until the strategy is promoted.
+  const sRows=(strategyItems as any[]).filter(r=>r.strategy_id===strategy?.id)
+  const rowOf=(type:string,id:any)=>sRows.find(r=>r.item_type===type&&r.item_id===id)
+  const mainState=(p:any)=>p?.planning_state==='proposed'?'proposed':'planned'
+  const projects=(mainProjects as any[]).map(p=>{
+    const r=rowOf('project',p.id)
+    return r?{...p,track_id:r.track_id,start_date:r.start_date,end_date:r.end_date,planning_state:r.planning_state||mainState(p)}:{...p,track_id:null}
+  })
+  const epics=(mainEpics as any[]).map(e=>{const r=rowOf('epic',e.id);return r?{...e,start_date:r.start_date,end_date:r.end_date}:e})
+  const deps=(allDeps as any[]).filter(d=>strategy&&d.strategy_id===strategy.id)
+  const SANDBOX_FIELDS=['track_id','start_date','end_date','planning_state']
+  async function upsertRow(type:string,id:any,fields:any){
+    if(!strategy)return
+    const cur=rowOf(type,id)
+    const main=type==='project'?(mainProjects as any[]).find(p=>p.id===id):(mainEpics as any[]).find(e=>e.id===id)
+    const row={strategy_id:strategy.id,item_type:type,item_id:id,
+      track_id:cur?cur.track_id:null,
+      start_date:cur?cur.start_date:(main?.start_date||null),
+      end_date:cur?cur.end_date:(main?.ongoing?null:(main?.end_date||null)),
+      planning_state:type==='project'?(cur?.planning_state||mainState(main)):null,
+      ...fields,updated_at:new Date().toISOString()}
+    const tempId=cur?.id||`tmp-${type}-${id}`
+    setStrategyItems((prev:any[])=>cur?prev.map(r=>r.id===cur.id?{...r,...row}:r):[...prev,{...row,id:tempId}])
+    const{data,error}=await supabase.from('strategy_items').upsert(row,{onConflict:'strategy_id,item_type,item_id'}).select().single()
+    if(error){alert('Failed to save to this strategy: '+error.message);return}
+    if(data)setStrategyItems((prev:any[])=>prev.map(r=>r.id===tempId||r.id===data.id?data:r))
+  }
   const [selId,setSelId]=useState<any>(null)
   const [drag,setDrag]=useState<any>(null) // {id,mode:'move'|'start'|'end',x0,dm}
   const [editGoal,setEditGoal]=useState<any>(null) // {track_id,fy,text}
@@ -77,14 +106,113 @@ export default function StrategyTab({projects,setProjects,strategies,setStrategi
 
   // ── Writes ────────────────────────────────────────────────────────────────
   async function updProject(id:any,fields:any){
-    setProjects((prev:any[])=>prev.map(p=>p.id===id?{...p,...fields}:p))
-    const{error}=await supabase.from('projects').update({...fields,updated_at:new Date().toISOString()}).eq('id',id)
-    if(error)alert('Failed to save project: '+error.message)
+    const sandbox:any={},own:any={}
+    for(const k of Object.keys(fields)){
+      if(k==='ongoing')continue // placing work in a strategy never changes the project itself
+      ;(SANDBOX_FIELDS.includes(k)?sandbox:own)[k]=fields[k]
+    }
+    if(Object.keys(own).length){
+      setProjects((prev:any[])=>prev.map(p=>p.id===id?{...p,...own}:p))
+      const{error}=await supabase.from('projects').update({...own,updated_at:new Date().toISOString()}).eq('id',id)
+      if(error)alert('Failed to save project: '+error.message)
+    }
+    if(Object.keys(sandbox).length)await upsertRow('project',id,sandbox)
+  }
+  // ── Compare with the main roadmap, promote, duplicate, reset ─────────────
+  function changesVsMain(){
+    const out:any[]=[]
+    for(const r of sRows){
+      const main=r.item_type==='project'?(mainProjects as any[]).find(p=>p.id===r.item_id):(mainEpics as any[]).find(e=>e.id===r.item_id)
+      if(!main)continue
+      const mEnd=main.ongoing?null:(main.end_date||null)
+      const diff:string[]=[]
+      if((r.start_date||null)!==(main.start_date||null)||(r.end_date||null)!==mEnd)diff.push('dates')
+      if(r.item_type==='project'&&r.planning_state&&r.planning_state!==mainState(main))diff.push(r.planning_state==='planned'?'planned':'proposed')
+      if(diff.length)out.push({row:r,main,diff})
+    }
+    const mainDeps=(allDeps as any[]).filter(d=>!d.strategy_id&&d.blocker_type!=='item'&&d.blocked_type!=='item')
+    const sig=(d:any)=>`${d.blocker_type}:${d.blocker_id}>${d.blocked_type}:${d.blocked_id}`
+    const mainSigs=new Set(mainDeps.map(sig)),mySigs=new Set(deps.map(sig))
+    return{rows:out,addDeps:deps.filter(d=>!mainSigs.has(sig(d))),dropDeps:mainDeps.filter(d=>!mySigs.has(sig(d)))}
+  }
+  async function promote(){
+    if(!strategy)return
+    const ch=changesVsMain()
+    const nP=ch.rows.filter(c=>c.row.item_type==='project').length,nE=ch.rows.length-nP
+    if(!ch.rows.length&&!ch.addDeps.length&&!ch.dropDeps.length){alert('The main roadmap already matches this strategy.');return}
+    const lines=[nP&&`${nP} project${nP!==1?'s get':' gets'} this strategy's dates or planning state`,nE&&`${nE} epic${nE!==1?'s get':' gets'} this strategy's dates`,
+      ch.addDeps.length&&`${ch.addDeps.length} dependenc${ch.addDeps.length!==1?'ies are':'y is'} added`,ch.dropDeps.length&&`${ch.dropDeps.length} dependenc${ch.dropDeps.length!==1?'ies are':'y is'} removed`].filter(Boolean)
+    if(!confirm(`Promote "${strategy.name}" to the main roadmap?\n\n• ${lines.join('\n• ')}\n\nThe Roadmap, Projects, Budget and Sprints tabs use the main roadmap. Other strategies are not changed.`))return
+    for(const c of ch.rows){
+      const fields:any={start_date:c.row.start_date||null}
+      if(!(c.main.ongoing&&!c.row.end_date))fields.end_date=c.row.end_date||null
+      if(c.row.item_type==='project'&&c.row.planning_state)fields.planning_state=c.row.planning_state
+      const table=c.row.item_type==='project'?'projects':'epics'
+      const{error}=await supabase.from(table).update(fields).eq('id',c.row.item_id)
+      if(error){alert(`Promoting stopped: ${error.message}`);return}
+      if(table==='projects')setProjects((prev:any[])=>prev.map(p=>p.id===c.row.item_id?{...p,...fields}:p))
+      else setEpics((prev:any[])=>prev.map(e=>e.id===c.row.item_id?{...e,...fields}:e))
+    }
+    if(ch.dropDeps.length){
+      const{error}=await supabase.from('work_dependencies').delete().in('id',ch.dropDeps.map(d=>d.id))
+      if(error){alert('Removing dependencies failed: '+error.message);return}
+      const gone=new Set(ch.dropDeps.map(d=>d.id))
+      setDeps((prev:any[])=>prev.filter(d=>!gone.has(d.id)))
+    }
+    if(ch.addDeps.length){
+      const{data,error}=await supabase.from('work_dependencies').insert(ch.addDeps.map(d=>({blocker_type:d.blocker_type,blocker_id:d.blocker_id,blocked_type:d.blocked_type,blocked_id:d.blocked_id,strategy_id:null}))).select()
+      if(error){alert('Adding dependencies failed: '+error.message);return}
+      if(data)setDeps((prev:any[])=>[...prev,...data])
+    }
+    await updStrategy({promoted_at:new Date().toISOString()})
+    alert(`"${strategy.name}" is now the main roadmap.`)
+  }
+  async function duplicateStrategy(){
+    if(!strategy)return
+    const{data:ns,error}=await supabase.from('strategies').insert({name:`${strategy.name} (copy)`,description:strategy.description,start_fy:strategy.start_fy,end_fy:strategy.end_fy,
+      bau_pct:strategy.bau_pct,freeze_months:strategy.freeze_months,sort_order:strategies.length}).select().single()
+    if(error||!ns){alert('Failed to duplicate: '+(error?.message||'no row returned'));return}
+    const myTracks=tracks.filter((t:any)=>t.strategy_id===strategy.id)
+    const trackMap=new Map<string,string>()
+    const newTracks:any[]=[],newGoals:any[]=[]
+    for(const t of myTracks){
+      const{data:nt}=await supabase.from('tracks').insert({strategy_id:ns.id,name:t.name,description:t.description,color:t.color,sort_order:t.sort_order}).select().single()
+      if(!nt)continue
+      trackMap.set(t.id,nt.id);newTracks.push(nt)
+      const gs=goals.filter((g:any)=>g.track_id===t.id).map((g:any)=>({track_id:nt.id,fy:g.fy,goal:g.goal}))
+      if(gs.length){const{data:ng}=await supabase.from('track_goals').insert(gs).select();if(ng)newGoals.push(...ng)}
+    }
+    const rows=sRows.map(r=>({strategy_id:ns.id,item_type:r.item_type,item_id:r.item_id,track_id:r.track_id?trackMap.get(r.track_id)||null:null,start_date:r.start_date,end_date:r.end_date,planning_state:r.planning_state}))
+    const{data:nr}=rows.length?await supabase.from('strategy_items').insert(rows).select():{data:[]}
+    const nd=deps.map(d=>({strategy_id:ns.id,blocker_type:d.blocker_type,blocker_id:d.blocker_id,blocked_type:d.blocked_type,blocked_id:d.blocked_id}))
+    const{data:ndr}=nd.length?await supabase.from('work_dependencies').insert(nd).select():{data:[]}
+    setStrategies((prev:any[])=>[...prev,ns]);setTracks((prev:any[])=>[...prev,...newTracks]);setGoals((prev:any[])=>[...prev,...newGoals])
+    setStrategyItems((prev:any[])=>[...prev,...(nr||[])]);setDeps((prev:any[])=>[...prev,...(ndr||[])])
+    pickStrategy(ns.id)
+  }
+  async function resetToMain(){
+    if(!strategy)return
+    if(!confirm(`Reset "${strategy.name}" to the main roadmap?\n\nDates, planning states and dependencies go back to the main roadmap's. Tracks, goals and which projects sit on which track stay.`))return
+    const keep=sRows.filter(r=>r.item_type==='project'&&r.track_id)
+    const{error}=await supabase.from('strategy_items').delete().eq('strategy_id',strategy.id)
+    if(error){alert('Reset failed: '+error.message);return}
+    const fresh=keep.map(r=>{const p=(mainProjects as any[]).find(x=>x.id===r.item_id);return{strategy_id:strategy.id,item_type:'project',item_id:r.item_id,track_id:r.track_id,
+      start_date:p?.start_date||null,end_date:p?.ongoing?null:(p?.end_date||null),planning_state:mainState(p)}})
+    const{data:nr}=fresh.length?await supabase.from('strategy_items').insert(fresh).select():{data:[]}
+    await supabase.from('work_dependencies').delete().eq('strategy_id',strategy.id)
+    const mainDeps=(allDeps as any[]).filter(d=>!d.strategy_id&&d.blocker_type!=='item'&&d.blocked_type!=='item')
+      .map(d=>({strategy_id:strategy.id,blocker_type:d.blocker_type,blocker_id:d.blocker_id,blocked_type:d.blocked_type,blocked_id:d.blocked_id}))
+    const{data:nd}=mainDeps.length?await supabase.from('work_dependencies').insert(mainDeps).select():{data:[]}
+    setStrategyItems((prev:any[])=>[...prev.filter(r=>r.strategy_id!==strategy.id),...(nr||[])])
+    setDeps((prev:any[])=>[...prev.filter(d=>d.strategy_id!==strategy.id),...(nd||[])])
   }
   async function createStrategy(t:any){
     const{data,error}=await supabase.from('strategies').insert({name:t.name,start_fy:t.start_fy,end_fy:t.end_fy,bau_pct:t.bau_pct,freeze_months:t.freeze_months,sort_order:strategies.length}).select().single()
     if(error||!data){alert('Failed to create strategy: '+(error?.message||'no row returned'));return}
     setStrategies((prev:any[])=>[...prev,data])
+    const mainDeps=(allDeps as any[]).filter(d=>!d.strategy_id&&d.blocker_type!=='item'&&d.blocked_type!=='item')
+      .map(d=>({strategy_id:data.id,blocker_type:d.blocker_type,blocker_id:d.blocker_id,blocked_type:d.blocked_type,blocked_id:d.blocked_id}))
+    if(mainDeps.length){const{data:nd}=await supabase.from('work_dependencies').insert(mainDeps).select();if(nd)setDeps((prev:any[])=>[...prev,...nd])}
     for(const [i,tr] of (t.tracks||[]).entries()){
       const{data:trow,error:te}=await supabase.from('tracks').insert({strategy_id:data.id,name:tr.name,description:tr.description||null,color:tr.color,sort_order:i}).select().single()
       if(te||!trow){alert('Failed to add track: '+(te?.message||''));continue}
@@ -106,12 +234,13 @@ export default function StrategyTab({projects,setProjects,strategies,setStrategi
   }
   async function deleteStrategy(){
     if(!strategy)return
-    if(!confirm(`Delete the strategy "${strategy.name}"?\n\nIts tracks and goals are deleted. Projects stay, they just leave this roadmap.`))return
+    if(!confirm(`Delete the strategy "${strategy.name}"?\n\nIts tracks, goals, placements and dependencies are deleted. Projects and the main roadmap are not changed.`))return
     const trackIds=tracks.filter((t:any)=>t.strategy_id===strategy.id).map((t:any)=>t.id)
     setStrategies((prev:any[])=>prev.filter(s=>s.id!==strategy.id))
     setTracks((prev:any[])=>prev.filter(t=>t.strategy_id!==strategy.id))
     setGoals((prev:any[])=>prev.filter(g=>!trackIds.includes(g.track_id)))
-    setProjects((prev:any[])=>prev.map(p=>trackIds.includes(p.track_id)?{...p,track_id:null}:p))
+    setStrategyItems((prev:any[])=>prev.filter(r=>r.strategy_id!==strategy.id))
+    setDeps((prev:any[])=>prev.filter(d=>d.strategy_id!==strategy.id))
     setSelId(null)
     const{error}=await supabase.from('strategies').delete().eq('id',strategy.id)
     if(error)alert('Failed to delete strategy: '+error.message)
@@ -141,7 +270,7 @@ export default function StrategyTab({projects,setProjects,strategies,setStrategi
     if(!confirm(`Delete the track "${track.name}"?${n?`\n\nIts ${n} project${n!==1?'s':''} stay, they just leave this track.`:''}`))return
     setTracks((prev:any[])=>prev.filter(t=>t.id!==track.id))
     setGoals((prev:any[])=>prev.filter(g=>g.track_id!==track.id))
-    setProjects((prev:any[])=>prev.map(p=>p.track_id===track.id?{...p,track_id:null}:p))
+    setStrategyItems((prev:any[])=>prev.map(r=>r.track_id===track.id?{...r,track_id:null}:r))
     const{error}=await supabase.from('tracks').delete().eq('id',track.id)
     if(error)alert('Failed to delete track: '+error.message)
   }
@@ -162,7 +291,7 @@ export default function StrategyTab({projects,setProjects,strategies,setStrategi
     if(error){alert('Failed to save goal: '+error.message);return}
     if(data)setGoals((prev:any[])=>[...prev.filter(g=>!(g.track_id===track_id&&g.fy===fy)),data])
   }
-  const addDep=(blocker:string,blocked:string)=>createDependency(blocker,blocked,deps,setDeps)
+  const addDep=(blocker:string,blocked:string)=>createDependency(blocker,blocked,deps,setDeps,strategy?.id||null)
   const removeDep=(d:any)=>{if(confirm(`Remove the dependency ${keyName(depKey(d.blocker_type,d.blocker_id))} → ${keyName(depKey(d.blocked_type,d.blocked_id))}?`))deleteDependency(d,setDeps)}
   // Names and dates for anything a dependency can point at
   function keyName(key:string){
@@ -188,9 +317,13 @@ export default function StrategyTab({projects,setProjects,strategies,setStrategi
     if(!n)return
     if(projects.some((p:any)=>p.name.toLowerCase()===n.toLowerCase())){alert(`A project called "${n}" already exists. Add it to a track from its row instead.`);return}
     const{data,error}=await supabase.from('projects').insert({name:n,team:team||null,status:'Planning',priority:'P3',rag:'Green',color:PROPOSED,description:'',
-      sort_order:projects.length,space:'work',planning_state:'proposed',work_type:wt,track_id:trackId||null}).select().single()
+      sort_order:projects.length,space:'work',planning_state:'proposed',work_type:wt}).select().single()
     if(error){alert('Failed to create project: '+error.message);return}
-    if(data){setProjects((prev:any[])=>[...prev,data]);setSelId(data.id)}
+    if(data){
+      setProjects((prev:any[])=>[...prev,data]);setSelId(data.id)
+      if(strategy)await supabase.from('strategy_items').insert({strategy_id:strategy.id,item_type:'project',item_id:data.id,track_id:trackId||null,planning_state:'proposed'}).select().single()
+        .then(({data:r})=>{if(r)setStrategyItems((prev:any[])=>[...prev,r])})
+    }
   }
 
   // ── Empty state ───────────────────────────────────────────────────────────
@@ -210,6 +343,7 @@ export default function StrategyTab({projects,setProjects,strategies,setStrategi
   const sTracks=tracks.filter((t:any)=>t.strategy_id===strategy.id).sort((a:any,b:any)=>a.sort_order-b.sort_order)
   const sTrackIds=new Set(sTracks.map((t:any)=>t.id))
   const live=(projects as any[]).filter(p=>(p.space||'work')==='work')
+  const capacity=computeCapacity?computeCapacity(live):null
   const state=(p:any)=>p.planning_state==='proposed'?'proposed':'planned'
   // Same ordering as the Roadmap tab: start date, end date, name or RAG, either direction,
   // with ongoing (∞) projects pinned to the bottom. Undated projects sit below dated ones.
@@ -371,9 +505,10 @@ export default function StrategyTab({projects,setProjects,strategies,setStrategi
   // ── Epics: sub-rows under their project. An epic uses its own dates, or else the span of
   // its stories' dates (drawn dashed). Dragging a story-dated epic gives it its own dates.
   async function updEpic(id:any,fields:any){
-    setEpics((prev:any[])=>prev.map(e=>e.id===id?{...e,...fields}:e))
-    const{error}=await supabase.from('epics').update(fields).eq('id',id)
-    if(error)alert('Failed to save epic: '+error.message)
+    const f:any={}
+    if('start_date' in fields)f.start_date=fields.start_date
+    if('end_date' in fields)f.end_date=fields.end_date
+    await upsertRow('epic',id,f)
   }
   function epicBase(ep:any){
     if(ep.start_date)return{s:ep.start_date,e:ep.end_date||ep.start_date,derived:false}
@@ -477,6 +612,10 @@ export default function StrategyTab({projects,setProjects,strategies,setStrategi
         <div style={{marginLeft:'auto',display:'flex',gap:6}}>
           {openAssistant&&<button onClick={()=>openAssistant(`Look at the "${strategy.name}" strategy and draft a Plan A: place the proposed and undated projects by quarter on their tracks, respecting dependencies, the code freeze and team capacity. Keep anything you place as proposed.`)}
             style={{background:'none',border:'1px solid #C8973A',borderRadius:6,color:'#C8973A',fontSize:11,fontWeight:700,padding:'5px 10px',cursor:'pointer'}}>💬 Draft Plan A with the assistant</button>}
+          {(()=>{const ch=changesVsMain();const n=ch.rows.length+ch.addDeps.length+ch.dropDeps.length
+            return <button onClick={promote} title={n?`${n} difference${n!==1?'s':''} from the main roadmap. Click to copy this strategy onto it.`:'The main roadmap matches this strategy'}
+              style={{background:n?'#27AE60':'none',border:'1px solid '+(n?'#27AE60':'#243447'),borderRadius:6,color:n?'#fff':'#7A8FA6',fontSize:11,fontWeight:700,padding:'5px 10px',cursor:'pointer'}}>
+              ⇪ Promote to main roadmap{n?` (${n})`:''}</button>})()}
           <button onClick={()=>setSelId(null)} style={{background:!sel&&selId!=='__new'?'#1E3048':'none',border:'1px solid #243447',borderRadius:6,color:'#F4F6F8',fontSize:11,padding:'5px 10px',cursor:'pointer'}}>⚙ Strategy settings</button>
         </div>
       </div>
@@ -668,7 +807,7 @@ export default function StrategyTab({projects,setProjects,strategies,setStrategi
             <ProjectPanel p={sel} state={state(sel)} tracks={sTracks} projects={live} deps={deps} shown={shown} issues={issues.filter(i=>i.id===sel.id)}
               updProject={updProject} addDep={addDep} removeDep={removeDep} keyName={keyName} onClose={()=>setSelId(null)} onOpenProject={onOpenProject}/>
           ):(
-            <SettingsPanel strategy={strategy} tracks={sTracks} projects={live} teams={teams} issues={issues} setSelId={setSelId}
+            <SettingsPanel strategy={strategy} tracks={sTracks} projects={live} teams={teams} issues={issues} setSelId={setSelId} duplicateStrategy={duplicateStrategy} resetToMain={resetToMain}
               updStrategy={updStrategy} deleteStrategy={deleteStrategy} addTrack={addTrack} updTrack={updTrack} moveTrack={moveTrack} deleteTrack={deleteTrack}
               updProject={updProject} createProject={createProject}/>
           )}
@@ -813,7 +952,7 @@ function EpicSidePanel({epic,project,items,base,updEpic,onClose,onOpenProject}:a
   )
 }
 
-function SettingsPanel({strategy,tracks,projects,teams,issues,setSelId,updStrategy,deleteStrategy,addTrack,updTrack,moveTrack,deleteTrack,updProject,createProject}:any){
+function SettingsPanel({strategy,tracks,projects,teams,issues,setSelId,updStrategy,deleteStrategy,addTrack,updTrack,moveTrack,deleteTrack,updProject,createProject,duplicateStrategy,resetToMain}:any){
   const [name,setName]=useState(strategy.name)
   const [newTrack,setNewTrack]=useState('')
   const [addPid,setAddPid]=useState('')
@@ -908,6 +1047,9 @@ function SettingsPanel({strategy,tracks,projects,teams,issues,setSelId,updStrate
         <div style={{fontSize:10,color:'#7A8FA6'}}>It appears on the roadmap without dates. Click a quarter in its row to place it.</div>
       </div>
       <div style={SECTION}>
+        <div style={{fontSize:10,color:'#7A8FA6',lineHeight:1.5}}>Changes in this strategy stay here until you promote it.{strategy.promoted_at?` Last promoted ${new Date(strategy.promoted_at).toLocaleDateString()}.`:''}</div>
+        <button onClick={duplicateStrategy} style={{background:'none',border:'1px solid #243447',borderRadius:5,color:'#C8C8D4',fontSize:11,padding:'6px 0',cursor:'pointer'}}>⧉ Duplicate to compare options</button>
+        <button onClick={resetToMain} style={{background:'none',border:'1px solid #243447',borderRadius:5,color:'#C8C8D4',fontSize:11,padding:'6px 0',cursor:'pointer'}}>↺ Reset dates to the main roadmap</button>
         <button onClick={deleteStrategy} style={{background:'none',border:'1px solid #5C2B2B',borderRadius:5,color:'#E74C3C',fontSize:11,padding:'6px 0',cursor:'pointer'}}>Delete this strategy</button>
       </div>
     </div>

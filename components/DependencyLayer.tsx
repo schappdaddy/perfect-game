@@ -10,18 +10,18 @@ import { supabase } from '../lib/supabase'
 // layer works over any layout as long as it sits inside the positioned container that
 // holds the bars.
 
-export type DepRow={id:string,blocker_type:string,blocker_id:string,blocked_type:string,blocked_id:string}
+export type DepRow={id:string,blocker_type:string,blocker_id:string,blocked_type:string,blocked_id:string,strategy_id?:string|null}
 export const depKey=(type:string,id:any)=>`${type}:${id}`
 const fromKey=(d:DepRow)=>depKey(d.blocker_type,d.blocker_id)
 const toKey=(d:DepRow)=>depKey(d.blocked_type,d.blocked_id)
 const LINE='#E07B2A',BAD='#E74C3C'
 
-export async function createDependency(blocker:string,blocked:string,deps:DepRow[],setDeps:any){
+export async function createDependency(blocker:string,blocked:string,deps:DepRow[],setDeps:any,strategyId:string|null=null){
   if(blocker===blocked)return
   if(deps.some(d=>fromKey(d)===blocker&&toKey(d)===blocked))return
   if(deps.some(d=>fromKey(d)===blocked&&toKey(d)===blocker)){alert('These two already depend on each other the other way round. Remove that line first.');return}
   const[bt,bi]=blocker.split(':'),[dt,di]=blocked.split(':')
-  const{data,error}=await supabase.from('work_dependencies').insert({blocker_type:bt,blocker_id:bi,blocked_type:dt,blocked_id:di}).select().single()
+  const{data,error}=await supabase.from('work_dependencies').insert({blocker_type:bt,blocker_id:bi,blocked_type:dt,blocked_id:di,strategy_id:strategyId}).select().single()
   if(error){alert('Failed to add the dependency: '+error.message);return}
   if(data)setDeps((prev:DepRow[])=>[...prev,data])
 }
