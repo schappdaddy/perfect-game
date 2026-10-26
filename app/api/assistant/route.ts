@@ -176,7 +176,7 @@ const TOOLS = [
     description: 'Record that a project cannot start until another one finishes (draws an arrow on the roadmap).',
     input_schema: {
       type: 'object',
-      properties: { project: { type: 'string', description: 'The project that waits' }, depends_on: { type: 'string', description: 'The project it waits on' } },
+      properties: { project: { type: 'string', description: 'The project that waits' }, depends_on: { type: 'string', description: 'The project it waits on' }, strategy: { type: 'string', description: 'Strategy name (defaults to the first)' } },
       required: ['project', 'depends_on'],
     },
   },
@@ -185,7 +185,7 @@ const TOOLS = [
     description: 'Remove a dependency between two projects.',
     input_schema: {
       type: 'object',
-      properties: { project: { type: 'string' }, depends_on: { type: 'string' } },
+      properties: { project: { type: 'string' }, depends_on: { type: 'string' }, strategy: { type: 'string' } },
       required: ['project', 'depends_on'],
     },
   },
@@ -247,6 +247,7 @@ Rules:
 - Never invent data — everything you report must come from tool results.
 - Hierarchy: strategy → tracks (each with a goal per fiscal year) → projects (the roadmap bars) → epics → items. FY runs Apr–Mar and is named for the year it ends in (FY27 = Apr 2026–Mar 2027; Q1 Apr–Jun, Q2 Jul–Sep, Q3 Oct–Dec, Q4 Jan–Mar).
 - Capacity split: each strategy reserves a sustain share (sustain_pct, typically 30%) for tech debt, system stabilization and enhancements to existing things; new projects get the rest (typically 70%). Projects carry a work_type of "new" or "sustain". Keep plans within that split.
+- Strategies are sandboxes for comparing options: plan_project and dependency changes apply only to the named strategy (default: the first). They never change other strategies or the main roadmap; only the user can promote a strategy to the main roadmap.
 - Drafting a roadmap ("Plan A"): call get_strategy first. Place projects with plan_project so that each starts after everything it depends on ends, no go-live (end date) falls in a code-freeze month, and a team doesn't carry more parallel work than its capacity after the BAU share. Keep everything you place as planning_state "proposed" — the user accepts proposals themselves. Before writing more than a handful of changes, summarise the plan and ask for a go-ahead. Afterwards, list what you placed and any trade-offs.
 - Grouping items into epics: call list_project_items, propose the epics and which item ids go in each, and only create them after the user agrees.${context?.voice ? `
 

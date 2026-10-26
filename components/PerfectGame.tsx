@@ -8019,12 +8019,12 @@ function DoneTab({items,setItems,projects,setProjects,ccrs,ccrItems,space}:{item
 // Assistant — conversational copilot. Client runs the tool loop against
 // live app state; /api/assistant proxies Claude and holds the key.
 function Assistant({open,setOpen,seed,setSeed,items:itemsProp,setItems,projects:projectsProp,setProjects,milestones,tasks:tasksProp,setTasks,ccrs,setCcrs,ccrItems,setCcrItems,space,
-  epics:epicsProp=[],setEpics,strategies:strategiesProp=[],setStrategies,tracks:tracksProp=[],setTracks,goals:goalsProp=[],setGoals,deps:depsProp=[],setDeps}:any){
+  strategyItems:strategyItemsProp=[],setStrategyItems,epics:epicsProp=[],setEpics,strategies:strategiesProp=[],setStrategies,tracks:tracksProp=[],setTracks,goals:goalsProp=[],setGoals,deps:depsProp=[],setDeps}:any){
   // Tools run several writes in one turn, and React hasn't re-rendered between them —
   // so they read and write this live copy instead of the props captured at send time
   // (reading stale props gave every item added in one request the same RTL id).
   const live=useRef<any>({})
-  live.current={items:itemsProp,projects:projectsProp,tasks:tasksProp,epics:epicsProp,strategies:strategiesProp,tracks:tracksProp,goals:goalsProp,deps:depsProp}
+  live.current={items:itemsProp,projects:projectsProp,tasks:tasksProp,epics:epicsProp,strategies:strategiesProp,tracks:tracksProp,goals:goalsProp,deps:depsProp,strategyItems:strategyItemsProp}
   const items=itemsProp,projects=projectsProp
   const [msgs,setMsgs]=useState<any[]>([])       // UI transcript: {role:'user'|'assistant'|'act',text}
   const [apiMsgs,setApiMsgs]=useState<any[]>([]) // raw Anthropic message history
@@ -8271,14 +8271,31 @@ function Assistant({open,setOpen,seed,setSeed,items:itemsProp,setItems,projects:
         return pool.find((t:any)=>t.name.toLowerCase()===r)||pool.find((t:any)=>t.name.toLowerCase().includes(r))||null
       }
       const pname=(id:any)=>L.projects.find((p:any)=>p.id===id)?.name
+      // Strategies are sandboxes: a project's track, dates and planning state in a strategy
+      // live in strategy_items; anything the strategy hasn't touched shows the main values
+      const inStrategy=(p:any,st:any)=>{
+        const r=st&&L.strategyItems.find((x:any)=>x.strategy_id===st.id&&x.item_type==='project'&&x.item_id===p.id)
+        return r?{...p,track_id:r.track_id,start_date:r.start_date,end_date:r.end_date,planning_state:r.planning_state||p.planning_state}:{...p,track_id:null}
+      }
+      async function saveToStrategy(st:any,p:any,f:any){
+        const cur=L.strategyItems.find((x:any)=>x.strategy_id===st.id&&x.item_type==='project'&&x.item_id===p.id)
+        const row={strategy_id:st.id,item_type:'project',item_id:p.id,track_id:cur?cur.track_id:null,start_date:cur?cur.start_date:(p.start_date||null),
+          end_date:cur?cur.end_date:(p.ongoing?null:(p.end_date||null)),planning_state:cur?.planning_state||(p.planning_state==='proposed'?'proposed':'planned'),...f,updated_at:new Date().toISOString()}
+        const{data,error}=await supabase.from('strategy_items').upsert(row,{onConflict:'strategy_id,item_type,item_id'}).select().single()
+        if(error)return error.message
+        setStrategyItems((prev:any[])=>[...prev.filter((x:any)=>x.id!==data.id&&!(x.strategy_id===st.id&&x.item_type==='project'&&x.item_id===p.id)),data])
+        live.current={...live.current,strategyItems:[...live.current.strategyItems.filter((x:any)=>x.id!==data.id&&!(x.strategy_id===st.id&&x.item_type==='project'&&x.item_id===p.id)),data]}
+        return null
+      }
       if(name==='get_strategy'){
         const st=findStrategy(inp.strategy)
         if(!st)return{error:'No strategy exists yet. Offer to create one with create_strategy.'}
         const trs=L.tracks.filter((t:any)=>t.strategy_id===st.id).sort((a:any,b:any)=>a.sort_order-b.sort_order)
         const trIds=new Set(trs.map((t:any)=>t.id))
-        const work=L.projects.filter((p:any)=>spaceOf(p)==='work')
-        const fmtP=(p:any)=>({name:p.name,team:p.team,status:p.status,state:p.planning_state==='proposed'?'proposed':'planned',work_type:workTypeOfProject(p),start:p.start_date,end:p.ongoing?'ongoing':p.end_date,
-          depends_on:L.deps.filter((d:any)=>d.blocked_type==='project'&&d.blocked_id===p.id&&d.blocker_type==='project').map((d:any)=>pname(d.blocker_id)).filter(Boolean)})
+        const work=L.projects.filter((p:any)=>spaceOf(p)==='work').map((p:any)=>inStrategy(p,st))
+        const sDeps=L.deps.filter((d:any)=>d.strategy_id===st.id)
+        const fmtP=(p:any)=>({name:p.name,team:p.team,status:p.status,state:p.planning_state==='proposed'?'proposed':'planned',work_type:workTypeOfProject(p),start:p.start_date,end:p.ongoing&&!p.end_date?'ongoing':p.end_date,
+          depends_on:sDeps.filter((d:any)=>d.blocked_type==='project'&&d.blocked_id===p.id&&d.blocker_type==='project').map((d:any)=>pname(d.blocker_id)).filter(Boolean)})
         return{
           strategy:{name:st.name,fiscal_years:`FY${st.start_fy}–FY${st.end_fy} (FY runs Apr–Mar; FY${st.start_fy} starts ${st.start_fy-1}-04-01)`,sustain_pct:st.bau_pct,new_project_pct:100-Number(st.bau_pct),code_freeze_months:st.freeze_months},
           tracks:trs.map((t:any)=>({name:t.name,description:t.description,
@@ -8286,6 +8303,7 @@ function Assistant({open,setOpen,seed,setSeed,items:itemsProp,setItems,projects:
             projects:work.filter((p:any)=>p.track_id===t.id).map(fmtP)})),
           not_on_a_track:work.filter((p:any)=>!trIds.has(p.track_id)&&!PROJECT_TERMINAL.includes(p.status)).map(fmtP),
           other_strategies:L.strategies.filter((s:any)=>s.id!==st.id).map((s:any)=>s.name),
+          note:'This strategy is a sandbox: changes here do not affect other strategies or the main roadmap until the user promotes it.',
         }
       }
       if(name==='create_strategy'){
@@ -8325,31 +8343,39 @@ function Assistant({open,setOpen,seed,setSeed,items:itemsProp,setItems,projects:
           else{const tr=findTrack(inp.track,st);if(!tr)return{error:`No track matched "${inp.track}"`,tracks:L.tracks.filter((t:any)=>!st||t.strategy_id===st.id).map((t:any)=>t.name)};fields.track_id=tr.id}
         }
         if(inp.start_date!==undefined)fields.start_date=inp.start_date||null
-        if(inp.end_date!==undefined){fields.end_date=inp.end_date||null;if(inp.end_date)fields.ongoing=false}
+        if(inp.end_date!==undefined)fields.end_date=inp.end_date||null
         if(inp.planning_state)fields.planning_state=inp.planning_state==='bau'?'planned':inp.planning_state
-        if(inp.work_type==='new'||inp.work_type==='sustain')fields.work_type=inp.work_type
+        const own:any={}
+        if(inp.work_type==='new'||inp.work_type==='sustain')own.work_type=inp.work_type
         if(fields.start_date&&fields.end_date&&fields.end_date<fields.start_date)return{error:'end_date is before start_date'}
+        if(Object.keys(fields).length&&!st)return{error:'No strategy exists yet. Create one first.'}
         if(!pr){
           if(!inp.create_if_missing)return{error:`No project matched "${inp.project}". Set create_if_missing to add it as a new proposed project.`,projects:L.projects.filter((p:any)=>spaceOf(p)==='work'&&!PROJECT_TERMINAL.includes(p.status)).map((p:any)=>p.name)}
           const team=inp.team?TEAMS.find(x=>x.toLowerCase().includes(String(inp.team).toLowerCase()))||null:null
           const{data,error}=await supabase.from('projects').insert({name:String(inp.project).trim(),team,status:'Planning',priority:'P3',rag:'Green',color:'#E07B2A',description:inp.description||'',
-            sort_order:L.projects.length,space:'work',planning_state:'proposed',...fields}).select().single()
+            sort_order:L.projects.length,space:'work',planning_state:'proposed',...own}).select().single()
           if(error)return{error:error.message}
           setProjects((prev:any[])=>[...prev,data]);pushLive('projects',data)
-          return{created:{project:data.name,team:data.team||'none',track:inp.track||'none',state:data.planning_state,work_type:data.work_type,start:data.start_date,end:data.end_date}}
+          if(st){const e=await saveToStrategy(st,{...data,start_date:null,end_date:null},{planning_state:'proposed',...fields});if(e)return{error:e}}
+          return{created:{project:data.name,strategy:st?.name||'none',team:data.team||'none',track:inp.track||'none',state:fields.planning_state||'proposed',work_type:data.work_type,start:fields.start_date||null,end:fields.end_date||null}}
         }
-        if(!Object.keys(fields).length)return{error:'Nothing to change'}
-        setProjects((prev:any[])=>prev.map((p:any)=>p.id===pr.id?{...p,...fields}:p));patchLive('projects',pr.id,fields)
-        const{error}=await supabase.from('projects').update(fields).eq('id',pr.id)
-        if(error)return{error:error.message}
-        const now={...pr,...fields}
-        return{updated:{project:pr.name,track:L.tracks.find((t:any)=>t.id===now.track_id)?.name||'none',state:now.planning_state==='proposed'?'proposed':'planned',work_type:workTypeOfProject(now),start:now.start_date,end:now.ongoing?'ongoing':now.end_date}}
+        if(!Object.keys(fields).length&&!Object.keys(own).length)return{error:'Nothing to change'}
+        if(Object.keys(own).length){
+          setProjects((prev:any[])=>prev.map((p:any)=>p.id===pr.id?{...p,...own}:p));patchLive('projects',pr.id,own)
+          const{error}=await supabase.from('projects').update(own).eq('id',pr.id)
+          if(error)return{error:error.message}
+        }
+        if(Object.keys(fields).length){const e=await saveToStrategy(st,pr,fields);if(e)return{error:e}}
+        const now={...inStrategy({...pr,...own},st)}
+        return{updated:{project:pr.name,track:L.tracks.find((t:any)=>t.id===now.track_id)?.name||'none',state:now.planning_state==='proposed'?'proposed':'planned',work_type:workTypeOfProject(now),start:now.start_date,end:now.ongoing&&!now.end_date?'ongoing':now.end_date,strategy:st?.name}}
       }
       if(name==='add_dependency'||name==='remove_dependency'){
         const a=findProject(inp.project),b=findProject(inp.depends_on)
         if(!a||!b)return{error:`No project matched "${!a?inp.project:inp.depends_on}"`}
         if(a.id===b.id)return{error:'A project cannot depend on itself'}
-        const existing=L.deps.find((d:any)=>d.blocked_type==='project'&&d.blocked_id===a.id&&d.blocker_type==='project'&&d.blocker_id===b.id)
+        const st=findStrategy(inp.strategy)
+        if(!st)return{error:'No strategy exists yet.'}
+        const existing=L.deps.find((d:any)=>d.strategy_id===st.id&&d.blocked_type==='project'&&d.blocked_id===a.id&&d.blocker_type==='project'&&d.blocker_id===b.id)
         if(name==='remove_dependency'){
           if(!existing)return{error:`${a.name} does not depend on ${b.name}`}
           setDeps((prev:any[])=>prev.filter((d:any)=>d.id!==existing.id))
@@ -8359,7 +8385,7 @@ function Assistant({open,setOpen,seed,setSeed,items:itemsProp,setItems,projects:
           return{removed:{project:a.name,depended_on:b.name}}
         }
         if(existing)return{unchanged:`${a.name} already depends on ${b.name}`}
-        const{data,error}=await supabase.from('work_dependencies').insert({blocker_type:'project',blocker_id:b.id,blocked_type:'project',blocked_id:a.id}).select().single()
+        const{data,error}=await supabase.from('work_dependencies').insert({blocker_type:'project',blocker_id:b.id,blocked_type:'project',blocked_id:a.id,strategy_id:st.id}).select().single()
         if(error)return{error:error.message}
         setDeps((prev:any[])=>[...prev,data]);pushLive('deps',data)
         return{created:{project:a.name,depends_on:b.name}}
@@ -8500,7 +8526,8 @@ export default function PerfectGame() {
   const [strategies,setStrategies]=useState<any[]>([])
   const [tracks,setTracks]=useState<any[]>([])
   const [trackGoals,setTrackGoals]=useState<any[]>([])
-  const [projectDeps,setProjectDeps]=useState<any[]>([])
+  const [projectDeps,setProjectDeps]=useState<any[]>([]) // work_dependencies: strategy_id null = main roadmap
+  const [strategyItems,setStrategyItems]=useState<any[]>([])
   const [loading,setLoading]=useState(true)
   const [activeTab,setActiveTab]=useState('desk')
   const [selectedProject,setSelectedProject]=useState<any>(null) // shared so Roadmap can open the same Project detail panel Projects uses
@@ -8524,7 +8551,7 @@ export default function PerfectGame() {
 
 useEffect(()=>{
     async function load(){
-      const[{data:itemData},{data:projectData},{data:milestoneData},{data:taskData},{data:ccrData},{data:ccrItemData},{data:roleData},{data:peopleData},{data:projRoleData},{data:itemAsgData},{data:qbData},{data:sprintData},{data:sprintAsgData},{data:sprintCfgData},{data:epicData},{data:stratData},{data:trackData},{data:goalData},{data:depData}]=await Promise.all([
+      const[{data:itemData},{data:projectData},{data:milestoneData},{data:taskData},{data:ccrData},{data:ccrItemData},{data:roleData},{data:peopleData},{data:projRoleData},{data:itemAsgData},{data:qbData},{data:sprintData},{data:sprintAsgData},{data:sprintCfgData},{data:epicData},{data:stratData},{data:trackData},{data:goalData},{data:depData},{data:stratItemData}]=await Promise.all([
       supabase.from('items').select('*').order('sort_order',{ascending:true}),
       supabase.from('projects').select('*').order('sort_order',{ascending:true}),
       supabase.from('milestones').select('*').order('date',{ascending:true}),
@@ -8544,6 +8571,7 @@ useEffect(()=>{
       supabase.from('tracks').select('*').order('sort_order',{ascending:true}),
       supabase.from('track_goals').select('*'),
       supabase.from('work_dependencies').select('*'),
+      supabase.from('strategy_items').select('*'),
     ])
     if(itemData) setItems(itemData)
     if(milestoneData) setMilestones(milestoneData)
@@ -8563,6 +8591,7 @@ useEffect(()=>{
     if(trackData) setTracks(trackData)
     if(goalData) setTrackGoals(goalData)
     if(depData) setProjectDeps(depData)
+    if(stratItemData) setStrategyItems(stratItemData)
 
     // Items that name a project that doesn't exist are shown as-is. (This used to recreate the
     // project, which brought deleted projects back and made duplicates during bulk adds.)
@@ -8639,15 +8668,17 @@ useEffect(()=>{
       <div style={{flex:1,overflow:'hidden'}}>
         {activeTab==='backlog'&&<Backlog items={sItems} setItems={setSItems} projects={sProjects} setProjects={setSProjects} space={space} ccrs={ccrs} ccrItems={ccrItems} setCcrItems={setCcrItems} epics={epics} setEpics={setEpics} sustainPct={Number(strategies[0]?.bau_pct??30)}/>}
         {activeTab==='strategy'&&<StrategyTab projects={projects} setProjects={setProjects} strategies={strategies} setStrategies={setStrategies} tracks={tracks} setTracks={setTracks} goals={trackGoals} setGoals={setTrackGoals} deps={projectDeps} setDeps={setProjectDeps}
-          people={people} teams={TEAMS} capacity={capacityByMonth(projects.filter(inSpace),projectRoles,people,roles,items.filter(inSpace))}
+          people={people} teams={TEAMS} computeCapacity={(ps:any[])=>capacityByMonth(ps,projectRoles,people,roles,items.filter(inSpace))}
+          strategyItems={strategyItems} setStrategyItems={setStrategyItems}
           onOpenProject={(p:any)=>{setSelectedProject(p);setActiveTab('projects')}} openAssistant={(t:string)=>{setAsstSeed(t);setAsstOpen(true)}}
           items={items.filter(inSpace)} epics={epics} setEpics={setEpics}/>}
         {activeTab==='projects'&&<Projects items={sItems} setItems={setSItems} projects={sProjects} setProjects={setSProjects} milestones={sMilestones} setMilestones={setSMilestones} tasks={tasks} setTasks={setTasks} space={space} ccrs={ccrs} ccrItems={ccrItems} roles={roles} people={people} projectRoles={projectRoles} setProjectRoles={setProjectRoles} itemAssignments={itemAssignments} setItemAssignments={setItemAssignments} sprints={sprints} selectedProject={selectedProject} setSelectedProject={setSelectedProject} epics={epics} setEpics={setEpics}/>}
-{activeTab==='roadmap'&&<Roadmap deps={projectDeps} setDeps={setProjectDeps} items={sItems} setItems={setSItems} projects={sProjects} setProjects={setSProjects} milestones={sMilestones} setMilestones={setSMilestones} tasks={tasks} setTasks={setTasks} sprints={sprints} itemAssignments={itemAssignments} projectRoles={projectRoles} people={people} roles={roles} onOpenProject={(p:any)=>{setSelectedProject(p);setActiveTab('projects')}}/>}
+{activeTab==='roadmap'&&<Roadmap deps={projectDeps.filter((d:any)=>!d.strategy_id)} setDeps={setProjectDeps} items={sItems} setItems={setSItems} projects={sProjects} setProjects={setSProjects} milestones={sMilestones} setMilestones={setSMilestones} tasks={tasks} setTasks={setTasks} sprints={sprints} itemAssignments={itemAssignments} projectRoles={projectRoles} people={people} roles={roles} onOpenProject={(p:any)=>{setSelectedProject(p);setActiveTab('projects')}}/>}
         {activeTab==='teams'&&<Teams items={sItems} projects={sProjects} milestones={sMilestones} ccrs={ccrs} ccrItems={ccrItems}/>}
         {activeTab==='desk'&&<Desk items={items} setItems={setItems} projects={projects} setProjects={setProjects} milestones={milestones} setMilestones={setMilestones} tasks={tasks} setTasks={setTasks} ccrs={ccrs} setCcrs={setCcrs} ccrItems={ccrItems} setCcrItems={setCcrItems} space={space} openAssistant={(t:string)=>{setAsstSeed(t);setAsstOpen(true)}}/>}
         <Assistant open={asstOpen} setOpen={setAsstOpen} seed={asstSeed} setSeed={setAsstSeed} items={items} setItems={setItems} projects={projects} setProjects={setProjects} milestones={milestones} tasks={tasks} setTasks={setTasks} ccrs={ccrs} setCcrs={setCcrs} ccrItems={ccrItems} setCcrItems={setCcrItems} space={space}
-          epics={epics} setEpics={setEpics} strategies={strategies} tracks={tracks} setTracks={setTracks} goals={trackGoals} setGoals={setTrackGoals} deps={projectDeps} setDeps={setProjectDeps}/>
+          epics={epics} setEpics={setEpics} strategies={strategies} tracks={tracks} setTracks={setTracks} goals={trackGoals} setGoals={setTrackGoals} deps={projectDeps} setDeps={setProjectDeps}
+          strategyItems={strategyItems} setStrategyItems={setStrategyItems}/>
         {activeTab==='stakeholder'&&<Stakeholder items={sItems} projects={sProjects} milestones={sMilestones}/>}
         {activeTab==='done'&&<DoneTab items={sItems} setItems={setSItems} projects={sProjects} setProjects={setSProjects} ccrs={ccrs} ccrItems={ccrItems} space={space}/>}
         {activeTab==='budget'&&<BudgetTab roles={roles} setRoles={setRoles} people={people} setPeople={setPeople} projects={sProjects} items={sItems} projectRoles={projectRoles} itemAssignments={itemAssignments} qBudgets={qBudgets} setQBudgets={setQBudgets}/>}
