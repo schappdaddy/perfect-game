@@ -55,10 +55,12 @@ export const rateFor=(row:any,people:any[],roles:any[])=>{
 }
 // A person's own type decides; an unnamed role falls back to the role's type
 export const isContractor=(person:any,role:any)=>person?(person.type==='contractor'):role?.type==='contractor'
+// Share of a role's time on a project that can be capitalised: none on support work or
+// for roles that aren't CapEx-eligible, otherwise the role's CapEx % (80% by default)
+export const capexShare=(role:any,budgetType:string)=>budgetType==='support'||!role?.capex_eligible?0:(role.capex_pct??80)/100
 function split(cost:number,role:any,budgetType:string){
-  if(budgetType==='support'||!role?.capex_eligible)return{capex:0,opex:cost}
-  const pct=role.capex_pct??80
-  return{capex:cost*pct/100,opex:cost*(1-pct/100)}
+  const c=cost*capexShare(role,budgetType)
+  return{capex:c,opex:cost-c}
 }
 
 // work: [{p, s, e, rows}] — every project with its dates and roster in this strategy.
@@ -66,18 +68,18 @@ function split(cost:number,role:any,budgetType:string){
 // and for showing overlaps).
 export function computeAllocation(work:any[],people:any[],roles:any[]){
   // Each FY also splits into contractor and FTE cost, and contractor cost by vendor
-  const costs=new Map<string,{byFy:Record<number,{cost:number,capex:number,opex:number,contractor:number,fte:number}>,total:number,vendors:Record<string,Record<number,number>>}>()
+  const costs=new Map<string,{byFy:Record<number,Record<string,number>>,total:number,vendors:Record<string,Record<number,number>>}>()
   const add=(p:any,role:any,y:number,m:number,cost:number,who:any)=>{
     const c=costs.get(p.id)||{byFy:{},total:0,vendors:{}}
     const fy=fyOfMonth(y,m),sp=split(cost,role,p.budget_type||'build')
-    const b=c.byFy[fy]||(c.byFy[fy]={cost:0,capex:0,opex:0,contractor:0,fte:0})
+    const b=c.byFy[fy]||(c.byFy[fy]={cost:0,capex:0,opex:0,contractor:0,fte:0,contractor_capex:0,contractor_opex:0,fte_capex:0,fte_opex:0})
     b.cost+=cost;b.capex+=sp.capex;b.opex+=sp.opex;c.total+=cost
     if(isContractor(who,role)){
-      b.contractor+=cost
+      b.contractor+=cost;b.contractor_capex+=sp.capex;b.contractor_opex+=sp.opex
       const v=who?.vendor||'Vendor not set'
       const vm=c.vendors[v]||(c.vendors[v]={})
       vm[fy]=(vm[fy]||0)+cost
-    }else b.fte+=cost
+    }else{b.fte+=cost;b.fte_capex+=sp.capex;b.fte_opex+=sp.opex}
     costs.set(p.id,c)
   }
   // person → month → {days: working days in the month, share: projectId → days of that person}
