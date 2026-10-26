@@ -1,6 +1,6 @@
 'use client'
 import { useState, Fragment } from 'react'
-import { slotted, roleName, rateFor, SLOTS, SHARED_TEAM } from './StrategyBudget'
+import { slotted, roleName, rateFor, isContractor, SLOTS, SHARED_TEAM } from './StrategyBudget'
 
 // Full-page report for one strategy, read before promoting it: what each project costs by
 // FY, the same rolled up by team, and each person's load per quarter with the projects
@@ -14,6 +14,9 @@ const fyLabel=(fy:number)=>'FY'+String(fy).slice(-2)
 const fmtD=(iso:string)=>{const[y,m]=iso.split('-').map(Number);return `${MONTHS[m-1]} ${String(y).slice(-2)}`}
 const monthsBetween=(s:string,e:string)=>{const[a,b]=s.split('-').map(Number),[c,d]=e.split('-').map(Number);return (c*12+d)-(a*12+b)+1}
 const workdays=(key:string)=>{const[y,m]=key.split('-').map(Number);let n=0;const d=new Date(y,m-1,1);while(d.getMonth()===m-1){if(d.getDay()!==0&&d.getDay()!==6)n++;d.setDate(d.getDate()+1)};return n}
+// Working days from a to b inclusive (ISO dates)
+const workdaysBetween=(a:string,b:string)=>{let n=0;const d=new Date(a+'T12:00:00'),e=new Date(b+'T12:00:00');while(d<=e){if(d.getDay()!==0&&d.getDay()!==6)n++;d.setDate(d.getDate()+1)};return n}
+const Q_HOURS=520 // 2,080 working hours a year ÷ 4: every full quarter costs the same
 const csvCell=(v:any)=>{const s=v==null?'':String(v);return /[",\n]/.test(s)?'"'+s.replace(/"/g,'""')+'"':s}
 function download(name:string,rows:any[][]){
   const blob=new Blob([rows.map(r=>r.map(csvCell).join(',')).join('\n')],{type:'text/csv'})
@@ -34,6 +37,7 @@ export function StrategyReport({strategy,entries,personMonth,people,roles,teams,
   const [teamFilter,setTeamFilter]=useState('all')
   // Which cost the tables show: everything, contractors only or FTEs only
   const [costView,setCostView]=useState<'cost'|'contractor'|'fte'>('cost')
+  const [capGrain,setCapGrain]=useState<'quarter'|'fy'>('quarter')
   const inScope=(entries as any[]).filter(x=>scope==='all'||x.onTrack)
   const costed=inScope.filter(x=>x.cost&&x.cost.total>0)
   const fyOf=(x:any,fy:number,key:string)=>x.cost?.byFy[fy]?.[key]||0
@@ -92,6 +96,31 @@ export function StrategyReport({strategy,entries,personMonth,people,roles,teams,
   const allStaff=staff.flatMap(g=>g.list)
   const idleNow=allStaff.filter(x=>!x.projects.length).length
   const stretched=allStaff.filter(x=>x.maxAtOnce>=3).length
+
+  // ── Team cost vs assigned ─────────────────────────────────────────────────
+  // Team cost: everyone on the team for the whole quarter (520h × rate), less any time after
+  // their termination date. Assigned: the part of that time they're on projects here.
+  const inView=(p:any)=>costView==='cost'||(costView==='contractor')===isContractor(p,roles.find((r:any)=>r.id===p.role_id))
+  const teamCap=personTeams.map(team=>{
+    const ppl=(people as any[]).filter(p=>p.team===team&&p.active!==false&&(!p.termination_date||p.termination_date>=winStart)&&inView(p))
+    const cells=quarters.map((qt:any)=>{
+      let full=0,assigned=0
+      for(const p of ppl){
+        if(p.termination_date&&p.termination_date<qt.start)continue
+        const rate=rateFor({person_id:p.id},people,roles)
+        const avail=p.termination_date&&p.termination_date<qt.end?workdaysBetween(qt.start,p.termination_date)/workdaysBetween(qt.start,qt.end):1
+        full+=Q_HOURS*rate*avail
+        assigned+=Q_HOURS*rate*qPct(personMonth.get(p.id),qt)/100
+      }
+      return{full,assigned}
+    })
+    return{team,heads:ppl.length,cells}
+  }).filter(t=>t.heads)
+  const cols=capGrain==='quarter'?quarters.map((qt:any,i:number)=>({label:`Q${qt.q}`,fy:qt.fy,idx:[i],first:qt.q===1}))
+    :fys.map((fy:number)=>({label:fyLabel(fy),fy,idx:quarters.map((qt:any,i:number)=>qt.fy===fy?i:-1).filter((i:number)=>i>=0),first:true}))
+  const colSum=(cells:any[],idx:number[],k:'full'|'assigned')=>idx.reduce((s,i)=>s+cells[i][k],0)
+  const allIdx=quarters.map((_:any,i:number)=>i)
+  const capTotals=quarters.map((_:any,i:number)=>({full:teamCap.reduce((s,t)=>s+t.cells[i].full,0),assigned:teamCap.reduce((s,t)=>s+t.cells[i].assigned,0)}))
 
   // ── CSV exports ────────────────────────────────────────────────────────────
   function exportBudget(){
@@ -180,6 +209,59 @@ export function StrategyReport({strategy,entries,personMonth,people,roles,teams,
           </tbody>
         </table>
         <div style={{padding:'6px 10px',fontSize:10.5,color:'#7A8FA6'}}>Contractor or FTE comes from each person&apos;s type in the roster (unnamed roles use the role&apos;s type). Use the Full budget / Contractors / FTE switch above to show either one in the tables below.</div>
+      </div>
+
+      {/* Team cost vs assigned */}
+      <div style={{display:'flex',alignItems:'center',gap:12,flexWrap:'wrap' as const,marginBottom:8}}>
+        <div style={{...SECTION,margin:0}}>TEAM COST VS ASSIGNED{costView!=='cost'?' · '+viewLabel.toUpperCase():''}</div>
+        <span style={{fontSize:11,color:'#7A8FA6'}}>What each team costs to keep, against what this strategy puts them to work on</span>
+        <div style={{marginLeft:'auto',display:'flex',border:'1px solid #243447',borderRadius:6,overflow:'hidden'}}>
+          {([['quarter','By quarter'],['fy','By FY']] as const).map(([k,l])=>(
+            <button key={k} onClick={()=>setCapGrain(k)} style={{...BTN,border:'none',borderRadius:0,fontWeight:700,background:capGrain===k?'#C8973A':'#1E3048',color:capGrain===k?'#0D1B2A':'#F4F6F8'}}>{l}</button>
+          ))}
+        </div>
+      </div>
+      <div style={{...CARD,padding:0,overflowX:'auto',marginBottom:22}}>
+        <table style={{borderCollapse:'collapse',width:'100%'}}>
+          <thead>
+            {capGrain==='quarter'&&<tr><th style={{...TH,textAlign:'left'}}/>{fys.map((fy:number)=><th key={fy} colSpan={4} style={{...TH,textAlign:'center',borderLeft:'1px solid #243447'}}>{fyLabel(fy)}</th>)}<th style={TH}/></tr>}
+            <tr><th style={{...TH,textAlign:'left',top:capGrain==='quarter'?29:0}}>Team</th>{cols.map((c:any,i:number)=><th key={i} style={{...TH,top:capGrain==='quarter'?29:0,borderLeft:c.first?'1px solid #243447':undefined}}>{c.label}</th>)}<th style={{...TH,top:capGrain==='quarter'?29:0}}>Total</th></tr>
+          </thead>
+          <tbody>
+            {[...teamCap.map(t=>({name:t.team,sub:`${t.heads} ${t.heads===1?'person':'people'}`,cells:t.cells,total:false})),...(teamCap.length>1?[{name:'All teams',sub:'',cells:capTotals,total:true}]:[])].map(t=>{
+              const full=(idx:number[])=>colSum(t.cells,idx,'full'),asg=(idx:number[])=>colSum(t.cells,idx,'assigned')
+              const pct=(idx:number[])=>full(idx)?Math.round(asg(idx)/full(idx)*100):0
+              const head={...LTD,background:'#1E3048',fontWeight:800,color:t.total?'#C8973A':'#F4F6F8',fontSize:11,letterSpacing:0.5}
+              return(
+                <Fragment key={t.name}>
+                  <tr><td colSpan={cols.length+2} style={head}>{t.name.toUpperCase()}{t.sub&&<span style={{fontWeight:400,color:'#7A8FA6',letterSpacing:0}}> · {t.sub}{t.name===SHARED_TEAM?' · shared across teams':''}</span>}</td></tr>
+                  <tr>
+                    <td style={{...LTD,paddingLeft:16}}>Team cost</td>
+                    {cols.map((c:any,i:number)=><td key={i} style={{...TD,borderLeft:c.first?'1px solid #243447':undefined}}>{fmtK(full(c.idx))}</td>)}
+                    <td style={{...TD,fontWeight:700,color:'#F4F6F8'}}>{fmtUSD(full(allIdx))}</td>
+                  </tr>
+                  <tr>
+                    <td style={{...LTD,paddingLeft:16}}>Assigned</td>
+                    {cols.map((c:any,i:number)=><td key={i} style={{...TD,color:'#F4F6F8',borderLeft:c.first?'1px solid #243447':undefined}}>{fmtK(asg(c.idx))}</td>)}
+                    <td style={{...TD,fontWeight:700,color:'#F4F6F8'}}>{fmtUSD(asg(allIdx))}</td>
+                  </tr>
+                  <tr>
+                    <td style={{...LTD,paddingLeft:16,color:'#7A8FA6'}}>Unassigned</td>
+                    {cols.map((c:any,i:number)=>{const u=full(c.idx)-asg(c.idx);return <td key={i} style={{...TD,color:u>1?'#D4820A':'#3A4A5E',borderLeft:c.first?'1px solid #243447':undefined}}>{u>1?fmtK(u):'—'}</td>})}
+                    <td style={{...TD,fontWeight:700,color:'#D4820A'}}>{fmtUSD(full(allIdx)-asg(allIdx))}</td>
+                  </tr>
+                  <tr>
+                    <td style={{...LTD,paddingLeft:16,color:'#7A8FA6'}}>% assigned</td>
+                    {cols.map((c:any,i:number)=>{const v=pct(c.idx);return <td key={i} style={{...TD,fontSize:11,background:loadColor(v),color:v?'#F4F6F8':'#3A4A5E',borderLeft:c.first?'1px solid #243447':undefined}}>{full(c.idx)?v+'%':'—'}</td>})}
+                    <td style={{...TD,fontWeight:700}}>{pct(allIdx)}%</td>
+                  </tr>
+                </Fragment>)})}
+          </tbody>
+        </table>
+        <div style={{padding:'6px 10px',fontSize:10.5,color:'#7A8FA6',lineHeight:1.5}}>
+          Team cost counts every active person on the team at 520 hours a quarter (2,080 a year) × their rate, so it&apos;s the same each quarter unless someone leaves. Assigned is the share of that time they&apos;re on projects in this strategy.
+          People are counted under their own team, so Retail Program sits on its own line. Assigned can differ slightly from project totals, which use each month&apos;s actual working days; unnamed roles count only in project totals.
+        </div>
       </div>
 
       {/* Budget by team */}
