@@ -2,6 +2,7 @@
 import { useState, useEffect, useRef, Fragment } from 'react'
 import { supabase } from '../lib/supabase'
 import { DependencyLayer, DepHandle, createDependency, deleteDependency, depKey } from './DependencyLayer'
+import { StrategyReport } from './StrategyReport'
 import { StrategyBudgetPanel, StaffingSection, computeAllocation, slotted, overlapsFor, SLOTS, SHARED_TEAM } from './StrategyBudget'
 
 // ── Strategy roadmap ─────────────────────────────────────────────────────────
@@ -144,7 +145,7 @@ export default function StrategyTab({projects:mainProjects,setProjects,strategie
   const [drag,setDrag]=useState<any>(null) // {id,mode:'move'|'start'|'end',x0,dm}
   const [editGoal,setEditGoal]=useState<any>(null) // {track_id,fy,text}
   const pref=(k:string,d:any)=>{try{const v=localStorage.getItem('pg_strat_'+k);return v==null?d:JSON.parse(v)}catch{return d}}
-  const [view,setView]=useState<any>(()=>({sortBy:pref('sortBy','start_date'),sortDir:pref('sortDir','asc'),showLoad:pref('showLoad',false),showEpics:pref('showEpics',true),snap:pref('snap','quarter'),groupBy:pref('groupBy','tracks'),budgetScope:pref('budgetScope','all'),sideTab:pref('sideTab','settings'),collapsed:pref('collapsed',{})}))
+  const [view,setView]=useState<any>(()=>({sortBy:pref('sortBy','start_date'),sortDir:pref('sortDir','asc'),showLoad:pref('showLoad',false),showEpics:pref('showEpics',true),snap:pref('snap','quarter'),groupBy:pref('groupBy','tracks'),budgetScope:pref('budgetScope','all'),sideTab:pref('sideTab','settings'),mode:pref('mode','map'),collapsed:pref('collapsed',{})}))
   function setPref(k:string,v:any){setView((cur:any)=>({...cur,[k]:v}));try{localStorage.setItem('pg_strat_'+k,JSON.stringify(v))}catch{}}
   const toggleCollapsed=(key:string)=>setPref('collapsed',{...view.collapsed,[key]:!view.collapsed[key]})
   const [narrow,setNarrow]=useState(false)
@@ -709,6 +710,11 @@ export default function StrategyTab({projects:mainProjects,setProjects,strategie
           {strategies.map((s:any)=><option key={s.id} value={s.id}>{s.name}</option>)}
           <option value="__new">+ New strategy…</option>
         </select>
+        <div style={{display:'flex',border:'1px solid #243447',borderRadius:6,overflow:'hidden'}}>
+          {[['map','Roadmap'],['report','📊 Report']].map(([k,l])=>(
+            <button key={k} onClick={()=>setPref('mode',k)} style={{background:view.mode===k?'#C8973A':'#1E3048',color:view.mode===k?'#0D1B2A':'#F4F6F8',border:'none',fontSize:11,fontWeight:700,padding:'5px 10px',cursor:'pointer'}}>{l}</button>
+          ))}
+        </div>
         <span style={{fontSize:11,color:'#7A8FA6'}}>FY{String(strategy.start_fy).slice(-2)}–FY{String(strategy.end_fy).slice(-2)}</span>
         <div style={{display:'flex',gap:6,fontSize:11}}>
           <Chip color="#D9E2EC" label={`${counts.planned} planned`}/>
@@ -718,7 +724,7 @@ export default function StrategyTab({projects:mainProjects,setProjects,strategie
             style={{color:Math.abs(splitNewPct-limits.new)>10?'#D4820A':'#C8C8D4'}}>· split {splitNewPct}/{100-splitNewPct} (target {limits.new}/{limits.sustain})</span>}
           {issues.length>0&&<Chip color="#E74C3C" label={`${issues.length} to check`}/>}
         </div>
-        <div style={{display:'flex',alignItems:'center',gap:6}}>
+        {view.mode!=='report'&&<div style={{display:'flex',alignItems:'center',gap:6}}>
           <select value={view.groupBy} onChange={e=>setPref('groupBy',e.target.value)} title="Group the roadmap by track or by team" style={{background:view.groupBy==='teams'?'#C8973A':'#1E3048',color:view.groupBy==='teams'?'#0D1B2A':'#F4F6F8',border:'1px solid #243447',borderRadius:6,fontSize:11,fontWeight:700,padding:'4px 8px',cursor:'pointer'}}>
             <option value="tracks">Group by tracks</option>
             <option value="teams">Group by teams</option>
@@ -741,7 +747,7 @@ export default function StrategyTab({projects:mainProjects,setProjects,strategie
           <label title="Show each project's epics under it" style={{display:'flex',alignItems:'center',gap:5,fontSize:11,color:'#7A8FA6',cursor:'pointer',whiteSpace:'nowrap' as const}}>
             <input type="checkbox" checked={view.showEpics} onChange={e=>setPref('showEpics',e.target.checked)} style={{accentColor:EPIC}}/>Epics
           </label>
-        </div>
+        </div>}
         <div style={{marginLeft:'auto',display:'flex',gap:6}}>
           {openAssistant&&<button onClick={()=>openAssistant(`Look at the "${strategy.name}" strategy and draft a Plan A: place the proposed and undated projects by quarter on their tracks, respecting dependencies, the code freeze and team capacity. Keep anything you place as proposed.`)}
             style={{background:'none',border:'1px solid #C8973A',borderRadius:6,color:'#C8973A',fontSize:11,fontWeight:700,padding:'5px 10px',cursor:'pointer'}}>💬 Draft Plan A with the assistant</button>}
@@ -753,6 +759,11 @@ export default function StrategyTab({projects:mainProjects,setProjects,strategie
         </div>
       </div>
 
+      {view.mode==='report'?(
+        <StrategyReport strategy={strategy} entries={budgetEntries} personMonth={allocation.personMonth} people={people} roles={roles} teams={teams}
+          fys={fys} quarters={quarters} scope={view.budgetScope} setScope={(v:string)=>setPref('budgetScope',v)}
+          onOpen={(id:any)=>{setPref('mode','map');setSelId(id)}}/>
+      ):(
       <div style={{flex:1,display:'flex',flexDirection:narrow?'column':'row',minHeight:0}}>
         {/* Roadmap grid */}
         <div style={{flex:1,overflow:'auto',minWidth:0,position:'relative'}}>
@@ -961,6 +972,7 @@ export default function StrategyTab({projects:mainProjects,setProjects,strategie
           </>)}
         </div>
       </div>
+      )}
     </div>
   )
 }
