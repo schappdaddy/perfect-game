@@ -8528,6 +8528,7 @@ export default function PerfectGame() {
   const [trackGoals,setTrackGoals]=useState<any[]>([])
   const [projectDeps,setProjectDeps]=useState<any[]>([]) // work_dependencies: strategy_id null = main roadmap
   const [strategyItems,setStrategyItems]=useState<any[]>([])
+  const [strategyRoles,setStrategyRoles]=useState<any[]>([])
   const [loading,setLoading]=useState(true)
   const [activeTab,setActiveTab]=useState('desk')
   const [selectedProject,setSelectedProject]=useState<any>(null) // shared so Roadmap can open the same Project detail panel Projects uses
@@ -8551,7 +8552,7 @@ export default function PerfectGame() {
 
 useEffect(()=>{
     async function load(){
-      const[{data:itemData},{data:projectData},{data:milestoneData},{data:taskData},{data:ccrData},{data:ccrItemData},{data:roleData},{data:peopleData},{data:projRoleData},{data:itemAsgData},{data:qbData},{data:sprintData},{data:sprintAsgData},{data:sprintCfgData},{data:epicData},{data:stratData},{data:trackData},{data:goalData},{data:depData},{data:stratItemData}]=await Promise.all([
+      const[{data:itemData},{data:projectData},{data:milestoneData},{data:taskData},{data:ccrData},{data:ccrItemData},{data:roleData},{data:peopleData},{data:projRoleData},{data:itemAsgData},{data:qbData},{data:sprintData},{data:sprintAsgData},{data:sprintCfgData},{data:epicData},{data:stratData},{data:trackData},{data:goalData},{data:depData},{data:stratItemData},{data:stratRoleData}]=await Promise.all([
       supabase.from('items').select('*').order('sort_order',{ascending:true}),
       supabase.from('projects').select('*').order('sort_order',{ascending:true}),
       supabase.from('milestones').select('*').order('date',{ascending:true}),
@@ -8572,6 +8573,7 @@ useEffect(()=>{
       supabase.from('track_goals').select('*'),
       supabase.from('work_dependencies').select('*'),
       supabase.from('strategy_items').select('*'),
+      supabase.from('strategy_roles').select('*'),
     ])
     if(itemData) setItems(itemData)
     if(milestoneData) setMilestones(milestoneData)
@@ -8592,6 +8594,7 @@ useEffect(()=>{
     if(goalData) setTrackGoals(goalData)
     if(depData) setProjectDeps(depData)
     if(stratItemData) setStrategyItems(stratItemData)
+    if(stratRoleData) setStrategyRoles(stratRoleData)
 
     // Items that name a project that doesn't exist are shown as-is. (This used to recreate the
     // project, which brought deleted projects back and made duplicates during bulk adds.)
@@ -8668,8 +8671,9 @@ useEffect(()=>{
       <div style={{flex:1,overflow:'hidden'}}>
         {activeTab==='backlog'&&<Backlog items={sItems} setItems={setSItems} projects={sProjects} setProjects={setSProjects} space={space} ccrs={ccrs} ccrItems={ccrItems} setCcrItems={setCcrItems} epics={epics} setEpics={setEpics} sustainPct={Number(strategies[0]?.bau_pct??30)}/>}
         {activeTab==='strategy'&&<StrategyTab projects={projects} setProjects={setProjects} strategies={strategies} setStrategies={setStrategies} tracks={tracks} setTracks={setTracks} goals={trackGoals} setGoals={setTrackGoals} deps={projectDeps} setDeps={setProjectDeps}
-          people={people} teams={TEAMS} computeCapacity={(ps:any[])=>capacityByMonth(ps,projectRoles,people,roles,items.filter(inSpace))}
-          strategyItems={strategyItems} setStrategyItems={setStrategyItems}
+          people={people} teams={TEAMS} computeCapacity={(ps:any[],prs:any[])=>capacityByMonth(ps,prs,people,roles,items.filter(inSpace))}
+          strategyItems={strategyItems} setStrategyItems={setStrategyItems} roles={roles} projectRoles={projectRoles} setProjectRoles={setProjectRoles}
+          strategyRoles={strategyRoles} setStrategyRoles={setStrategyRoles}
           onOpenProject={(p:any)=>{setSelectedProject(p);setActiveTab('projects')}} openAssistant={(t:string)=>{setAsstSeed(t);setAsstOpen(true)}}
           items={items.filter(inSpace)} epics={epics} setEpics={setEpics}/>}
         {activeTab==='projects'&&<Projects items={sItems} setItems={setSItems} projects={sProjects} setProjects={setSProjects} milestones={sMilestones} setMilestones={setSMilestones} tasks={tasks} setTasks={setTasks} space={space} ccrs={ccrs} ccrItems={ccrItems} roles={roles} people={people} projectRoles={projectRoles} setProjectRoles={setProjectRoles} itemAssignments={itemAssignments} setItemAssignments={setItemAssignments} sprints={sprints} selectedProject={selectedProject} setSelectedProject={setSelectedProject} epics={epics} setEpics={setEpics}/>}
