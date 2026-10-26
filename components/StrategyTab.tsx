@@ -2,7 +2,7 @@
 import { useState, useEffect, useRef, Fragment } from 'react'
 import { supabase } from '../lib/supabase'
 import { DependencyLayer, DepHandle, createDependency, deleteDependency, depKey } from './DependencyLayer'
-import { StrategyBudgetPanel, StaffingSection, projectCost } from './StrategyBudget'
+import { StrategyBudgetPanel, StaffingSection, computeAllocation, slotted, overlapsFor, SLOTS, SHARED_TEAM } from './StrategyBudget'
 
 // ── Strategy roadmap ─────────────────────────────────────────────────────────
 // A strategy spans whole fiscal years (FY runs Apr–Mar; FY27 = Apr 2026–Mar 2027) and
@@ -55,7 +55,7 @@ const TEMPLATE={
   ],
 }
 
-export default function StrategyTab({projects:mainProjects,setProjects,strategies,setStrategies,tracks,setTracks,goals,setGoals,deps:allDeps,setDeps,people,computeCapacity,teams,onOpenProject,openAssistant,items=[],epics:mainEpics=[],setEpics,strategyItems=[],setStrategyItems,roles=[],projectRoles=[],setProjectRoles,strategyRoles=[],setStrategyRoles}:any){
+export default function StrategyTab({projects:mainProjects,setProjects,strategies,setStrategies,tracks,setTracks,goals,setGoals,deps:allDeps,setDeps,people,teams,onOpenProject,openAssistant,items=[],epics:mainEpics=[],setEpics,strategyItems=[],setStrategyItems,roles=[],projectRoles=[],setProjectRoles,strategyRoles=[],setStrategyRoles}:any){
   const [stratId,setStratId]=useState<any>(()=>{try{return localStorage.getItem('pg_strategy')}catch{return null}})
   const strategy=(strategies as any[]).find(s=>s.id===stratId)||strategies[0]||null
   // ── Sandbox: this strategy's own placement of projects and epics (track, dates, planning
@@ -91,18 +91,25 @@ export default function StrategyTab({projects:mainProjects,setProjects,strategie
     if(error){alert('Failed to add: '+error.message);return}
     if(data)setStrategyRoles((prev:any[])=>[...prev,data])
   }
-  async function updRosterRow(row:any,fields:any){
-    if(!rowOf('project',row.project_id)?.roster_custom){
-      // First edit: take a copy, then apply the change to the copied row
-      await ensureOwnRoster(row.project_id)
-      const{data}=await supabase.from('strategy_roles').select('*').eq('strategy_id',strategy.id).eq('project_id',row.project_id)
-      const twin=(data||[]).find((r:any)=>r.person_id===row.person_id&&r.role_id===row.role_id)
-      if(!twin)return
-      row=twin
+  async function setSlot(projectId:any,slot:string,personId:string|null,current:any){
+    const person=personId?(people as any[]).find(p=>p.id===personId):null
+    if(current&&!personId){await removeRosterRow(current);return}
+    if(!personId)return
+    await ensureOwnRoster(projectId)
+    // after copying, find this strategy's row for the slot (by slot, or the copied twin)
+    const{data:mine}=await supabase.from('strategy_roles').select('*').eq('strategy_id',strategy.id).eq('project_id',projectId)
+    const target=(mine||[]).find((r:any)=>r.slot===slot)
+      ||(current&&(mine||[]).find((r:any)=>!r.slot&&r.person_id===current.person_id&&r.role_id===current.role_id))
+    const fields={person_id:personId,role_id:person?.role_id||null,headcount:1,allocation_pct:100,slot}
+    if(target){
+      setStrategyRoles((prev:any[])=>prev.map(r=>r.id===target.id?{...r,...fields}:r))
+      const{error}=await supabase.from('strategy_roles').update(fields).eq('id',target.id)
+      if(error)alert('Failed to save: '+error.message)
+    }else{
+      const{data,error}=await supabase.from('strategy_roles').insert({strategy_id:strategy.id,project_id:projectId,...fields}).select().single()
+      if(error){alert('Failed to add: '+error.message);return}
+      if(data)setStrategyRoles((prev:any[])=>[...prev,data])
     }
-    setStrategyRoles((prev:any[])=>prev.map(r=>r.id===row.id?{...r,...fields}:r))
-    const{error}=await supabase.from('strategy_roles').update(fields).eq('id',row.id)
-    if(error)alert('Failed to save: '+error.message)
   }
   async function removeRosterRow(row:any){
     if(!rowOf('project',row.project_id)?.roster_custom){
@@ -413,8 +420,6 @@ export default function StrategyTab({projects:mainProjects,setProjects,strategie
   const sTracks=tracks.filter((t:any)=>t.strategy_id===strategy.id).sort((a:any,b:any)=>a.sort_order-b.sort_order)
   const sTrackIds=new Set(sTracks.map((t:any)=>t.id))
   const live=(projects as any[]).filter(p=>(p.space||'work')==='work')
-  const effectiveRoles=live.flatMap(p=>rosterOf(p.id).map((r:any)=>({...r,project_id:p.id})))
-  const capacity=computeCapacity?computeCapacity(live,effectiveRoles):null
   const state=(p:any)=>p.planning_state==='proposed'?'proposed':'planned'
   // Same ordering as the Roadmap tab: start date, end date, name or RAG, either direction,
   // with ongoing (∞) projects pinned to the bottom. Undated projects sit below dated ones.
@@ -439,6 +444,23 @@ export default function StrategyTab({projects:mainProjects,setProjects,strategie
   // projects only show if they're on a track.
   const onTrack=(t:any)=>sortProjects(live.filter(p=>p.track_id===t.id))
   const backlog=sortProjects(live.filter(p=>!sTrackIds.has(p.track_id)&&!PROJECT_TERMINAL.includes(p.status)))
+  // Staffing & cost: every active, dated project on this roadmap with its roster here. A
+  // person's time is split evenly across the projects they overlap on (see StrategyBudget).
+  const budgetEntries=[...sTracks.flatMap(onTrack).map((p:any)=>({p,onTrack:true})),...backlog.map((p:any)=>({p,onTrack:false}))]
+    .filter(({p})=>!PROJECT_TERMINAL.includes(p.status)).map(({p,onTrack})=>{
+      const roster=rosterOf(p.id)
+      const filled=slotted(roster,people,roles)
+      const missing=SLOTS.filter(sl=>!filled.has(sl.key)).map(sl=>sl.label)
+      const s0=p.start_date?(p.start_date<winStart?winStart:p.start_date):null
+      const e0=p.end_date&&!(p.ongoing&&!rowOf('project',p.id)?.end_date)?(p.end_date>winEnd?winEnd:p.end_date):winEnd
+      return{p,onTrack,state:state(p),workType:workType(p),roster,missing,s:s0,e:e0}
+    })
+  const allocation=computeAllocation(budgetEntries.filter(x=>x.s&&x.roster.length&&x.s<=x.e).map(x=>({p:x.p,s:x.s,e:x.e,rows:x.roster})),people,roles)
+  for(const x of budgetEntries as any[]){
+    const c=allocation.costs.get(x.p.id)
+    x.cost=c||null
+    x.reason=!x.s?'no dates':!x.roster.length?'no people':c&&c.total>0?'':'$0 rates'
+  }
   const shown=new Map<string,any>()
   ;[...sTracks.flatMap(onTrack),...backlog].forEach(p=>shown.set(p.id,p))
   const projById=(id:any)=>(projects as any[]).find(p=>p.id===id)
@@ -499,17 +521,22 @@ export default function StrategyTab({projects:mainProjects,setProjects,strategie
   }))
   const sustainPct=Number(strategy.bau_pct)||0
   const limits:any={new:100-sustainPct,sustain:sustainPct}
-  const typeByName=new Map((projects as any[]).map(p=>[p.name,workType(p)]))
+  const typeById=new Map((projects as any[]).map(p=>[p.id,workType(p)]))
   const split:any={new:0,sustain:0}
   const loads:any[]=[]
-  ;(teams as string[]).forEach(team=>{
+  const loadTeams=[...(teams as string[]),...((people as any[]).some(p=>p.team===SHARED_TEAM)?[SHARED_TEAM]:[])]
+  loadTeams.forEach(team=>{
     const cells=quarters.map(qt=>{
       const ppl=(people as any[]).filter(p=>p.team===team&&p.active!==false&&(!p.termination_date||p.termination_date>=qt.start))
       if(!ppl.length)return null
       const sum:any={new:0,sustain:0}
       for(const person of ppl){
-        const months=capacity?.byProject?.get(person.id)
-        for(const k of qt.keys)for(const c of months?.get(k)||[])sum[typeByName.get(c.project)||'new']+=c.pct/3
+        const months=allocation.personMonth.get(person.id)
+        for(const k of qt.keys){
+          const cell=months?.get(k)
+          if(!cell||!cell.days)continue
+          for(const[pid,daysOn]of cell.share)sum[typeById.get(pid)||'new']+=(daysOn as number)/cell.days*100/3
+        }
       }
       if(qt.end>=todayISO()){split.new+=sum.new;split.sustain+=sum.sustain}
       return{new:sum.new/ppl.length,sustain:sum.sustain/ppl.length}
@@ -521,6 +548,15 @@ export default function StrategyTab({projects:mainProjects,setProjects,strategie
       loads.push({team,wt,cells:row})
     }
   })
+  for(const x of budgetEntries as any[])if(x.onTrack&&x.missing.length)issues.push({kind:'staff',id:x.p.id,text:`${x.p.name} has no ${x.missing.join(', ')} assigned.`})
+  const staffLabel=new Map<string,string>()
+  for(const x of budgetEntries as any[]){
+    const f=slotted(x.roster,people,roles)
+    const short:any={dev:'Dev',qa:'QA',po:'PO'}
+    const parts=SLOTS.map(sl=>{const r=f.get(sl.key);const n=r?.person_id?(people as any[]).find(p=>p.id===r.person_id)?.name:null;return `${short[sl.key]} ${n||(r?'role':'—')}`})
+    const extra=x.roster.length-f.size
+    if(x.roster.length)staffLabel.set(x.p.id,parts.join(' · ')+(extra>0?` +${extra}`:''))
+  }
   const splitTotal=split.new+split.sustain
   const splitNewPct=splitTotal?Math.round(split.new/splitTotal*100):null
 
@@ -546,6 +582,10 @@ export default function StrategyTab({projects:mainProjects,setProjects,strategie
       if(!list.length)rows.push({kind:'hint',text:'No projects for this team yet.',h:ROW_H})
       loads.filter(l=>l.team===tn).forEach(l=>rows.push({kind:'load',load:l,h:ROW_H}))
     })
+    if(loads.some(l=>l.team===SHARED_TEAM)){
+      rows.push({kind:'band',label:`${SHARED_TEAM.toUpperCase()} · SHARED ACROSS TEAMS`,color:'#3A4A5E',h:22})
+      loads.filter(l=>l.team===SHARED_TEAM).forEach(l=>rows.push({kind:'load',load:l,h:ROW_H}))
+    }
   }
   if(!teamView)sTracks.forEach((t:any,ti:number)=>{
     const list=onTrack(t),closed=!!view.collapsed[t.id]
@@ -651,17 +691,6 @@ export default function StrategyTab({projects:mainProjects,setProjects,strategie
     await updEpic(ep.id,clickedPeriod(e))
   }
 
-  const budgetEntries=[...sTracks.flatMap(onTrack).map((p:any)=>({p,onTrack:true})),...backlog.map((p:any)=>({p,onTrack:false}))]
-    .filter(({p})=>!PROJECT_TERMINAL.includes(p.status)).map(({p,onTrack})=>{
-      const base={p,onTrack,state:state(p),workType:workType(p)}
-      const roster=rosterOf(p.id)
-      if(!p.start_date)return{...base,cost:null,reason:'no dates'}
-      if(!roster.length)return{...base,cost:null,reason:'no people'}
-      const s0=p.start_date<winStart?winStart:p.start_date
-      const e0=p.end_date&&!(p.ongoing&&!rowOf('project',p.id)?.end_date)?(p.end_date>winEnd?winEnd:p.end_date):winEnd
-      const cost=projectCost(p,roster,s0,e0,people,roles)
-      return{...base,cost,reason:cost.total>0?'':'$0 rates'}
-    })
   const sel=selId?projById(selId):null
   const selEpic=typeof selId==='string'&&selId.startsWith('epic:')?(epics as any[]).find(e=>'epic:'+e.id===selId)||null:null
   const counts={planned:0,proposed:0,sustain:0} as any
@@ -877,6 +906,10 @@ export default function StrategyTab({projects:mainProjects,setProjects,strategie
                           {!drag&&<DepHandle k={depKey('project',p.id)}/>}
                         </div>
                       )}
+                      {ex&&staffLabel.has(p.id)&&!(drag?.id===p.id)&&(
+                        <span title={staffLabel.get(p.id)} style={{position:'absolute',top:7,left:ex.open?ex.x0+8:ex.x1+16,maxWidth:ex.open?Math.max(60,ex.x1-ex.x0-16):undefined,fontSize:9.5,
+                          color:ex.open?'#0D1B2A':'#7A8FA6',whiteSpace:'nowrap' as const,overflow:'hidden',textOverflow:'ellipsis',pointerEvents:'none',zIndex:2}}>{staffLabel.get(p.id)}</span>
+                      )}
                     </div>
                   </div>
                 )
@@ -911,8 +944,10 @@ export default function StrategyTab({projects:mainProjects,setProjects,strategie
             <ProjectPanel p={sel} state={state(sel)} tracks={sTracks} projects={live} deps={deps} shown={shown} issues={issues.filter(i=>i.id===sel.id)}
               updProject={updProject} addDep={addDep} removeDep={removeDep} keyName={keyName} onClose={()=>setSelId(null)} onOpenProject={onOpenProject}
               staffing={<StaffingSection key={sel.id} project={sel} team={sel.team} teams={teams} rows={rosterOf(sel.id)} custom={!!rowOf('project',sel.id)?.roster_custom}
-                people={people} roles={roles} fys={fys} cost={budgetEntries.find((x:any)=>x.p.id===sel.id)?.cost}
-                onTeam={(t:any)=>updProject(sel.id,{team:t})} onAdd={(f:any)=>addRosterRow(sel.id,f)} onUpdate={updRosterRow} onRemove={removeRosterRow}/>}/>
+                people={people} roles={roles} fys={fys} cost={(budgetEntries as any[]).find((x:any)=>x.p.id===sel.id)?.cost}
+                overlaps={(personId:string)=>overlapsFor(personId,sel.id,allocation.personMonth,(id:string)=>projById(id)?.name||'another project')}
+                onTeam={(t:any)=>updProject(sel.id,{team:t})} onSetSlot={(slot:string,pid:any,cur:any)=>setSlot(sel.id,slot,pid,cur)}
+                onAdd={(f:any)=>addRosterRow(sel.id,f)} onRemove={removeRosterRow}/>}/>
           ):(<>
             <div style={{display:'flex',borderBottom:'1px solid #243447',background:'#162436',position:'sticky',top:0,zIndex:2}}>
               {[['settings','⚙ Settings'],['budget','$ Budget']].map(([k,l])=>(
@@ -1082,7 +1117,7 @@ function SettingsPanel({strategy,tracks,projects,teams,issues,setSelId,updStrate
           <div style={{...H,color:'#E74C3C'}}>TO CHECK ({issues.length})</div>
           {issues.map((i:any,ix:number)=>(
             <div key={ix} onClick={()=>i.id&&setSelId(i.id)} style={{fontSize:11,color:'#E8A79E',cursor:i.id?'pointer':'default',lineHeight:1.4}}>
-              {i.kind==='dep'?'⛓':i.kind==='freeze'?'❄':'👥'} {i.text}
+              {i.kind==='dep'?'⛓':i.kind==='freeze'?'❄':i.kind==='staff'?'🧑':'👥'} {i.text}
             </div>
           ))}
         </div>
