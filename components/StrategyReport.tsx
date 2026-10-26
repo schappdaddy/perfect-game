@@ -32,11 +32,22 @@ export function StrategyReport({strategy,entries,personMonth,people,roles,teams,
   const [hideIdle,setHideIdle]=useState(false)
   const [showProjects,setShowProjects]=useState(true)
   const [teamFilter,setTeamFilter]=useState('all')
+  // Which cost the tables show: everything, contractors only or FTEs only
+  const [costView,setCostView]=useState<'cost'|'contractor'|'fte'>('cost')
   const inScope=(entries as any[]).filter(x=>scope==='all'||x.onTrack)
   const costed=inScope.filter(x=>x.cost&&x.cost.total>0)
-  const fyCost=(x:any,fy:number)=>x.cost?.byFy[fy]?.cost||0
-  const sumFy=(list:any[],fy:number)=>list.reduce((s,x)=>s+fyCost(x,fy),0)
-  const sumAll=(list:any[])=>list.reduce((s,x)=>s+(x.cost?.total||0),0)
+  const fyOf=(x:any,fy:number,key:string)=>x.cost?.byFy[fy]?.[key]||0
+  const fyCost=(x:any,fy:number)=>fyOf(x,fy,costView)
+  const sumFy=(list:any[],fy:number,key:string=costView)=>list.reduce((s,x)=>s+fyOf(x,fy,key),0)
+  const sumAll=(list:any[],key:string=costView)=>fys.reduce((s:number,fy:number)=>s+sumFy(list,fy,key),0)
+  const projTotal=(x:any)=>sumAll([x])
+  const viewLabel={cost:'Full budget',contractor:'Contractors',fte:'FTE'}[costView]
+  // Contractor cost by vendor, per FY
+  const vendors=new Map<string,Record<number,number>>()
+  for(const x of costed)for(const[v,byFy]of Object.entries(x.cost.vendors||{})){
+    const acc=vendors.get(v)||{};for(const[fy,c]of Object.entries(byFy as any))acc[Number(fy)]=(acc[Number(fy)]||0)+(c as number);vendors.set(v,acc)
+  }
+  const vendorRows=[...vendors.entries()].map(([v,byFy])=>({v,byFy,total:Object.values(byFy).reduce((a,b)=>a+b,0)})).sort((a,b)=>b.total-a.total)
   const total=sumAll(costed)
   const personName=(id:any)=>(people as any[]).find(p=>p.id===id)?.name
   const projName=(id:any)=>(entries as any[]).find(x=>x.p.id===id)?.p.name||'Another project'
@@ -84,18 +95,18 @@ export function StrategyReport({strategy,entries,personMonth,people,roles,teams,
 
   // ── CSV exports ────────────────────────────────────────────────────────────
   function exportBudget(){
-    const rows:any[][]=[['Team','Project','State','Work type','Start','End','Months','Developer','QA','Product Owner',...fys.map(fyLabel),'Total','Not costed because']]
+    const rows:any[][]=[['Team','Project','State','Work type','Start','End','Months','Developer','QA','Product Owner',...fys.map(fyLabel),'Total','Contractors','FTE','Not costed because']]
     for(const g of byTeam)for(const x of g.list){
-      rows.push([g.team,x.p.name,x.state,x.workType,x.s||'',x.s?x.e:'',x.s&&x.e?monthsBetween(x.s,x.e):'',...slotNames(x).map(n=>n||''),...fys.map((fy:number)=>Math.round(fyCost(x,fy))),Math.round(x.cost?.total||0),x.reason||''])
+      rows.push([g.team,x.p.name,x.state,x.workType,x.s||'',x.s?x.e:'',x.s&&x.e?monthsBetween(x.s,x.e):'',...slotNames(x).map(n=>n||''),...fys.map((fy:number)=>Math.round(fyOf(x,fy,'cost'))),Math.round(sumAll([x],'cost')),Math.round(sumAll([x],'contractor')),Math.round(sumAll([x],'fte')),x.reason||''])
     }
-    rows.push(['All teams','Total','','','','','','','','',...fys.map((fy:number)=>Math.round(sumFy(costed,fy))),Math.round(total),''])
+    rows.push(['All teams','Total','','','','','','','','',...fys.map((fy:number)=>Math.round(sumFy(costed,fy,'cost'))),Math.round(sumAll(costed,'cost')),Math.round(sumAll(costed,'contractor')),Math.round(sumAll(costed,'fte')),''])
     download(`${strategy.name} - budget.csv`,rows)
   }
   function exportCapacity(){
     const qh=quarters.map((qt:any)=>`${fyLabel(qt.fy)} Q${qt.q}`)
     const rows:any[][]=[['Team','Person','Role','Project',...qh,'Cost']]
     for(const g of staff)for(const x of g.list){
-      rows.push([g.team,x.person.name,x.role,'All work',...x.cells.map((v:number)=>Math.round(v)+'%'),Math.round(x.cost)])
+      rows.push([g.team,x.person.name,x.role+(x.person.type==='contractor'?` (contractor${x.person.vendor?', '+x.person.vendor:''})`:''),'All work',...x.cells.map((v:number)=>Math.round(v)+'%'),Math.round(x.cost)])
       const pm=personMonth.get(x.person.id)
       for(const pid of x.projects)rows.push([g.team,x.person.name,x.role,projName(pid),...quarters.map((qt:any)=>Math.round(qPct(pm,qt,pid))+'%'),''])
     }
@@ -117,6 +128,11 @@ export function StrategyReport({strategy,entries,personMonth,people,roles,teams,
             <option value="all">Everything on this roadmap</option>
             <option value="tracks">Projects on tracks only</option>
           </select>
+          <div style={{display:'flex',border:'1px solid #243447',borderRadius:6,overflow:'hidden'}}>
+            {([['cost','Full budget'],['contractor','Contractors'],['fte','FTE']] as const).map(([k,l])=>(
+              <button key={k} onClick={()=>setCostView(k)} style={{...BTN,border:'none',borderRadius:0,fontWeight:700,background:costView===k?'#C8973A':'#1E3048',color:costView===k?'#0D1B2A':'#F4F6F8'}}>{l}</button>
+            ))}
+          </div>
           <button onClick={exportBudget} style={BTN}>⬇ Budget CSV</button>
           <button onClick={exportCapacity} style={BTN}>⬇ Capacity CSV</button>
         </div>
@@ -124,17 +140,53 @@ export function StrategyReport({strategy,entries,personMonth,people,roles,teams,
 
       {/* Headline numbers */}
       <div style={{display:'grid',gridTemplateColumns:'repeat(auto-fit,minmax(150px,1fr))',gap:10,marginBottom:22}}>
-        <Stat label="Total budget" value={fmtUSD(total)} sub={`${costed.length} costed project${costed.length!==1?'s':''}`} gold/>
+        <Stat label={costView==='cost'?'Total budget':viewLabel+' budget'} value={fmtUSD(total)} sub={costView==='cost'?`${costed.length} costed project${costed.length!==1?'s':''}`:`${sumAll(costed,'cost')?Math.round(total/sumAll(costed,'cost')*100):0}% of ${fmtUSD(sumAll(costed,'cost'))} full budget`} gold/>
         {fys.map((fy:number)=><Stat key={fy} label={fyLabel(fy)+(fy===curFy?' (this FY)':'')} value={fmtUSD(sumFy(costed,fy))} sub={total?Math.round(sumFy(costed,fy)/total*100)+'% of total':''}/>)}
         <Stat label="Planned · Proposed" value={`${fmtK(sumAll(planned))} · ${fmtK(sumAll(proposed))}`} sub={`${planned.length} planned, ${proposed.length} proposed`}/>
         <Stat label="New · Sustain" value={`${total?Math.round(sumAll(nw)/total*100):0}% · ${total?Math.round(sumAll(su)/total*100):0}%`} sub={`target ${100-(Number(strategy.bau_pct)||0)}/${Number(strategy.bau_pct)||0}`}/>
       </div>
 
-      {/* Budget by team */}
-      <div style={SECTION}>BUDGET BY TEAM</div>
+      {/* Full budget vs contractors */}
+      <div style={SECTION}>FULL BUDGET VS CONTRACTORS</div>
       <div style={{...CARD,padding:0,overflowX:'auto',marginBottom:22}}>
         <table style={{borderCollapse:'collapse',width:'100%'}}>
-          <thead><tr><th style={{...TH,textAlign:'left'}}>Team</th><th style={TH}>Projects</th>{fys.map((fy:number)=><th key={fy} style={TH}>{fyLabel(fy)}</th>)}<th style={TH}>Total</th><th style={TH}>Share</th></tr></thead>
+          <thead><tr><th style={{...TH,textAlign:'left'}}/>{fys.map((fy:number)=><th key={fy} style={TH}>{fyLabel(fy)}</th>)}<th style={TH}>Total</th><th style={TH}>Share</th></tr></thead>
+          <tbody>
+            <tr>
+              <td style={{...LTD,fontWeight:800,color:'#C8973A'}}>Full budget</td>
+              {fys.map((fy:number)=><td key={fy} style={{...TD,fontWeight:800,color:'#C8973A'}}>{fmtUSD(sumFy(costed,fy,'cost'))}</td>)}
+              <td style={{...TD,fontWeight:800,color:'#C8973A'}}>{fmtUSD(sumAll(costed,'cost'))}</td><td style={TD}>100%</td>
+            </tr>
+            <tr>
+              <td style={{...LTD,fontWeight:700,color:'#F4F6F8'}}>Contractors</td>
+              {fys.map((fy:number)=><td key={fy} style={{...TD,fontWeight:700,color:'#F4F6F8'}}>{fmtUSD(sumFy(costed,fy,'contractor'))}</td>)}
+              <td style={{...TD,fontWeight:700,color:'#F4F6F8'}}>{fmtUSD(sumAll(costed,'contractor'))}</td>
+              <td style={TD}>{sumAll(costed,'cost')?Math.round(sumAll(costed,'contractor')/sumAll(costed,'cost')*100):0}%</td>
+            </tr>
+            {vendorRows.map(r=>(
+              <tr key={r.v}>
+                <td style={{...LTD,paddingLeft:24,fontSize:11,color:'#A9B8C9'}}>↳ {r.v}</td>
+                {fys.map((fy:number)=><td key={fy} style={{...TD,fontSize:11}}>{fmtK(r.byFy[fy]||0)}</td>)}
+                <td style={{...TD,fontSize:11}}>{fmtUSD(r.total)}</td>
+                <td style={{...TD,fontSize:11}}>{sumAll(costed,'cost')?Math.round(r.total/sumAll(costed,'cost')*100):0}%</td>
+              </tr>
+            ))}
+            <tr>
+              <td style={{...LTD,fontWeight:700,color:'#F4F6F8'}}>FTE</td>
+              {fys.map((fy:number)=><td key={fy} style={{...TD,fontWeight:700,color:'#F4F6F8'}}>{fmtUSD(sumFy(costed,fy,'fte'))}</td>)}
+              <td style={{...TD,fontWeight:700,color:'#F4F6F8'}}>{fmtUSD(sumAll(costed,'fte'))}</td>
+              <td style={TD}>{sumAll(costed,'cost')?Math.round(sumAll(costed,'fte')/sumAll(costed,'cost')*100):0}%</td>
+            </tr>
+          </tbody>
+        </table>
+        <div style={{padding:'6px 10px',fontSize:10.5,color:'#7A8FA6'}}>Contractor or FTE comes from each person&apos;s type in the roster (unnamed roles use the role&apos;s type). Use the Full budget / Contractors / FTE switch above to show either one in the tables below.</div>
+      </div>
+
+      {/* Budget by team */}
+      <div style={SECTION}>BUDGET BY TEAM{costView!=='cost'?' · '+viewLabel.toUpperCase():''}</div>
+      <div style={{...CARD,padding:0,overflowX:'auto',marginBottom:22}}>
+        <table style={{borderCollapse:'collapse',width:'100%'}}>
+          <thead><tr><th style={{...TH,textAlign:'left'}}>Team</th><th style={TH}>Projects</th>{fys.map((fy:number)=><th key={fy} style={TH}>{fyLabel(fy)}</th>)}<th style={TH}>Total</th><th style={TH}>Share</th><th style={TH}>Contractor %</th></tr></thead>
           <tbody>
             {byTeam.map(g=>{const c=g.list.filter(x=>x.cost?.total>0);const t=sumAll(c);return(
               <tr key={g.team}>
@@ -143,11 +195,13 @@ export function StrategyReport({strategy,entries,personMonth,people,roles,teams,
                 {fys.map((fy:number)=><td key={fy} style={TD}>{fmtK(sumFy(c,fy))}</td>)}
                 <td style={{...TD,fontWeight:700,color:'#F4F6F8'}}>{fmtUSD(t)}</td>
                 <td style={TD}>{total?Math.round(t/total*100):0}%</td>
+                <td style={TD}>{sumAll(c,'cost')?Math.round(sumAll(c,'contractor')/sumAll(c,'cost')*100)+'%':'—'}</td>
               </tr>)})}
             <tr>
               <td style={{...LTD,fontWeight:800,color:'#C8973A'}}>Total</td><td style={TD}/>
               {fys.map((fy:number)=><td key={fy} style={{...TD,fontWeight:800,color:'#C8973A'}}>{fmtK(sumFy(costed,fy))}</td>)}
               <td style={{...TD,fontWeight:800,color:'#C8973A'}}>{fmtUSD(total)}</td><td style={TD}/>
+              <td style={{...TD,fontWeight:700}}>{sumAll(costed,'cost')?Math.round(sumAll(costed,'contractor')/sumAll(costed,'cost')*100)+'%':'—'}</td>
             </tr>
           </tbody>
         </table>
@@ -155,7 +209,7 @@ export function StrategyReport({strategy,entries,personMonth,people,roles,teams,
       </div>
 
       {/* Budget by project */}
-      <div style={SECTION}>BUDGET BY PROJECT</div>
+      <div style={SECTION}>BUDGET BY PROJECT{costView!=='cost'?' · '+viewLabel.toUpperCase():''}</div>
       <div style={{...CARD,padding:0,overflowX:'auto',marginBottom:22}}>
         <table style={{borderCollapse:'collapse',width:'100%'}}>
           <thead><tr>
@@ -178,7 +232,7 @@ export function StrategyReport({strategy,entries,personMonth,people,roles,teams,
                     <td style={{...LTD,fontSize:11}}>{names.map((n,i)=><span key={i} style={{color:n?'#C8C8D4':'#E74C3C'}}>{i?' · ':''}{n||'—'}</span>)}{x.roster.length>names.filter(Boolean).length&&<span style={{color:'#7A8FA6'}}> +{x.roster.length-names.filter(Boolean).length}</span>}</td>
                     {x.cost?.total>0?<>
                       {fys.map((fy:number)=><td key={fy} style={TD}>{fmtK(fyCost(x,fy))}</td>)}
-                      <td style={{...TD,fontWeight:700,color:'#F4F6F8'}}>{fmtUSD(x.cost.total)}</td>
+                      <td style={{...TD,fontWeight:700,color:'#F4F6F8'}}>{fmtUSD(projTotal(x))}</td>
                     </>:<td colSpan={fys.length+1} style={{...TD,color:'#D4820A',textAlign:'center'}}>Not costed: {x.reason||'no cost'}</td>}
                   </tr>)})}
                 <tr>
@@ -222,6 +276,7 @@ export function StrategyReport({strategy,entries,personMonth,people,roles,teams,
                       <td style={{...LTD,minWidth:240}}>
                         <span style={{color:'#F4F6F8',fontWeight:700}}>{x.person.name}</span>
                         <span style={{color:'#7A8FA6',fontSize:11}}> · {x.role||'No role'}</span>
+                        {x.person.type==='contractor'&&<span style={{marginLeft:6,fontSize:9.5,color:'#A9B8C9',border:'1px solid #3A4A5E',borderRadius:3,padding:'0 4px'}}>CONTRACTOR{x.person.vendor?' · '+x.person.vendor:''}</span>}
                         {x.person.termination_date&&x.person.termination_date<=winEnd&&<span style={{color:'#D4820A',fontSize:10.5}}> · leaves {fmtD(x.person.termination_date)}</span>}
                         {!x.projects.length&&<span style={{color:'#7A8FA6',fontSize:10.5,fontStyle:'italic'}}> · available</span>}
                       </td>

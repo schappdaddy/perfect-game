@@ -53,6 +53,8 @@ export const rateFor=(row:any,people:any[],roles:any[])=>{
   }
   return Number(roles.find(r=>r.id===row.role_id)?.hourly_rate||0)
 }
+// A person's own type decides; an unnamed role falls back to the role's type
+export const isContractor=(person:any,role:any)=>person?(person.type==='contractor'):role?.type==='contractor'
 function split(cost:number,role:any,budgetType:string){
   if(budgetType==='support'||!role?.capex_eligible)return{capex:0,opex:cost}
   const pct=role.capex_pct??80
@@ -63,12 +65,19 @@ function split(cost:number,role:any,budgetType:string){
 // Returns each project's cost by FY, and each person's monthly share per project (for load
 // and for showing overlaps).
 export function computeAllocation(work:any[],people:any[],roles:any[]){
-  const costs=new Map<string,{byFy:Record<number,{cost:number,capex:number,opex:number}>,total:number}>()
-  const add=(p:any,role:any,y:number,m:number,cost:number)=>{
-    const c=costs.get(p.id)||{byFy:{},total:0}
+  // Each FY also splits into contractor and FTE cost, and contractor cost by vendor
+  const costs=new Map<string,{byFy:Record<number,{cost:number,capex:number,opex:number,contractor:number,fte:number}>,total:number,vendors:Record<string,Record<number,number>>}>()
+  const add=(p:any,role:any,y:number,m:number,cost:number,who:any)=>{
+    const c=costs.get(p.id)||{byFy:{},total:0,vendors:{}}
     const fy=fyOfMonth(y,m),sp=split(cost,role,p.budget_type||'build')
-    const b=c.byFy[fy]||(c.byFy[fy]={cost:0,capex:0,opex:0})
+    const b=c.byFy[fy]||(c.byFy[fy]={cost:0,capex:0,opex:0,contractor:0,fte:0})
     b.cost+=cost;b.capex+=sp.capex;b.opex+=sp.opex;c.total+=cost
+    if(isContractor(who,role)){
+      b.contractor+=cost
+      const v=who?.vendor||'Vendor not set'
+      const vm=c.vendors[v]||(c.vendors[v]={})
+      vm[fy]=(vm[fy]||0)+cost
+    }else b.fte+=cost
     costs.set(p.id,c)
   }
   // person → month → {days: working days in the month, share: projectId → days of that person}
@@ -84,7 +93,7 @@ export function computeAllocation(work:any[],people:any[],roles:any[]){
         const role=roles.find((r:any)=>r.id===row.role_id)
         const rate=rateFor(row,people,roles),heads=Number(row.headcount||1)
         const d=new Date(w.s+'T12:00:00'),end=new Date(w.e+'T12:00:00')
-        while(d<=end){if(d.getDay()!==0&&d.getDay()!==6)add(w.p,role,d.getFullYear(),d.getMonth()+1,8*rate*heads);d.setDate(d.getDate()+1)}
+        while(d<=end){if(d.getDay()!==0&&d.getDay()!==6)add(w.p,role,d.getFullYear(),d.getMonth()+1,8*rate*heads,null);d.setDate(d.getDate()+1)}
       }
     }
   }
@@ -109,7 +118,7 @@ export function computeAllocation(work:any[],people:any[],roles:any[]){
           const cell=pm.get(key)||{days:0,share:new Map()}
           pm.set(key,cell)
           for(const a of active){
-            add(a.p,role,y,m,8*rate/active.length)
+            add(a.p,role,y,m,8*rate/active.length,person)
             cell.share.set(a.p.id,(cell.share.get(a.p.id)||0)+1/active.length)
           }
         }
@@ -189,6 +198,7 @@ export function StrategyBudgetPanel({entries,fys,scope,setScope,onOpen}:any){
             <div style={{color:'#7A8FA6',fontSize:10}}>{sum(costed)?Math.round(sum(list)/sum(costed)*100):0}% of total</div>
           </div>
         ))}
+        <div style={{gridColumn:'1 / -1',color:'#7A8FA6',fontSize:10.5}}>Contractors <b style={{color:'#F4F6F8'}}>{fmtUSD(sum(costed,undefined,'contractor'))}</b> · FTE <b style={{color:'#F4F6F8'}}>{fmtUSD(sum(costed,undefined,'fte'))}</b></div>
         <div style={{gridColumn:'1 / -1',color:'#7A8FA6',fontSize:10.5}}>CapEx <b style={{color:'#F4F6F8'}}>{fmtUSD(sum(costed,undefined,'capex'))}</b> · OpEx <b style={{color:'#F4F6F8'}}>{fmtUSD(sum(costed,undefined,'opex'))}</b></div>
       </div>
       {groups.map(g=>open[g.k]&&g.list.length>0&&(
