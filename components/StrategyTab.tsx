@@ -2,6 +2,7 @@
 import { useState, useEffect, useRef, Fragment } from 'react'
 import { supabase } from '../lib/supabase'
 import { DependencyLayer, DepHandle, createDependency, deleteDependency, depKey } from './DependencyLayer'
+import { StrategyBudgetPanel, StaffingSection, projectCost } from './StrategyBudget'
 
 // ── Strategy roadmap ─────────────────────────────────────────────────────────
 // A strategy spans whole fiscal years (FY runs Apr–Mar; FY27 = Apr 2026–Mar 2027) and
@@ -54,7 +55,7 @@ const TEMPLATE={
   ],
 }
 
-export default function StrategyTab({projects:mainProjects,setProjects,strategies,setStrategies,tracks,setTracks,goals,setGoals,deps:allDeps,setDeps,people,computeCapacity,teams,onOpenProject,openAssistant,items=[],epics:mainEpics=[],setEpics,strategyItems=[],setStrategyItems}:any){
+export default function StrategyTab({projects:mainProjects,setProjects,strategies,setStrategies,tracks,setTracks,goals,setGoals,deps:allDeps,setDeps,people,computeCapacity,teams,onOpenProject,openAssistant,items=[],epics:mainEpics=[],setEpics,strategyItems=[],setStrategyItems,roles=[],projectRoles=[],setProjectRoles,strategyRoles=[],setStrategyRoles}:any){
   const [stratId,setStratId]=useState<any>(()=>{try{return localStorage.getItem('pg_strategy')}catch{return null}})
   const strategy=(strategies as any[]).find(s=>s.id===stratId)||strategies[0]||null
   // ── Sandbox: this strategy's own placement of projects and epics (track, dates, planning
@@ -65,11 +66,56 @@ export default function StrategyTab({projects:mainProjects,setProjects,strategie
   const mainState=(p:any)=>p?.planning_state==='proposed'?'proposed':'planned'
   const projects=(mainProjects as any[]).map(p=>{
     const r=rowOf('project',p.id)
-    return r?{...p,track_id:r.track_id,start_date:r.start_date,end_date:r.end_date,planning_state:r.planning_state||mainState(p)}:{...p,track_id:null}
+    return r?{...p,track_id:r.track_id,start_date:r.start_date,end_date:r.end_date,planning_state:r.planning_state||mainState(p),team:r.team??p.team}:{...p,track_id:null}
   })
   const epics=(mainEpics as any[]).map(e=>{const r=rowOf('epic',e.id);return r?{...e,start_date:r.start_date,end_date:r.end_date}:e})
   const deps=(allDeps as any[]).filter(d=>strategy&&d.strategy_id===strategy.id)
-  const SANDBOX_FIELDS=['track_id','start_date','end_date','planning_state']
+  const SANDBOX_FIELDS=['track_id','start_date','end_date','planning_state','team']
+  // A project's roster in this strategy: its own copy once edited here, else the project's
+  const rosterOf=(projectId:any)=>rowOf('project',projectId)?.roster_custom
+    ?(strategyRoles as any[]).filter(r=>r.strategy_id===strategy?.id&&r.project_id===projectId)
+    :(projectRoles as any[]).filter(r=>r.project_id===projectId)
+  async function ensureOwnRoster(projectId:any){
+    if(rowOf('project',projectId)?.roster_custom)return
+    const copy=(projectRoles as any[]).filter(r=>r.project_id===projectId).map(r=>({strategy_id:strategy.id,project_id:projectId,role_id:r.role_id,person_id:r.person_id,headcount:r.headcount,allocation_pct:r.allocation_pct}))
+    if(copy.length){
+      const{data,error}=await supabase.from('strategy_roles').insert(copy).select()
+      if(error){alert('Failed to copy the roster: '+error.message);return}
+      if(data)setStrategyRoles((prev:any[])=>[...prev,...data])
+    }
+    await upsertRow('project',projectId,{roster_custom:true})
+  }
+  async function addRosterRow(projectId:any,fields:any){
+    await ensureOwnRoster(projectId)
+    const{data,error}=await supabase.from('strategy_roles').insert({strategy_id:strategy.id,project_id:projectId,...fields}).select().single()
+    if(error){alert('Failed to add: '+error.message);return}
+    if(data)setStrategyRoles((prev:any[])=>[...prev,data])
+  }
+  async function updRosterRow(row:any,fields:any){
+    if(!rowOf('project',row.project_id)?.roster_custom){
+      // First edit: take a copy, then apply the change to the copied row
+      await ensureOwnRoster(row.project_id)
+      const{data}=await supabase.from('strategy_roles').select('*').eq('strategy_id',strategy.id).eq('project_id',row.project_id)
+      const twin=(data||[]).find((r:any)=>r.person_id===row.person_id&&r.role_id===row.role_id)
+      if(!twin)return
+      row=twin
+    }
+    setStrategyRoles((prev:any[])=>prev.map(r=>r.id===row.id?{...r,...fields}:r))
+    const{error}=await supabase.from('strategy_roles').update(fields).eq('id',row.id)
+    if(error)alert('Failed to save: '+error.message)
+  }
+  async function removeRosterRow(row:any){
+    if(!rowOf('project',row.project_id)?.roster_custom){
+      await ensureOwnRoster(row.project_id)
+      const{data}=await supabase.from('strategy_roles').select('*').eq('strategy_id',strategy.id).eq('project_id',row.project_id)
+      const twin=(data||[]).find((r:any)=>r.person_id===row.person_id&&r.role_id===row.role_id)
+      if(!twin)return
+      row=twin
+    }
+    setStrategyRoles((prev:any[])=>prev.filter(r=>r.id!==row.id))
+    const{error}=await supabase.from('strategy_roles').delete().eq('id',row.id)
+    if(error)alert('Failed to remove: '+error.message)
+  }
   async function upsertRow(type:string,id:any,fields:any){
     if(!strategy)return
     const cur=rowOf(type,id)
@@ -79,6 +125,7 @@ export default function StrategyTab({projects:mainProjects,setProjects,strategie
       start_date:cur?cur.start_date:(main?.start_date||null),
       end_date:cur?cur.end_date:(main?.ongoing?null:(main?.end_date||null)),
       planning_state:type==='project'?(cur?.planning_state||mainState(main)):null,
+      team:cur?cur.team:null,roster_custom:cur?.roster_custom||false,
       ...fields,updated_at:new Date().toISOString()}
     const tempId=cur?.id||`tmp-${type}-${id}`
     setStrategyItems((prev:any[])=>cur?prev.map(r=>r.id===cur.id?{...r,...row}:r):[...prev,{...row,id:tempId}])
@@ -90,7 +137,7 @@ export default function StrategyTab({projects:mainProjects,setProjects,strategie
   const [drag,setDrag]=useState<any>(null) // {id,mode:'move'|'start'|'end',x0,dm}
   const [editGoal,setEditGoal]=useState<any>(null) // {track_id,fy,text}
   const pref=(k:string,d:any)=>{try{const v=localStorage.getItem('pg_strat_'+k);return v==null?d:JSON.parse(v)}catch{return d}}
-  const [view,setView]=useState<any>(()=>({sortBy:pref('sortBy','start_date'),sortDir:pref('sortDir','asc'),showLoad:pref('showLoad',false),showEpics:pref('showEpics',true),snap:pref('snap','quarter'),collapsed:pref('collapsed',{})}))
+  const [view,setView]=useState<any>(()=>({sortBy:pref('sortBy','start_date'),sortDir:pref('sortDir','asc'),showLoad:pref('showLoad',false),showEpics:pref('showEpics',true),snap:pref('snap','quarter'),groupBy:pref('groupBy','tracks'),budgetScope:pref('budgetScope','all'),sideTab:pref('sideTab','settings'),collapsed:pref('collapsed',{})}))
   function setPref(k:string,v:any){setView((cur:any)=>({...cur,[k]:v}));try{localStorage.setItem('pg_strat_'+k,JSON.stringify(v))}catch{}}
   const toggleCollapsed=(key:string)=>setPref('collapsed',{...view.collapsed,[key]:!view.collapsed[key]})
   const [narrow,setNarrow]=useState(false)
@@ -128,6 +175,13 @@ export default function StrategyTab({projects:mainProjects,setProjects,strategie
       const diff:string[]=[]
       if((r.start_date||null)!==(main.start_date||null)||(r.end_date||null)!==mEnd)diff.push('dates')
       if(r.item_type==='project'&&r.planning_state&&r.planning_state!==mainState(main))diff.push(r.planning_state==='planned'?'planned':'proposed')
+      if(r.item_type==='project'&&r.team&&r.team!==main.team)diff.push('team')
+      if(r.item_type==='project'&&r.roster_custom){
+        const sig=(x:any)=>`${x.person_id||''}|${x.role_id||''}|${Number(x.headcount)}|${Number(x.allocation_pct)}`
+        const mine=(strategyRoles as any[]).filter(x=>x.strategy_id===strategy?.id&&x.project_id===r.item_id).map(sig).sort().join(',')
+        const theirs=(projectRoles as any[]).filter(x=>x.project_id===r.item_id).map(sig).sort().join(',')
+        if(mine!==theirs)diff.push('people')
+      }
       if(diff.length)out.push({row:r,main,diff})
     }
     const mainDeps=(allDeps as any[]).filter(d=>!d.strategy_id&&d.blocker_type!=='item'&&d.blocked_type!=='item')
@@ -140,13 +194,24 @@ export default function StrategyTab({projects:mainProjects,setProjects,strategie
     const ch=changesVsMain()
     const nP=ch.rows.filter(c=>c.row.item_type==='project').length,nE=ch.rows.length-nP
     if(!ch.rows.length&&!ch.addDeps.length&&!ch.dropDeps.length){alert('The main roadmap already matches this strategy.');return}
-    const lines=[nP&&`${nP} project${nP!==1?'s get':' gets'} this strategy's dates or planning state`,nE&&`${nE} epic${nE!==1?'s get':' gets'} this strategy's dates`,
+    const nPeople=ch.rows.filter(c=>c.diff.includes('people')||c.diff.includes('team')).length
+    const lines=[nP&&`${nP} project${nP!==1?'s get':' gets'} this strategy's dates, planning state, team or people`,nPeople&&`${nPeople} of them get this strategy's team or people (their roster is replaced)`,nE&&`${nE} epic${nE!==1?'s get':' gets'} this strategy's dates`,
       ch.addDeps.length&&`${ch.addDeps.length} dependenc${ch.addDeps.length!==1?'ies are':'y is'} added`,ch.dropDeps.length&&`${ch.dropDeps.length} dependenc${ch.dropDeps.length!==1?'ies are':'y is'} removed`].filter(Boolean)
     if(!confirm(`Promote "${strategy.name}" to the main roadmap?\n\n• ${lines.join('\n• ')}\n\nThe Roadmap, Projects, Budget and Sprints tabs use the main roadmap. Other strategies are not changed.`))return
     for(const c of ch.rows){
       const fields:any={start_date:c.row.start_date||null}
       if(!(c.main.ongoing&&!c.row.end_date))fields.end_date=c.row.end_date||null
       if(c.row.item_type==='project'&&c.row.planning_state)fields.planning_state=c.row.planning_state
+      if(c.row.item_type==='project'&&c.row.team)fields.team=c.row.team
+      if(c.diff.includes('people')){
+        const pid=c.row.item_id
+        const{error:de}=await supabase.from('project_roles').delete().eq('project_id',pid)
+        if(de){alert(`Promoting stopped: ${de.message}`);return}
+        const mine=(strategyRoles as any[]).filter(x=>x.strategy_id===strategy.id&&x.project_id===pid).map(x=>({project_id:pid,role_id:x.role_id,person_id:x.person_id,headcount:x.headcount,allocation_pct:x.allocation_pct}))
+        const{data:nr,error:ie}=mine.length?await supabase.from('project_roles').insert(mine).select():{data:[],error:null}
+        if(ie){alert(`Promoting stopped: ${ie.message}`);return}
+        setProjectRoles((prev:any[])=>[...prev.filter(x=>x.project_id!==pid),...(nr||[])])
+      }
       const table=c.row.item_type==='project'?'projects':'epics'
       const{error}=await supabase.from(table).update(fields).eq('id',c.row.item_id)
       if(error){alert(`Promoting stopped: ${error.message}`);return}
@@ -182,7 +247,9 @@ export default function StrategyTab({projects:mainProjects,setProjects,strategie
       const gs=goals.filter((g:any)=>g.track_id===t.id).map((g:any)=>({track_id:nt.id,fy:g.fy,goal:g.goal}))
       if(gs.length){const{data:ng}=await supabase.from('track_goals').insert(gs).select();if(ng)newGoals.push(...ng)}
     }
-    const rows=sRows.map(r=>({strategy_id:ns.id,item_type:r.item_type,item_id:r.item_id,track_id:r.track_id?trackMap.get(r.track_id)||null:null,start_date:r.start_date,end_date:r.end_date,planning_state:r.planning_state}))
+    const rows=sRows.map(r=>({strategy_id:ns.id,item_type:r.item_type,item_id:r.item_id,track_id:r.track_id?trackMap.get(r.track_id)||null:null,start_date:r.start_date,end_date:r.end_date,planning_state:r.planning_state,team:r.team,roster_custom:r.roster_custom}))
+    const roster=(strategyRoles as any[]).filter(x=>x.strategy_id===strategy.id).map(x=>({strategy_id:ns.id,project_id:x.project_id,role_id:x.role_id,person_id:x.person_id,headcount:x.headcount,allocation_pct:x.allocation_pct}))
+    if(roster.length){const{data:nrr}=await supabase.from('strategy_roles').insert(roster).select();if(nrr)setStrategyRoles((prev:any[])=>[...prev,...nrr])}
     const{data:nr}=rows.length?await supabase.from('strategy_items').insert(rows).select():{data:[]}
     const nd=deps.map(d=>({strategy_id:ns.id,blocker_type:d.blocker_type,blocker_id:d.blocker_id,blocked_type:d.blocked_type,blocked_id:d.blocked_id}))
     const{data:ndr}=nd.length?await supabase.from('work_dependencies').insert(nd).select():{data:[]}
@@ -192,7 +259,9 @@ export default function StrategyTab({projects:mainProjects,setProjects,strategie
   }
   async function resetToMain(){
     if(!strategy)return
-    if(!confirm(`Reset "${strategy.name}" to the main roadmap?\n\nDates, planning states and dependencies go back to the main roadmap's. Tracks, goals and which projects sit on which track stay.`))return
+    if(!confirm(`Reset "${strategy.name}" to the main roadmap?\n\nDates, planning states, teams, people and dependencies go back to the main roadmap's. Tracks, goals and which projects sit on which track stay.`))return
+    await supabase.from('strategy_roles').delete().eq('strategy_id',strategy.id)
+    setStrategyRoles((prev:any[])=>prev.filter(x=>x.strategy_id!==strategy.id))
     const keep=sRows.filter(r=>r.item_type==='project'&&r.track_id)
     const{error}=await supabase.from('strategy_items').delete().eq('strategy_id',strategy.id)
     if(error){alert('Reset failed: '+error.message);return}
@@ -240,6 +309,7 @@ export default function StrategyTab({projects:mainProjects,setProjects,strategie
     setTracks((prev:any[])=>prev.filter(t=>t.strategy_id!==strategy.id))
     setGoals((prev:any[])=>prev.filter(g=>!trackIds.includes(g.track_id)))
     setStrategyItems((prev:any[])=>prev.filter(r=>r.strategy_id!==strategy.id))
+    setStrategyRoles((prev:any[])=>prev.filter(x=>x.strategy_id!==strategy.id))
     setDeps((prev:any[])=>prev.filter(d=>d.strategy_id!==strategy.id))
     setSelId(null)
     const{error}=await supabase.from('strategies').delete().eq('id',strategy.id)
@@ -343,7 +413,8 @@ export default function StrategyTab({projects:mainProjects,setProjects,strategie
   const sTracks=tracks.filter((t:any)=>t.strategy_id===strategy.id).sort((a:any,b:any)=>a.sort_order-b.sort_order)
   const sTrackIds=new Set(sTracks.map((t:any)=>t.id))
   const live=(projects as any[]).filter(p=>(p.space||'work')==='work')
-  const capacity=computeCapacity?computeCapacity(live):null
+  const effectiveRoles=live.flatMap(p=>rosterOf(p.id).map((r:any)=>({...r,project_id:p.id})))
+  const capacity=computeCapacity?computeCapacity(live,effectiveRoles):null
   const state=(p:any)=>p.planning_state==='proposed'?'proposed':'planned'
   // Same ordering as the Roadmap tab: start date, end date, name or RAG, either direction,
   // with ongoing (∞) projects pinned to the bottom. Undated projects sit below dated ones.
@@ -460,7 +531,23 @@ export default function StrategyTab({projects:mainProjects,setProjects,strategie
     rows.push({kind:'project',p,epicCount:eps.length,h:ROW_H})
     if(eps.length&&!view.collapsed['pe:'+p.id])eps.forEach(e=>rows.push({kind:'epic',e,p,h:20}))
   }
-  sTracks.forEach((t:any,ti:number)=>{
+  const teamView=view.groupBy==='teams'
+  if(teamView){
+    // Every project on this roadmap grouped by its team here, each team followed by its load
+    const all=[...sTracks.flatMap(onTrack),...backlog]
+    const names=[...teams,...(all.some(p=>!p.team||!teams.includes(p.team))?['__none']:[])]
+    names.forEach((tn:string,ti:number)=>{
+      const list=sortProjects(all.filter(p=>tn==='__none'?(!p.team||!teams.includes(p.team)):p.team===tn))
+      const key='team:'+tn,closed=!!view.collapsed[key]
+      rows.push({kind:'track',track:{id:key,name:tn==='__none'?'No team':tn,color:tn==='Consumer Experience'?'#C9D6E3':tn==='Operational Efficiency'?'#6FA6CB':'#7A8FA6',
+        description:`${list.length} project${list.length!==1?'s':''}`},index:ti,count:list.length,closed,teamRow:true,h:24})
+      if(closed)return
+      list.forEach(pushProject)
+      if(!list.length)rows.push({kind:'hint',text:'No projects for this team yet.',h:ROW_H})
+      loads.filter(l=>l.team===tn).forEach(l=>rows.push({kind:'load',load:l,h:ROW_H}))
+    })
+  }
+  if(!teamView)sTracks.forEach((t:any,ti:number)=>{
     const list=onTrack(t),closed=!!view.collapsed[t.id]
     rows.push({kind:'track',track:t,index:ti,count:list.length,closed,h:24})
     if(closed)return
@@ -468,10 +555,12 @@ export default function StrategyTab({projects:mainProjects,setProjects,strategie
     list.forEach(pushProject)
     if(!list.length)rows.push({kind:'hint',text:'No projects yet. Pick a project and set its track.',h:ROW_H})
   })
-  if(!sTracks.length)rows.push({kind:'hint',text:'No tracks yet. Add your first one in Strategy settings.',h:ROW_H})
-  rows.push({kind:'band',key:'__backlog',label:`BACKLOG · NOT ON A TRACK (${backlog.length})`,closed:!!view.collapsed.__backlog,color:'#3A4A5E',h:22})
-  if(!view.collapsed.__backlog)backlog.forEach(pushProject)
-  if(view.showLoad){
+  if(!teamView&&!sTracks.length)rows.push({kind:'hint',text:'No tracks yet. Add your first one in Strategy settings.',h:ROW_H})
+  if(!teamView){
+    rows.push({kind:'band',key:'__backlog',label:`BACKLOG · NOT ON A TRACK (${backlog.length})`,closed:!!view.collapsed.__backlog,color:'#3A4A5E',h:22})
+    if(!view.collapsed.__backlog)backlog.forEach(pushProject)
+  }
+  if(view.showLoad&&!teamView){
     rows.push({kind:'band',label:`TEAM LOAD · NEW ${limits.new}% / SUSTAIN ${limits.sustain}%`,color:'#243447',h:22})
     loads.forEach(l=>rows.push({kind:'load',load:l,h:ROW_H}))
   }
@@ -562,6 +651,17 @@ export default function StrategyTab({projects:mainProjects,setProjects,strategie
     await updEpic(ep.id,clickedPeriod(e))
   }
 
+  const budgetEntries=[...sTracks.flatMap(onTrack).map((p:any)=>({p,onTrack:true})),...backlog.map((p:any)=>({p,onTrack:false}))]
+    .filter(({p})=>!PROJECT_TERMINAL.includes(p.status)).map(({p,onTrack})=>{
+      const base={p,onTrack,state:state(p),workType:workType(p)}
+      const roster=rosterOf(p.id)
+      if(!p.start_date)return{...base,cost:null,reason:'no dates'}
+      if(!roster.length)return{...base,cost:null,reason:'no people'}
+      const s0=p.start_date<winStart?winStart:p.start_date
+      const e0=p.end_date&&!(p.ongoing&&!rowOf('project',p.id)?.end_date)?(p.end_date>winEnd?winEnd:p.end_date):winEnd
+      const cost=projectCost(p,roster,s0,e0,people,roles)
+      return{...base,cost,reason:cost.total>0?'':'$0 rates'}
+    })
   const sel=selId?projById(selId):null
   const selEpic=typeof selId==='string'&&selId.startsWith('epic:')?(epics as any[]).find(e=>'epic:'+e.id===selId)||null:null
   const counts={planned:0,proposed:0,sustain:0} as any
@@ -590,6 +690,10 @@ export default function StrategyTab({projects:mainProjects,setProjects,strategie
           {issues.length>0&&<Chip color="#E74C3C" label={`${issues.length} to check`}/>}
         </div>
         <div style={{display:'flex',alignItems:'center',gap:6}}>
+          <select value={view.groupBy} onChange={e=>setPref('groupBy',e.target.value)} title="Group the roadmap by track or by team" style={{background:view.groupBy==='teams'?'#C8973A':'#1E3048',color:view.groupBy==='teams'?'#0D1B2A':'#F4F6F8',border:'1px solid #243447',borderRadius:6,fontSize:11,fontWeight:700,padding:'4px 8px',cursor:'pointer'}}>
+            <option value="tracks">Group by tracks</option>
+            <option value="teams">Group by teams</option>
+          </select>
           <span style={{fontSize:11,color:'#7A8FA6'}}>Sort</span>
           <select value={view.sortBy} onChange={e=>setPref('sortBy',e.target.value)} style={{background:'#1E3048',color:'#F4F6F8',border:'1px solid #243447',borderRadius:6,fontSize:11,padding:'4px 8px',cursor:'pointer'}}>
             <option value="start_date">Start Date</option>
@@ -598,9 +702,9 @@ export default function StrategyTab({projects:mainProjects,setProjects,strategie
             <option value="rag">RAG Status</option>
           </select>
           <button onClick={()=>setPref('sortDir',view.sortDir==='asc'?'desc':'asc')} title="Sort direction" style={{background:'#1E3048',color:'#F4F6F8',border:'1px solid #243447',borderRadius:6,fontSize:13,padding:'2px 10px',cursor:'pointer'}}>{view.sortDir==='asc'?'↑':'↓'}</button>
-          <label title="Show each team's planned load per quarter under the roadmap" style={{display:'flex',alignItems:'center',gap:5,fontSize:11,color:'#7A8FA6',cursor:'pointer',whiteSpace:'nowrap' as const}}>
+          {!teamView&&<label title="Show each team's planned load per quarter under the roadmap" style={{display:'flex',alignItems:'center',gap:5,fontSize:11,color:'#7A8FA6',cursor:'pointer',whiteSpace:'nowrap' as const}}>
             <input type="checkbox" checked={view.showLoad} onChange={e=>setPref('showLoad',e.target.checked)} style={{accentColor:'#C8973A'}}/>Team load
-          </label>
+          </label>}
           <select value={view.snap} onChange={e=>setPref('snap',e.target.value)} title="What dragging snaps to" style={{background:'#1E3048',color:'#F4F6F8',border:'1px solid #243447',borderRadius:6,fontSize:11,padding:'4px 8px',cursor:'pointer'}}>
             <option value="quarter">Snap to quarters</option>
             <option value="month">Snap to months</option>
@@ -661,8 +765,8 @@ export default function StrategyTab({projects:mainProjects,setProjects,strategie
                     {/* The name and subtitle run across the band rather than being clipped to the label column */}
                     <div style={{...cellLabel,overflow:'visible',background:r.track.color,borderRight:'none',padding:'0 6px 0 8px',display:'flex',alignItems:'center',gap:4,fontSize:11,fontWeight:800,color:'#0D1B2A',letterSpacing:1,whiteSpace:'nowrap' as const}}>
                       <button onClick={()=>toggleCollapsed(r.track.id)} title={r.closed?'Expand':'Collapse'} style={HDR_BTN}>{r.closed?'▸':'▾'}</button>
-                      <button onClick={()=>moveTrack(r.track.id,-1)} disabled={r.index===0} title="Move track up" style={{...HDR_BTN,opacity:r.index===0?0.3:1}}>▲</button>
-                      <button onClick={()=>moveTrack(r.track.id,1)} disabled={r.index===sTracks.length-1} title="Move track down" style={{...HDR_BTN,opacity:r.index===sTracks.length-1?0.3:1}}>▼</button>
+                      {!r.teamRow&&<button onClick={()=>moveTrack(r.track.id,-1)} disabled={r.index===0} title="Move track up" style={{...HDR_BTN,opacity:r.index===0?0.3:1}}>▲</button>}
+                      {!r.teamRow&&<button onClick={()=>moveTrack(r.track.id,1)} disabled={r.index===sTracks.length-1} title="Move track down" style={{...HDR_BTN,opacity:r.index===sTracks.length-1?0.3:1}}>▼</button>}
                       <span onClick={()=>toggleCollapsed(r.track.id)} title={`${r.track.name} track`} style={{cursor:'pointer',marginLeft:4}}>{r.track.name.toUpperCase()}</span>
                       {r.closed&&<span style={{fontSize:10,fontWeight:700,opacity:0.7}}>· {r.count} project{r.count!==1?'s':''}</span>}
                       {r.track.description&&<span style={{fontSize:11,fontWeight:600,letterSpacing:0,marginLeft:14,opacity:0.85}}>{r.track.description}</span>}
@@ -797,7 +901,7 @@ export default function StrategyTab({projects:mainProjects,setProjects,strategie
         </div>
 
         {/* Side panel */}
-        <div style={{width:narrow?'100%':320,maxHeight:narrow?'45%':'none',flexShrink:0,borderLeft:narrow?'none':'1px solid #243447',borderTop:narrow?'1px solid #243447':'none',background:'#0F1C2B',overflowY:'auto'}}>
+        <div style={{width:narrow?'100%':(!sel&&!selEpic&&selId!=='__new'&&view.sideTab==='budget'?440:320),maxHeight:narrow?'45%':'none',flexShrink:0,borderLeft:narrow?'none':'1px solid #243447',borderTop:narrow?'1px solid #243447':'none',background:'#0F1C2B',overflowY:'auto'}}>
           {selId==='__new'?(
             <NewStrategy onCreate={async(t:any)=>{await createStrategy(t);setSelId(null)}} onCancel={()=>setSelId(null)}/>
           ):selEpic?(
@@ -805,12 +909,21 @@ export default function StrategyTab({projects:mainProjects,setProjects,strategie
               onOpenProject={onOpenProject}/>
           ):sel?(
             <ProjectPanel p={sel} state={state(sel)} tracks={sTracks} projects={live} deps={deps} shown={shown} issues={issues.filter(i=>i.id===sel.id)}
-              updProject={updProject} addDep={addDep} removeDep={removeDep} keyName={keyName} onClose={()=>setSelId(null)} onOpenProject={onOpenProject}/>
-          ):(
+              updProject={updProject} addDep={addDep} removeDep={removeDep} keyName={keyName} onClose={()=>setSelId(null)} onOpenProject={onOpenProject}
+              staffing={<StaffingSection key={sel.id} project={sel} team={sel.team} teams={teams} rows={rosterOf(sel.id)} custom={!!rowOf('project',sel.id)?.roster_custom}
+                people={people} roles={roles} fys={fys} cost={budgetEntries.find((x:any)=>x.p.id===sel.id)?.cost}
+                onTeam={(t:any)=>updProject(sel.id,{team:t})} onAdd={(f:any)=>addRosterRow(sel.id,f)} onUpdate={updRosterRow} onRemove={removeRosterRow}/>}/>
+          ):(<>
+            <div style={{display:'flex',borderBottom:'1px solid #243447',background:'#162436',position:'sticky',top:0,zIndex:2}}>
+              {[['settings','⚙ Settings'],['budget','$ Budget']].map(([k,l])=>(
+                <button key={k} onClick={()=>setPref('sideTab',k)} style={{flex:1,background:view.sideTab===k?'#0F1C2B':'transparent',color:view.sideTab===k?'#F4F6F8':'#7A8FA6',border:'none',borderBottom:view.sideTab===k?'2px solid #C8973A':'2px solid transparent',padding:'9px 0',fontSize:12,fontWeight:700,cursor:'pointer'}}>{l}</button>
+              ))}
+            </div>
+            {view.sideTab==='budget'?<StrategyBudgetPanel entries={budgetEntries} fys={fys} scope={view.budgetScope} setScope={(v:string)=>setPref('budgetScope',v)} onOpen={(id:any)=>setSelId(id)}/>:
             <SettingsPanel strategy={strategy} tracks={sTracks} projects={live} teams={teams} issues={issues} setSelId={setSelId} duplicateStrategy={duplicateStrategy} resetToMain={resetToMain}
               updStrategy={updStrategy} deleteStrategy={deleteStrategy} addTrack={addTrack} updTrack={updTrack} moveTrack={moveTrack} deleteTrack={deleteTrack}
-              updProject={updProject} createProject={createProject}/>
-          )}
+              updProject={updProject} createProject={createProject}/>}
+          </>)}
         </div>
       </div>
     </div>
@@ -829,7 +942,7 @@ const H={fontSize:10,fontWeight:700,color:'#7A8FA6',letterSpacing:1,marginBottom
 const INPUT={width:'100%',boxSizing:'border-box' as const,background:'#1E3048',border:'1px solid #243447',borderRadius:5,color:'#F4F6F8',fontSize:12,padding:'6px 8px'}
 const SECTION={padding:'14px 16px',borderBottom:'1px solid #243447',display:'flex',flexDirection:'column' as const,gap:8}
 
-function ProjectPanel({p,state,tracks,projects,deps,shown,issues,updProject,addDep,removeDep,keyName,onClose,onOpenProject}:any){
+function ProjectPanel({p,state,tracks,projects,deps,shown,issues,updProject,addDep,removeDep,keyName,onClose,onOpenProject,staffing}:any){
   const me='project:'+p.id
   const waitsOn=deps.filter((d:any)=>`${d.blocked_type}:${d.blocked_id}`===me)
   const blocks=deps.filter((d:any)=>`${d.blocker_type}:${d.blocker_id}`===me)
@@ -866,6 +979,7 @@ function ProjectPanel({p,state,tracks,projects,deps,shown,issues,updProject,addD
         </div>
         <div style={{fontSize:10,color:'#7A8FA6'}}>Sustain is tech debt, system stabilization and enhancements to existing things. It counts toward the sustain share.</div>
       </div>
+      {staffing}
       <div style={SECTION}>
         <div style={H}>TRACK</div>
         <select value={tracks.some((t:any)=>t.id===p.track_id)?p.track_id:''} onChange={e=>updProject(p.id,{track_id:e.target.value||null})} style={INPUT}>
