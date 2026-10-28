@@ -4,7 +4,7 @@
 // Each strategy is drawn from its own sandbox (strategy_items), like the Strategy tab.
 
 const PROJECT_TERMINAL=['Complete','Cancelled','Done']
-const BAD='E74C3C',NAVY='1F2A3C',STEEL='87A5BF',ORANGE='E07B2A',PROPOSED_FILL='F2C6A0',CREAM='FDFBF0',FREEZE='E4E4E4',GOAL_FILL='F8E9DF',INK='1F2A3C',MUTED='6B7280'
+const BAD='E74C3C',GROUP='C8973A',NAVY='1F2A3C',STEEL='87A5BF',ORANGE='E07B2A',PROPOSED_FILL='F2C6A0',CREAM='FDFBF0',FREEZE='E4E4E4',GOAL_FILL='F8E9DF',INK='1F2A3C',MUTED='6B7280'
 const TEAM_FILL:any={'Consumer Experience':NAVY,'Operational Efficiency':STEEL}
 const MONTHS=['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec']
 const hex=(c:string|null|undefined,d:string)=>(c||d).replace('#','').toUpperCase()
@@ -28,7 +28,7 @@ function drawSlide(pptx:any,strategy:any,{projects,strategyItems,tracks,goals,de
   const sRows=(strategyItems as any[]).filter(r=>r.strategy_id===strategy.id&&r.item_type==='project')
   const live=(projects as any[]).filter(p=>(p.space||'work')==='work').map(p=>{
     const r=sRows.find(x=>x.item_id===p.id)
-    return r?{...p,track_id:r.track_id,start_date:r.start_date,end_date:r.end_date,planning_state:r.planning_state||(p.planning_state==='proposed'?'proposed':'planned'),team:r.team??p.team}
+    return r?{...p,track_id:r.track_id,start_date:r.start_date,end_date:r.end_date,planning_state:r.planning_state||(p.planning_state==='proposed'?'proposed':'planned'),team:r.team??p.team,group_name:r.group_name||null}
       :{...p,track_id:null,planning_state:p.planning_state==='proposed'?'proposed':'planned'}
   })
   const sTracks=(tracks as any[]).filter(t=>t.strategy_id===strategy.id).sort((a,b)=>a.sort_order-b.sort_order)
@@ -50,21 +50,39 @@ function drawSlide(pptx:any,strategy:any,{projects,strategyItems,tracks,goals,de
   const xEnd=(iso:string)=>{const{y,m,d}=parts(iso);return xAt(Math.min(endAbs+1,y*12+m-1+d/daysIn(y,m)))}
   const visible=(p:any)=>p.start_date&&p.start_date<=winEnd&&(p.ongoing||!p.end_date||p.end_date>=winStart)
   const byStart=(a:any,b:any)=>(a.start_date||'').localeCompare(b.start_date||'')||a.name.localeCompare(b.name)
+  // Sorted by start, with each group's members kept together where its first member falls
+  const ordered=(list:any[])=>{
+    const sorted=[...list].sort(byStart),out:any[]=[],seen=new Set<string>()
+    for(const p of sorted){
+      if(!p.group_name){out.push(p);continue}
+      if(seen.has(p.group_name))continue
+      seen.add(p.group_name);out.push(...sorted.filter(x=>x.group_name===p.group_name))
+    }
+    return out
+  }
   const label=(p:any)=>`${p.name}${p.team?` (${teamShort(p.team)})`:''}`
 
   // Rows
-  type Row={kind:'section'|'goals'|'project',text?:string,color?:string,style?:string,track?:any,p?:any}
+  type Row={kind:'section'|'goals'|'project'|'group',text?:string,color?:string,style?:string,track?:any,p?:any,members?:any[],inGroup?:boolean}
+  const pushList=(list:any[])=>{
+    let open:string|null=null
+    for(const p of ordered(list)){
+      if(p.group_name&&p.group_name!==open)rows.push({kind:'group',text:p.group_name,members:list.filter(x=>x.group_name===p.group_name)})
+      open=p.group_name||null
+      rows.push({kind:'project',p,inGroup:!!p.group_name})
+    }
+  }
   const rows:Row[]=[]
   const offTrack=live.filter(p=>!trackIds.has(p.track_id)&&!PROJECT_TERMINAL.includes(p.status)&&visible(p))
-  const inFlight=offTrack.filter(p=>!sustain(p)).sort(byStart)
-  const ongoing=offTrack.filter(sustain).sort(byStart)
-  if(inFlight.length){rows.push({kind:'section',text:'IN-FLIGHT WORK (roadmap dates)',style:'light'});inFlight.forEach(p=>rows.push({kind:'project',p}))}
+  const inFlight=offTrack.filter(p=>!sustain(p))
+  const ongoing=offTrack.filter(sustain)
+  if(inFlight.length){rows.push({kind:'section',text:'IN-FLIGHT WORK (roadmap dates)',style:'light'});pushList(inFlight)}
   for(const t of sTracks){
     rows.push({kind:'section',text:`${t.name.toUpperCase()} TRACK${t.description?': '+t.description:''}`,color:hex(t.color,'5B7A99'),style:'band'})
     if((goals as any[]).some(g=>g.track_id===t.id&&g.goal))rows.push({kind:'goals',track:t})
-    live.filter(p=>p.track_id===t.id&&visible(p)).sort(byStart).forEach(p=>rows.push({kind:'project',p}))
+    pushList(live.filter(p=>p.track_id===t.id&&visible(p)))
   }
-  if(ongoing.length){rows.push({kind:'section',text:`ONGOING DELIVERABLES: always supported (in the ${Number(strategy.bau_pct)||0}% BAU share)`,color:'6B7280',style:'band'});ongoing.forEach(p=>rows.push({kind:'project',p}))}
+  if(ongoing.length){rows.push({kind:'section',text:`ONGOING DELIVERABLES: always supported (in the ${Number(strategy.bau_pct)||0}% BAU share)`,color:'6B7280',style:'band'});pushList(ongoing)}
 
   const BODY_TOP=1.85,BODY_BOTTOM=6.5
   const rowH=Math.max(0.11,Math.min(0.24,(BODY_BOTTOM-BODY_TOP)/Math.max(rows.length,1)))
@@ -117,8 +135,23 @@ function drawSlide(pptx:any,strategy:any,{projects,strategyItems,tracks,goals,de
       }
       return
     }
+    if(r.kind==='group'){
+      // The group's name, and a bracket over its members' span
+      slide.addText(`${r.text!.toUpperCase()} · runs together`,{x:LX+0.06,y,w:LW-0.06,h:rowH,color:GROUP,bold:true,fontSize:fs,valign:'bottom',margin:[0,4,1,4]})
+      const xs=r.members!.filter(m=>m.start_date).map(m=>({a:xStart(m.start_date),b:m.ongoing||!m.end_date?xAt(endAbs+1):xEnd(m.end_date)}))
+      if(xs.length){
+        const a=Math.min(...xs.map(x=>x.a)),b=Math.max(...xs.map(x=>x.b)),yb=y+rowH*0.62,tick=rowH*0.38
+        const ln={line:{color:GROUP,width:1.5}}
+        slide.addShape(pptx.ShapeType.line,{x:a,y:yb,w:b-a,h:0,...ln})
+        slide.addShape(pptx.ShapeType.line,{x:a,y:yb,w:0,h:tick,...ln})
+        slide.addShape(pptx.ShapeType.line,{x:b,y:yb,w:0,h:tick,...ln})
+      }
+      slide.addShape(pptx.ShapeType.line,{x:LX+0.02,y:y+rowH*0.3,w:0,h:rowH*0.7,line:{color:GROUP,width:2}})
+      return
+    }
     const p=r.p
-    slide.addText(label(p),{x:LX,y,w:LW,h:rowH,color:INK,fontSize:fs,valign:'middle',margin:[0,4,0,4],fit:'shrink'})
+    if(r.inGroup)slide.addShape(pptx.ShapeType.line,{x:LX+0.02,y,w:0,h:rowH,line:{color:GROUP,width:2}})
+    slide.addText(label(p),{x:LX+(r.inGroup?0.1:0),y,w:LW-(r.inGroup?0.1:0),h:rowH,color:INK,fontSize:fs,valign:'middle',margin:[0,4,0,4],fit:'shrink'})
     const x0=xStart(p.start_date),x1=p.ongoing||!p.end_date?xAt(endAbs+1):xEnd(p.end_date)
     if(x1<=x0)return
     const proposed=p.planning_state==='proposed'
@@ -129,7 +162,7 @@ function drawSlide(pptx:any,strategy:any,{projects,strategyItems,tracks,goals,de
 
   // Dependency arrows, as elbow connectors: out of the end of the blocker, along to the
   // row of what waits on it, then into its start. When that work starts before the blocker
-  // finishes, the arrow drops straight onto its bar instead, in red, as on the Strategy tab.
+  // finishes, its bar is outlined in red instead, as the Strategy tab warns.
   const seg=(xa:number,ya:number,xb:number,yb:number,color:string,arrow:boolean)=>{
     const dx=xb-xa,dy=yb-ya
     slide.addShape(pptx.ShapeType.line,{x:Math.min(xa,xb),y:Math.min(ya,yb),w:Math.abs(dx),h:Math.abs(dy),flipH:dx<0,flipV:dy<0,
@@ -152,12 +185,12 @@ function drawSlide(pptx:any,strategy:any,{projects,strategyItems,tracks,goals,de
       // Starts later: across a little, along the gap to the target's row, then into its start
       const xm=x1+STUB
       seg(x1,y1,xm,y1,ORANGE,false);seg(xm,y1,xm,y2,ORANGE,false);seg(xm,y2,x2,y2,ORANGE,true)
-    }else if(x1<=b.x1){
-      // Starts too early: drop from the blocker's end onto the target bar
-      seg(x1,y1,x1,edge,BAD,true);late.push(d)
     }else{
-      // The target is over before the blocker ends: down to its row, back to its end
-      seg(x1,y1,x1,y2,BAD,false);seg(x1,y2,b.x1,y2,BAD,true);late.push(d)
+      // Starts before the blocker finishes: no arrow (it would cross other bars); the bar is
+      // outlined in red and the notes say what it's waiting on
+      if(!late.some(x=>x.blocked_id===d.blocked_id))
+        slide.addShape(pptx.ShapeType.rect,{x:b.x0-0.03,y:y2-barH/2-0.03,w:b.x1-b.x0+0.06,h:barH+0.06,fill:{type:'none'},line:{color:BAD,width:1.5}})
+      late.push(d);continue
     }
     drawn.push(d)
   }
@@ -167,10 +200,13 @@ function drawSlide(pptx:any,strategy:any,{projects,strategyItems,tracks,goals,de
   const legend:[string,any][]=[['Consumer Experience (dated)',{fill:{color:NAVY},line:{color:NAVY}}],['Operational Efficiency (dated)',{fill:{color:STEEL},line:{color:STEEL}}],
     ['Proposed, not yet planned',{fill:{color:PROPOSED_FILL},line:{color:ORANGE,width:1}}],
     [`Code freeze${freeze.length?' '+[...freeze].sort((a,b)=>((a+8)%12)-((b+8)%12)).map(m=>MONTHS[m-1]).join(', '):''}`,{fill:{color:FREEZE},line:{color:FREEZE}}]]
+  if(rows.some(r=>r.kind==='group'))legend.push(['Group: runs together',{fill:{type:'none'},line:{color:GROUP,width:1.5}}])
+  if(late.length)legend.push(['Starts before what it waits on',{fill:{type:'none'},line:{color:BAD,width:1.5}}])
+  const step=12.2/legend.length,lfs=legend.length>4?9.5:11
   legend.forEach(([t,st],i)=>{
-    const x=LX+i*3.05
+    const x=LX+i*step
     slide.addShape(pptx.ShapeType.rect,{x,y:LY+0.04,w:0.3,h:0.18,...st})
-    slide.addText(t,{x:x+0.38,y:LY,w:2.6,h:0.26,fontSize:11,color:'4A5568',valign:'middle',margin:0})
+    slide.addText(t,{x:x+0.38,y:LY,w:step-0.45,h:0.26,fontSize:lfs,color:'4A5568',valign:'middle',margin:0})
   })
 
   // Notes: the strategy's description and what the arrows mean
@@ -179,6 +215,6 @@ function drawSlide(pptx:any,strategy:any,{projects,strategyItems,tracks,goals,de
   for(const d of drawn){const k=d.blocked_id;byBlocked.set(k,[...(byBlocked.get(k)||[]),name(d.blocker_id)])}
   const arrows=[...byBlocked.entries()].map(([k,from])=>`${listJoin(from)} → ${name(k)}`)
   const lateText=late.map(d=>`${name(d.blocked_id)} starts before ${name(d.blocker_id)} finishes`)
-  const note=[strategy.description,arrows.length?`Arrows: ${arrows.join('; ')}.`:'',lateText.length?`Red arrows: ${lateText.join('; ')}.`:'','FY runs Apr to Mar.'].filter(Boolean).join(' ')
+  const note=[strategy.description,arrows.length?`Arrows: ${arrows.join('; ')}.`:'',lateText.length?`Red outline: ${lateText.join('; ')}.`:'','FY runs Apr to Mar.'].filter(Boolean).join(' ')
   slide.addText(note,{x:LX,y:LY+0.3,w:12.2,h:Math.max(0.3,7.4-(LY+0.3)),fontSize:9,color:MUTED,valign:'top',margin:0,fit:'shrink'})
 }
