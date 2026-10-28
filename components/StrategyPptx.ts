@@ -4,7 +4,7 @@
 // Each strategy is drawn from its own sandbox (strategy_items), like the Strategy tab.
 
 const PROJECT_TERMINAL=['Complete','Cancelled','Done']
-const NAVY='1F2A3C',STEEL='87A5BF',ORANGE='E07B2A',PROPOSED_FILL='F2C6A0',CREAM='FDFBF0',FREEZE='E4E4E4',GOAL_FILL='F8E9DF',INK='1F2A3C',MUTED='6B7280'
+const BAD='E74C3C',NAVY='1F2A3C',STEEL='87A5BF',ORANGE='E07B2A',PROPOSED_FILL='F2C6A0',CREAM='FDFBF0',FREEZE='E4E4E4',GOAL_FILL='F8E9DF',INK='1F2A3C',MUTED='6B7280'
 const TEAM_FILL:any={'Consumer Experience':NAVY,'Operational Efficiency':STEEL}
 const MONTHS=['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec']
 const hex=(c:string|null|undefined,d:string)=>(c||d).replace('#','').toUpperCase()
@@ -99,7 +99,7 @@ function drawSlide(pptx:any,strategy:any,{projects,strategyItems,tracks,goals,de
   }
 
   // Body
-  const yOf=new Map<string,number>(),barOf=new Map<string,{x0:number,x1:number}>()
+  const yOf=new Map<string,number>(),barOf=new Map<string,{x0:number,x1:number,s:string,e:string|null}>()
   rows.forEach((r,i)=>{
     const y=BODY_TOP+i*rowH
     if(r.kind==='section'){
@@ -124,19 +124,41 @@ function drawSlide(pptx:any,strategy:any,{projects,strategyItems,tracks,goals,de
     const proposed=p.planning_state==='proposed'
     const fill=proposed?PROPOSED_FILL:TEAM_FILL[p.team]||'9AA5B1'
     slide.addShape(pptx.ShapeType.rect,{x:x0,y:y+rowH*0.22,w:x1-x0,h:rowH*0.56,fill:{color:fill},line:{color:proposed?ORANGE:fill,width:proposed?1:0}})
-    yOf.set(p.id,y+rowH/2);barOf.set(p.id,{x0,x1})
+    yOf.set(p.id,y+rowH/2);barOf.set(p.id,{x0,x1,s:p.start_date,e:p.ongoing?null:p.end_date||null})
   })
 
-  // Dependency arrows: from the end of the blocker to the start of what waits on it
+  // Dependency arrows, as elbow connectors: out of the end of the blocker, along to the
+  // row of what waits on it, then into its start. When that work starts before the blocker
+  // finishes, the arrow drops straight onto its bar instead, in red, as on the Strategy tab.
+  const seg=(xa:number,ya:number,xb:number,yb:number,color:string,arrow:boolean)=>{
+    const dx=xb-xa,dy=yb-ya
+    slide.addShape(pptx.ShapeType.line,{x:Math.min(xa,xb),y:Math.min(ya,yb),w:Math.abs(dx),h:Math.abs(dy),flipH:dx<0,flipV:dy<0,
+      line:{color,width:1.25,...(arrow?{endArrowType:'triangle'}:{})}})
+  }
+  const barH=rowH*0.56,STUB=0.08
+  const late:any[]=[]
   const sDeps=(deps as any[]).filter(d=>d.strategy_id===strategy.id&&d.blocker_type==='project'&&d.blocked_type==='project')
   const drawn:any[]=[]
   for(const d of sDeps){
     const a=barOf.get(d.blocker_id),b=barOf.get(d.blocked_id)
     if(!a||!b)continue
     const x1=a.x1,y1=yOf.get(d.blocker_id)!,x2=b.x0,y2=yOf.get(d.blocked_id)!
-    const dx=x2-x1,dy=y2-y1
-    slide.addShape(pptx.ShapeType.line,{x:Math.min(x1,x2),y:Math.min(y1,y2),w:Math.max(Math.abs(dx),0.001),h:Math.max(Math.abs(dy),0.001),
-      flipH:dx<0,flipV:dy<0,line:{color:ORANGE,width:1.25,endArrowType:'triangle'}})
+    const down=y2>y1,edge=y2+(down?-1:1)*barH/2 // the target bar's top (or bottom) edge
+    const onTime=!!a.e&&b.s>a.e
+    if(onTime&&x2-x1<0.1){
+      // Starts as the blocker ends: straight down (or up) onto the start of its bar
+      seg(x2,y1,x2,edge,ORANGE,true)
+    }else if(onTime){
+      // Starts later: across a little, along the gap to the target's row, then into its start
+      const xm=x1+STUB
+      seg(x1,y1,xm,y1,ORANGE,false);seg(xm,y1,xm,y2,ORANGE,false);seg(xm,y2,x2,y2,ORANGE,true)
+    }else if(x1<=b.x1){
+      // Starts too early: drop from the blocker's end onto the target bar
+      seg(x1,y1,x1,edge,BAD,true);late.push(d)
+    }else{
+      // The target is over before the blocker ends: down to its row, back to its end
+      seg(x1,y1,x1,y2,BAD,false);seg(x1,y2,b.x1,y2,BAD,true);late.push(d)
+    }
     drawn.push(d)
   }
 
@@ -155,7 +177,8 @@ function drawSlide(pptx:any,strategy:any,{projects,strategyItems,tracks,goals,de
   const name=(id:any)=>(projects as any[]).find(p=>p.id===id)?.name||'?'
   const byBlocked=new Map<string,string[]>()
   for(const d of drawn){const k=d.blocked_id;byBlocked.set(k,[...(byBlocked.get(k)||[]),name(d.blocker_id)])}
-  const arrows=[...byBlocked.entries()].map(([k,from])=>`${listJoin(from)} to ${name(k)}`)
-  const note=[strategy.description,arrows.length?`Arrows: ${arrows.join('; ')}.`:'','FY runs Apr to Mar.'].filter(Boolean).join(' ')
+  const arrows=[...byBlocked.entries()].map(([k,from])=>`${listJoin(from)} → ${name(k)}`)
+  const lateText=late.map(d=>`${name(d.blocked_id)} starts before ${name(d.blocker_id)} finishes`)
+  const note=[strategy.description,arrows.length?`Arrows: ${arrows.join('; ')}.`:'',lateText.length?`Red arrows: ${lateText.join('; ')}.`:'','FY runs Apr to Mar.'].filter(Boolean).join(' ')
   slide.addText(note,{x:LX,y:LY+0.3,w:12.2,h:Math.max(0.3,7.4-(LY+0.3)),fontSize:9,color:MUTED,valign:'top',margin:0,fit:'shrink'})
 }
