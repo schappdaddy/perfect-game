@@ -3,6 +3,7 @@ import { useState, useEffect, useRef, Fragment } from 'react'
 import { supabase } from '../lib/supabase'
 import { DependencyLayer, DepHandle, createDependency, deleteDependency, depKey } from './DependencyLayer'
 import { StrategyReport } from './StrategyReport'
+import { exportStrategiesPptx } from './StrategyPptx'
 import { StrategyBudgetPanel, StaffingSection, computeAllocation, slotted, overlapsFor, SLOTS, SHARED_TEAM } from './StrategyBudget'
 
 // ── Strategy roadmap ─────────────────────────────────────────────────────────
@@ -145,6 +146,7 @@ export default function StrategyTab({projects:mainProjects,setProjects,strategie
   const [drag,setDrag]=useState<any>(null) // {id,mode:'move'|'start'|'end',x0,dm}
   const [editGoal,setEditGoal]=useState<any>(null) // {track_id,fy,text}
   const pref=(k:string,d:any)=>{try{const v=localStorage.getItem('pg_strat_'+k);return v==null?d:JSON.parse(v)}catch{return d}}
+  const [exporting,setExporting]=useState(false)
   const [view,setView]=useState<any>(()=>({sortBy:pref('sortBy','start_date'),sortDir:pref('sortDir','asc'),showLoad:pref('showLoad',false),showEpics:pref('showEpics',true),snap:pref('snap','quarter'),groupBy:pref('groupBy','tracks'),budgetScope:pref('budgetScope','all'),sideTab:pref('sideTab','settings'),mode:pref('mode','map'),collapsed:pref('collapsed',{})}))
   function setPref(k:string,v:any){setView((cur:any)=>({...cur,[k]:v}));try{localStorage.setItem('pg_strat_'+k,JSON.stringify(v))}catch{}}
   const toggleCollapsed=(key:string)=>setPref('collapsed',{...view.collapsed,[key]:!view.collapsed[key]})
@@ -749,6 +751,17 @@ export default function StrategyTab({projects:mainProjects,setProjects,strategie
           </label>
         </div>}
         <div style={{marginLeft:'auto',display:'flex',gap:6}}>
+          <select value="" disabled={exporting} title="Download as PowerPoint, one slide per strategy" onChange={async e=>{
+            const which=e.target.value;if(!which)return
+            setExporting(true)
+            try{await exportStrategiesPptx({strategies:which==='all'?strategies:[strategy],projects:mainProjects,strategyItems,tracks,goals,deps:allDeps})}
+            catch(err:any){alert('Failed to build the PowerPoint: '+(err?.message||err))}
+            finally{setExporting(false)}
+          }} style={{background:'none',border:'1px solid #243447',borderRadius:6,color:'#F4F6F8',fontSize:11,fontWeight:700,padding:'5px 8px',cursor:'pointer'}}>
+            <option value="">{exporting?'Building…':'⬇ PowerPoint'}</option>
+            <option value="this">This strategy</option>
+            <option value="all">All strategies ({strategies.length})</option>
+          </select>
           {openAssistant&&<button onClick={()=>openAssistant(`Look at the "${strategy.name}" strategy and draft a Plan A: place the proposed and undated projects by quarter on their tracks, respecting dependencies, the code freeze and team capacity. Keep anything you place as proposed.`)}
             style={{background:'none',border:'1px solid #C8973A',borderRadius:6,color:'#C8973A',fontSize:11,fontWeight:700,padding:'5px 10px',cursor:'pointer'}}>💬 Draft Plan A with the assistant</button>}
           {(()=>{const ch=changesVsMain();const n=ch.rows.length+ch.addDeps.length+ch.dropDeps.length
