@@ -5,7 +5,7 @@ import * as XLSX from 'xlsx'
 import StrategyTab from './StrategyTab'
 import { EpicsSection } from './Epics'
 import { DependencyLayer, DepHandle, createDependency, deleteDependency, depKey } from './DependencyLayer'
-import { QuarterPlanner, ReleaseSelect, ReleasesManager, releaseOf, releaseText, fmtMonthKey } from './Releases'
+import { QuarterPlanner, ReleaseCalendar, ReleaseSelect, ReleasesManager, releaseOf, releaseText, fmtMonthKey } from './Releases'
 import { EpicRow, EpicPanel, epicProject, epicWorkType, convertStoryToEpic, convertEpicToStory } from './BacklogEpics'
 
 const T = {
@@ -3160,6 +3160,9 @@ function Roadmap({items,setItems,projects,setProjects,milestones,setMilestones,t
   const [showReleases,setShowReleasesState]=useState<boolean>(()=>{try{return localStorage.getItem('pg_rm_releases')!=='0'}catch{return true}})
   const setShowReleases=(v:boolean)=>{setShowReleasesState(v);try{localStorage.setItem('pg_rm_releases',v?'1':'0')}catch{}}
   const [relPopover,setRelPopover]=useState<any>(null) // month key of the clicked release
+  // Timeline (the Gantt) or the monthly release calendar
+  const [rmView,setRmViewState]=useState<string>(()=>{try{return localStorage.getItem('pg_rm_view')||'timeline'}catch{return 'timeline'}})
+  const setRmView=(v:string)=>{setRmViewState(v);try{localStorage.setItem('pg_rm_view',v)}catch{}}
   const [relMgr,setRelMgr]=useState(false)
   const [sprintPopover,setSprintPopover]=useState<any>(null) // {start_date,end_date} of clicked band
   const [view,setView]=useState('quarter')
@@ -3638,7 +3641,13 @@ function Roadmap({items,setItems,projects,setProjects,milestones,setMilestones,t
     <div style={{display:'flex',flexDirection:'column',height:'100%'}}>
       {/* Controls */}
       <div style={{display:'flex',gap:8,padding:'10px 20px',borderBottom:'1px solid #243447',alignItems:'center',background:'#162436',flexWrap:'wrap' as const}}>
+        <div style={{display:'flex',border:'1px solid #243447',borderRadius:6,overflow:'hidden'}}>
+          {[['timeline','◫ Timeline'],['calendar','📦 Release calendar']].map(([k,l])=>(
+            <button key={k} onClick={()=>setRmView(k)} style={{background:rmView===k?'#C8973A':'#1E3048',color:rmView===k?'#0D1B2A':'#C8C8D4',border:'none',padding:'5px 12px',fontSize:12,fontWeight:700,cursor:'pointer'}}>{l}</button>
+          ))}
+        </div>
         <select value={ft} onChange={e=>setFt(e.target.value)} style={sel}><option value="All">All Teams</option>{roadmapTeams.map(t=><option key={t}>{t}</option>)}</select>
+        {rmView==='timeline'&&<>
         <div style={{display:'flex',gap:3}}>
           {(mobileR?[['month','Month'],['quarter','Quarter']]:[['day','Day'],['week','Week'],['month','Month'],['quarter','Quarter'],['year','Year']]).map(([k,label])=>(
             <button key={k} onClick={()=>{
@@ -3704,9 +3713,16 @@ function Roadmap({items,setItems,projects,setProjects,milestones,setMilestones,t
           </span>
           <span style={{display:'flex',alignItems:'center',gap:3}}><span style={{width:2,height:10,background:'#E74C3C',display:'inline-block'}}/> Today</span>
         </div>}
+        </>}
       </div>
 
-      <div style={{display:'flex',flex:1,overflow:'hidden'}}>
+      {rmView==='calendar'&&<>
+        <ReleaseCalendar releases={releases} setReleases={setReleases} projects={projects} epics={epics} items={items} team={ft}
+          onOpenProject={onOpenProject} onSetDates={setReleases?()=>setRelMgr(true):undefined}/>
+        {relMgr&&setReleases&&<ReleasesManager releases={releases} setReleases={setReleases} onClose={()=>setRelMgr(false)}
+          counts={(k:string)=>[...items,...projects,...(epics as any[])].filter((x:any)=>x.release_month===k).length}/>}
+      </>}
+      <div style={{display:rmView==='calendar'?'none':'flex',flex:1,overflow:'hidden'}}>
         {/* Discussion panel */}
         <div style={{borderRight:'1px solid #243447',background:'#162436',flexShrink:0,display:'flex',flexDirection:'column',transition:'width 0.2s',width:discussionOpen?(discussNoteId?300:200):32,minWidth:32,overflow:'hidden'}}>
           <button onClick={()=>setDiscussionOpen(o=>!o)} style={{background:'none',border:'none',borderBottom:'1px solid #243447',cursor:'pointer',padding:'10px 8px',display:'flex',alignItems:'center',gap:6,color:'#C8973A',fontSize:11,fontWeight:700,letterSpacing:1,whiteSpace:'nowrap' as const,width:'100%',flexShrink:0}}>
