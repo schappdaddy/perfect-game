@@ -1,6 +1,7 @@
 'use client'
 import { useState } from 'react'
 import { supabase } from '../lib/supabase'
+import { ReleaseSelect, releaseText, fmtMonthKey } from './Releases'
 
 // Epics in the Backlog: an epic row that sits in the same table as stories (styled apart),
 // the epic side panel, and converting a story into an epic or an epic back into a story.
@@ -28,7 +29,7 @@ export function epicStories(epic:any,items:any[],projects:any[]){
 // One table row for an epic. Cells line up with the Backlog columns:
 // drag · ID · Item Name · Project · Epic · Work · Priority · Rank · Swimlane · Status · Team · Effort ·
 // Request Type · (Region … Owner: 9) · Start · End · ⚠ · 🚩 · custom columns
-export function EpicRow({epic,projects,items,isSel,onSelect,ccCount=0}:any){
+export function EpicRow({epic,projects,items,isSel,onSelect,ccCount=0,releases=[]}:any){
   const pr=epicProject(epic,projects)
   const its=epicStories(epic,items,projects)
   const done=its.filter((i:any)=>ITEM_TERMINAL.includes(i.status)).length
@@ -51,6 +52,7 @@ export function EpicRow({epic,projects,items,isSel,onSelect,ccCount=0}:any){
       <td style={TD}>{wt==='sustain'
         ?<span style={{fontSize:10,fontWeight:700,color:'#C8D4E0',background:'#4A5D72',borderRadius:4,padding:'2px 7px',whiteSpace:'nowrap' as const}}>⟳ Sustain</span>
         :<span style={{fontSize:10,fontWeight:700,color:'#C8973A',border:'1px solid rgba(200,151,58,0.5)',borderRadius:4,padding:'1px 7px',whiteSpace:'nowrap' as const}}>✦ New</span>}</td>
+      <td style={TD}>{epic.release_month?<span title={`${fmtMonthKey(epic.release_month)} release · ${releaseText(releases,epic.release_month)}`} style={{fontSize:10,fontWeight:700,color:'#5DADE2',border:'1px solid rgba(93,173,226,0.4)',borderRadius:4,padding:'1px 6px',whiteSpace:'nowrap' as const}}>📦 {fmtMonthKey(epic.release_month)}</span>:<span style={{fontSize:11,color:'#3A4A5E'}}>—</span>}</td>
       <td style={TD}><span style={{background:PRIORITY_BG[epic.priority]||'#1E3048',color:PRIORITY_BG[epic.priority]?'#fff':'#7A8FA6',borderRadius:4,padding:'2px 8px',fontSize:10,fontWeight:700}}>{epic.priority||'P3'}</span></td>
       <td style={dim}/>
       <td style={dim}/>
@@ -110,7 +112,7 @@ export async function convertEpicToStory(epic:any,{projects,items,setItems,setEp
   return data
 }
 
-export function EpicPanel({epic,projects,items,setItems,setEpics,statusOpts,priorities,teams,efforts,onClose,onConvert,onDelete}:any){
+export function EpicPanel({epic,projects,items,setItems,setEpics,statusOpts,priorities,teams,efforts,onClose,onConvert,onDelete,releases=[]}:any){
   const pr=epicProject(epic,projects)
   const its=epicStories(epic,items,projects)
   const candidates=items.filter((i:any)=>i.epic_id!==epic.id&&!ITEM_TERMINAL.includes(i.status)&&(!pr||i.parent_project===pr.name))
@@ -160,9 +162,9 @@ export function EpicPanel({epic,projects,items,setItems,setEpics,statusOpts,prio
           <input value={name} onChange={e=>setName(e.target.value)} onBlur={()=>name.trim()&&name!==epic.name&&upd({name:name.trim()})} style={INPUT}/></div>
         <div><div style={LABEL}>DESCRIPTION</div>
           <textarea value={desc} rows={3} onChange={e=>setDesc(e.target.value)} onBlur={()=>desc!==(epic.description||'')&&upd({description:desc||null})} style={{...INPUT,resize:'vertical' as const,fontFamily:'inherit'}}/></div>
-        <div><div style={LABEL}>PROJECT</div>
+        <div><div style={LABEL}>INITIATIVE</div>
           <select value={epic.project_id||''} onChange={e=>setProject(e.target.value)} style={{...INPUT,cursor:'pointer'}}>
-            <option value="">No project yet</option>
+            <option value="">No initiative yet</option>
             {[...projects].sort((a:any,b:any)=>a.name.localeCompare(b.name)).map((p:any)=><option key={p.id} value={p.id}>{p.name}</option>)}
           </select></div>
         <div style={{display:'grid',gridTemplateColumns:'1fr 1fr',gap:10}}>
@@ -171,10 +173,12 @@ export function EpicPanel({epic,projects,items,setItems,setEpics,statusOpts,prio
           <div><div style={LABEL}>TEAM</div>{sel('team',teams,'—')}</div>
           <div><div style={LABEL}>EFFORT</div>{sel('effort',efforts,'—')}</div>
         </div>
+        <div><div style={LABEL}>RELEASE</div>
+          <ReleaseSelect value={epic.release_month} releases={releases} onChange={(v:any)=>upd({release_month:v})} style={{...INPUT,cursor:'pointer'}}/></div>
         <div><div style={LABEL}>WORK TYPE</div>
           <select value={epic.work_type||''} onChange={e=>upd({work_type:e.target.value||null})} style={{...INPUT,cursor:'pointer'}}>
-            <option value="">Automatic: {epicWorkType({...epic,work_type:null},projects)==='sustain'?'Sustain':'New project'}{pr?' (from project)':''}</option>
-            <option value="new">New project</option>
+            <option value="">Automatic: {epicWorkType({...epic,work_type:null},projects)==='sustain'?'Sustain':'New initiative'}{pr?' (from initiative)':''}</option>
+            <option value="new">New initiative</option>
             <option value="sustain">Sustain (tech debt, stabilization & enhancements)</option>
           </select></div>
         <div><div style={LABEL}>DATES (SHOWN ON THE STRATEGY ROADMAP)</div>
