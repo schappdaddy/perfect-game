@@ -2800,7 +2800,8 @@ const sorted=items.filter(i=>!isItemDone(i)).sort((a,b)=>{
       <div style={{display:'flex',flex:1,overflow:'hidden'}}>
         {bview==='plan'&&space==='work'?(
           <QuarterPlanner items={items} setItems={setItems} projects={projects} setProjects={setProjects} releases={releases} setReleases={setReleases}
-            teams={TEAMS} workTypeOf={wtOf} onOpenItem={(i:any)=>{setSelEpicId(null);setSelected(i)}}/>
+            epics={(epics as any[]).filter((e:any)=>spaceOf(e)===space)} setEpics={setEpics} epicWorkTypeOf={(e:any)=>epicWorkType(e,projects)}
+            teams={TEAMS} workTypeOf={wtOf} onOpenItem={(i:any)=>{setSelEpicId(null);setSelected(i)}} onOpenEpic={(e:any)=>{setSelected(null);setSelEpicId(e.id)}}/>
         ):(
         <div data-backlog-table="true" style={{flex:1,overflowX:'auto',overflowY:'auto'}}>
           <table style={{width:'100%',borderCollapse:'collapse',minWidth:1400}}>
