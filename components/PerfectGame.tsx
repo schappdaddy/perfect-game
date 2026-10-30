@@ -3168,6 +3168,9 @@ function Roadmap({items,setItems,projects,setProjects,milestones,setMilestones,t
   const [showReleases,setShowReleasesState]=useState<boolean>(()=>{try{return localStorage.getItem('pg_rm_releases')!=='0'}catch{return true}})
   const setShowReleases=(v:boolean)=>{setShowReleasesState(v);try{localStorage.setItem('pg_rm_releases',v?'1':'0')}catch{}}
   const [relPopover,setRelPopover]=useState<any>(null) // month key of the clicked release
+  // Epics as rows under their initiative, each with its stories
+  const [showEpicsRm,setShowEpicsRmState]=useState<boolean>(()=>{try{return localStorage.getItem('pg_rm_epics')!=='0'}catch{return true}})
+  const setShowEpicsRm=(v:boolean)=>{setShowEpicsRmState(v);try{localStorage.setItem('pg_rm_epics',v?'1':'0')}catch{}}
   // Timeline (the Gantt) or the monthly release calendar
   const [rmView,setRmViewState]=useState<string>(()=>{try{return localStorage.getItem('pg_rm_view')||'timeline'}catch{return 'timeline'}})
   const setRmView=(v:string)=>{setRmViewState(v);try{localStorage.setItem('pg_rm_view',v)}catch{}}
@@ -3358,6 +3361,29 @@ function Roadmap({items,setItems,projects,setProjects,milestones,setMilestones,t
   })
 
   const orphans=withDates.filter(i=>!i.parent_project||!projects.find(p=>p.name===i.parent_project))
+  // An initiative's rows: each epic (its own dates, or the span of its dated stories) with its
+  // stories under it, then stories with no epic. Done epics show only while they have stories here.
+  function roadmapRows(group:any,childItems:any[]){
+    if(!showEpicsRm)return childItems.map(item=>({kind:'item',item}))
+    const gEpics=(epics as any[]).filter((e:any)=>e.project_id===group.id&&(e.space||'work')===(group.space||'work'))
+    const storiesOf=(e:any)=>childItems.filter(i=>i.epic_id===e.id)
+    const extent=(e:any)=>{
+      if(e.start_date&&e.end_date)return{s:e.start_date,e:e.end_date,derived:false}
+      const st=storiesOf(e);if(!st.length)return null
+      return{s:st.map(i=>i.start_date).sort()[0],e:st.map(i=>i.end_date).sort().slice(-1)[0],derived:true}
+    }
+    const shown=gEpics.filter((e:any)=>!ITEM_TERMINAL.includes(e.status)||storiesOf(e).length).map((e:any)=>({e,ext:extent(e)}))
+      .sort((a:any,b:any)=>(a.ext?.s||'9999').localeCompare(b.ext?.s||'9999')||(a.e.sort_order??0)-(b.e.sort_order??0))
+    const rows:any[]=[]
+    for(const{e,ext}of shown){
+      const st=storiesOf(e)
+      rows.push({kind:'epic',epic:e,ext,count:st.length})
+      if(!getCollapsed()['ep:'+e.id])st.forEach(item=>rows.push({kind:'item',item,inEpic:true}))
+    }
+    const inShown=new Set(shown.map((x:any)=>x.e.id))
+    childItems.filter(i=>!inShown.has(i.epic_id)).forEach(item=>rows.push({kind:'item',item}))
+    return rows
+  }
   const totalViolations=groups.reduce((acc,g:any)=>acc+g.violations.length,0)
 
   function getCollapsed(){
@@ -3691,6 +3717,9 @@ function Roadmap({items,setItems,projects,setProjects,milestones,setMilestones,t
         <label style={{display:'flex',alignItems:'center',gap:5,fontSize:11,color:'#7A8FA6',cursor:'pointer',whiteSpace:'nowrap' as const}} title="Overlay sprint windows on the timeline">
           <input type="checkbox" checked={showSprints} onChange={e=>setShowSprints(e.target.checked)} style={{accentColor:'#C8973A'}}/>Sprints
         </label>
+        <label style={{display:'flex',alignItems:'center',gap:5,fontSize:12,color:'#7A8FA6',cursor:'pointer'}} title="Show each initiative's epics, with their stories under them">
+          <input type="checkbox" checked={showEpicsRm} onChange={e=>setShowEpicsRm(e.target.checked)} style={{accentColor:'#E07B2A'}}/>Epics
+        </label>
         <label style={{display:'flex',alignItems:'center',gap:5,fontSize:12,color:'#7A8FA6',cursor:'pointer'}} title="Show the monthly releases">
           <input type="checkbox" checked={showReleases} onChange={e=>setShowReleases(e.target.checked)} style={{accentColor:'#5DADE2'}}/>Releases
         </label>
@@ -3806,12 +3835,22 @@ function Roadmap({items,setItems,projects,setProjects,milestones,setMilestones,t
                         <div style={{fontSize:9,color:'#7A8FA6'}}>{childItems.length} committed · {group.status}</div>
                       </div>
                     </div>
-                    {!isCollapsed&&childItems.map((item,idx)=>{
+                    {!isCollapsed&&roadmapRows(group,childItems).map((r:any,idx:number)=>{
+                      if(r.kind==='epic'){const e=r.epic,closed=!!getCollapsed()['ep:'+e.id];return(
+                        <div key={'ep'+e.id} title={`Epic: ${e.name}`} style={{height:ROW_H,borderBottom:'1px solid #243447',background:'rgba(224,123,42,0.06)',borderLeft:'3px solid #E07B2A',display:'flex',alignItems:'center',padding:'0 8px 0 14px',gap:6}}>
+                          {r.count>0?<button onClick={()=>toggleCollapse('ep:'+e.id)} title={`${closed?'Show':'Hide'} its ${r.count} stor${r.count===1?'y':'ies'}`} style={{background:'none',border:'none',cursor:'pointer',color:'#E07B2A',fontSize:10,padding:'2px',width:14,flexShrink:0}}>{closed?'▶':'▼'}</button>:<span style={{width:14,flexShrink:0}}/>}
+                          <div style={{overflow:'hidden'}}>
+                            <div style={{fontSize:11,fontWeight:700,color:'#F4F6F8',overflow:'hidden',whiteSpace:'nowrap' as const,textOverflow:'ellipsis',maxWidth:150}}><span style={{color:'#E07B2A'}}>◆</span> {e.name}</div>
+                            <div style={{fontSize:9,color:'#7A8FA6'}}>EPIC · {r.count} stor{r.count===1?'y':'ies'} · <span style={{color:sc(e.status),fontWeight:700}}>{e.status||'New'}</span></div>
+                          </div>
+                        </div>
+                      )}
+                      const item=r.item
                       const isViolation=!!group.violations.find((v:any)=>v.id===item.id)
                       return(
                         <div key={item.id} onClick={()=>{setEditing(item);setEditForm({name:item.name,start_date:item.start_date,end_date:item.end_date,roadmap_color:item.roadmap_color||rc,status:item.status||'',priority:item.priority||'',effort:item.effort||''})}}
                           title="Click to edit this item"
-                          style={{height:ROW_H,borderBottom:'1px solid #243447',background:isViolation?'rgba(192,57,43,0.05)':idx%2===0?'#0D1B2A':'#111D2C',display:'flex',alignItems:'center',padding:'0 8px 0 28px',gap:6,cursor:'pointer'}}>
+                          style={{height:ROW_H,borderBottom:'1px solid #243447',background:isViolation?'rgba(192,57,43,0.05)':idx%2===0?'#0D1B2A':'#111D2C',display:'flex',alignItems:'center',padding:r.inEpic?'0 8px 0 40px':'0 8px 0 28px',gap:6,cursor:'pointer',borderLeft:r.inEpic?'3px solid rgba(224,123,42,0.35)':undefined}}>
                           <div style={{width:1,height:20,background:'#243447',flexShrink:0}}/>
                           <span style={{background:pc(item.priority).bg,color:'#fff',padding:'1px 5px',borderRadius:3,fontSize:9,fontWeight:700,flexShrink:0}}>{item.priority}</span>
                           <div style={{overflow:'hidden'}}>
@@ -4024,7 +4063,23 @@ function Roadmap({items,setItems,projects,setProjects,milestones,setMilestones,t
                       })}
                     </div>
                     {/* Child rows */}
-                    {!isCollapsed&&childItems.map((item,idx)=>{
+                    {!isCollapsed&&roadmapRows(group,childItems).map((r:any,idx:number)=>{
+                      if(r.kind==='epic'){const e=r.epic,x=r.ext;return(
+                        <div key={'ep'+e.id} style={{height:ROW_H,borderBottom:'1px solid #243447',background:'rgba(224,123,42,0.04)',position:'relative'}}>
+                          <div style={{position:'absolute',top:0,bottom:0,left:todayPx(),width:2,background:'#E74C3C',opacity:0.3,zIndex:4,pointerEvents:'none'}}/>
+                          <CfShading/>
+                          {x?(
+                            <div data-dep-key={depKey('epic',e.id)} title={`◆ ${e.name}\n${x.s} → ${x.e}${x.derived?'\nDates from its stories':''}`}
+                              style={{position:'absolute',top:11,height:18,left:pct(x.s),width:barPx(x.s,x.e),minWidth:8,zIndex:3,boxSizing:'border-box' as const,borderRadius:9,
+                                background:x.derived?'rgba(224,123,42,0.12)':'rgba(224,123,42,0.7)',border:x.derived?'1.5px dashed #E07B2A':'none',
+                                display:'flex',alignItems:'center',padding:'0 10px',fontSize:10,fontWeight:700,color:x.derived?'#E07B2A':'#fff',overflow:'visible',whiteSpace:'nowrap' as const,opacity:ITEM_TERMINAL.includes(e.status)?0.5:1}}>
+                              <span style={{overflow:'hidden',textOverflow:'ellipsis'}}>◆ {e.name}</span>
+                              {setDeps&&<DepHandle k={depKey('epic',e.id)} size={8}/>}
+                            </div>
+                          ):<span style={{position:'absolute',left:Math.max(8,todayPx()+8),top:13,fontSize:10,color:'#3A4A5E',fontStyle:'italic'}}>◆ {e.name}: no dates yet (set them on the epic, or date its stories)</span>}
+                        </div>
+                      )}
+                      const item=r.item
                       const isViolation=!!group.violations.find((v:any)=>v.id===item.id)
                       return(
                         <div key={item.id} style={{height:ROW_H,borderBottom:'1px solid #243447',background:isViolation?'rgba(192,57,43,0.05)':idx%2===0?'#0D1B2A':'#111D2C',position:'relative'}}>
