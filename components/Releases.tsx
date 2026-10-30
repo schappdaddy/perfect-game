@@ -43,6 +43,13 @@ export async function saveRelease(releases:any[],setReleases:any,month:string,fi
   if(data)setReleases((prev:any[])=>prev.map(r=>r.month===month?data:r))
 }
 
+// Release choices as options: none, then three months back to eighteen ahead
+export function releaseOptions(releases:any[],value?:string|null){
+  const now=monthKeyOf(new Date())
+  const keys:string[]=[];for(let i=-3;i<=18;i++)keys.push(addMonths(now,i))
+  if(value&&!keys.includes(value))keys.unshift(value)
+  return[{value:'',label:'No release'},...keys.map(k=>({value:k,label:`${fmtMonthKey(k)} · ${releaseText(releases,k)}`,disabled:!!releaseOf(releases,k)?.no_release&&k!==value}))]
+}
 // Pick a monthly release for an initiative, epic or story
 export function ReleaseSelect({value,onChange,releases,style}:any){
   const now=monthKeyOf(new Date())
