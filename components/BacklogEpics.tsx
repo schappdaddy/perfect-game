@@ -49,7 +49,8 @@ export async function setEpicProject(epic:any,projectId:string|null,{projects,it
   }
 }
 
-export function EpicRow({epic,projects,items,isSel,onSelect,ccCount=0,releases=[],setItems,setEpics,statusOpts=[]}:any){
+// opts: {swimlanes, requestTypes, regions, vendors}; rank: drag an epic onto another, or type a position
+export function EpicRow({epic,projects,items,isSel,onSelect,ccCount=0,releases=[],setItems,setEpics,statusOpts=[],opts={},onRank,onDragEpic,onDropEpic,onOverEpic,dragOver=false}:any){
   const upd=(f:any)=>updateEpic(epic.id,f,setEpics)
   const blank=(list:string[])=>[{value:'',label:'—'},...list.map(o=>({value:o,label:o}))]
   const pr=epicProject(epic,projects)
@@ -59,8 +60,10 @@ export function EpicRow({epic,projects,items,isSel,onSelect,ccCount=0,releases=[
   const wt=epicWorkType(epic,projects)
   const dim={...TD,fontSize:11,color:'#3A4A5E'}
   return(
-    <tr onClick={onSelect} style={{background:isSel?'#2A2418':'rgba(224,123,42,0.07)',cursor:'pointer',borderLeft:`3px solid ${EPIC}`}}>
-      <td style={{...TD,textAlign:'center' as const,color:EPIC}}>◆</td>
+    <tr onClick={onSelect} draggable={!!onDragEpic} onDragStart={e=>{onDragEpic?.(epic);e.dataTransfer.effectAllowed='move'}}
+      onDragOver={e=>{if(onDropEpic){e.preventDefault();onOverEpic?.(epic)}}} onDrop={e=>{if(onDropEpic){e.preventDefault();onDropEpic(epic)}}}
+      style={{background:isSel?'#2A2418':'rgba(224,123,42,0.07)',cursor:'pointer',borderLeft:`3px solid ${EPIC}`,borderTop:dragOver?'2px solid #C8973A':undefined}}>
+      <td style={{...TD,textAlign:'center' as const,color:EPIC,cursor:onDragEpic?'grab':'pointer'}} title={onDragEpic?'Drag onto another epic to rank it there':undefined}>{onDragEpic&&<span style={{color:'#3A4A5E',marginRight:3}}>⠿</span>}◆</td>
       <td style={{...TD,fontSize:9,fontWeight:800,color:EPIC,letterSpacing:1}}>EPIC</td>
       <td style={{...TD,minWidth:240}}>
         <div style={{fontSize:12.5,fontWeight:800,color:'#F4F6F8'}}><InlineText value={epic.name} width={230} onSave={v=>v&&upd({name:v})}>{epic.name}</InlineText></div>
@@ -79,13 +82,20 @@ export function EpicRow({epic,projects,items,isSel,onSelect,ccCount=0,releases=[
         :<span style={{fontSize:10,fontWeight:700,color:'#C8973A',border:'1px solid rgba(200,151,58,0.5)',borderRadius:4,padding:'1px 7px',whiteSpace:'nowrap' as const}}>✦ New</span>}</InlineSelect></td>
       <td style={TD}><InlineSelect value={epic.release_month||''} options={releaseOptions(releases,epic.release_month)} onChange={v=>upd({release_month:v})}>{epic.release_month?<span title={`${fmtMonthKey(epic.release_month)} release · ${releaseText(releases,epic.release_month)}`} style={{fontSize:10,fontWeight:700,color:'#5DADE2',border:'1px solid rgba(93,173,226,0.4)',borderRadius:4,padding:'1px 6px',whiteSpace:'nowrap' as const}}>📦 {fmtMonthKey(epic.release_month)}</span>:<span style={{fontSize:11,color:'#3A4A5E'}}>—</span>}</InlineSelect></td>
       <td style={TD}><InlineSelect value={epic.priority||'P3'} options={['P1','P2','P3','P4']} onChange={v=>v&&upd({priority:v})}><span style={{background:PRIORITY_BG[epic.priority]||'#1E3048',color:PRIORITY_BG[epic.priority]?'#fff':'#7A8FA6',borderRadius:4,padding:'2px 8px',fontSize:10,fontWeight:700}}>{epic.priority||'P3'}</span></InlineSelect></td>
-      <td style={dim}/>
-      <td style={dim}/>
+      <td style={{...TD,textAlign:'center' as const,padding:'0 4px'}} onClick={e=>e.stopPropagation()}>
+        {onRank&&<input key={`erk-${epic.id}-${epic.manual_rank}`} type="number" min={1} defaultValue={epic.manual_rank??''} placeholder="—" title="Epic rank: type a position, or drag the epic onto another"
+          onKeyDown={e=>{if(e.key==='Enter'){const v=parseInt(e.currentTarget.value,10);if(!isNaN(v))onRank(epic,v);e.currentTarget.blur()}}}
+          onBlur={e=>{const v=parseInt(e.target.value,10);if(!isNaN(v)&&v!==epic.manual_rank)onRank(epic,v)}}
+          style={{width:44,background:'transparent',border:'1px solid rgba(224,123,42,0.45)',borderRadius:4,color:EPIC,fontWeight:700,fontSize:11,textAlign:'center' as const,padding:'2px 0'}}/>}
+      </td>
+      <td style={{...TD,fontSize:11,color:'#7A8FA6'}}><InlineSelect value={epic.swimlane||''} options={blank(opts.swimlanes||[])} onChange={v=>upd({swimlane:v})}>{epic.swimlane||'—'}</InlineSelect></td>
       <td style={TD}><InlineSelect value={epic.status||'New'} options={statusOpts.length?statusOpts:['New','Ready','In Progress','Done']} onChange={v=>v&&upd({status:v})}><span style={{color:STATUS_CLR[epic.status]||'#7A8FA6',fontSize:11,fontWeight:600}}>{epic.status||'New'}</span></InlineSelect></td>
       <td style={{...TD,fontSize:10,color:'#7A8FA6'}}><InlineSelect value={epic.team||''} options={blank(['Consumer Experience','Operational Efficiency'])} onChange={v=>upd({team:v})}>{epic.team==='Consumer Experience'?'CE':epic.team==='Operational Efficiency'?'OE':'—'}</InlineSelect></td>
       <td style={{...TD,textAlign:'center' as const,fontSize:11}}><InlineSelect value={epic.effort||''} options={blank(['S','M','L','XL'])} onChange={v=>upd({effort:v})}>{epic.effort||'—'}</InlineSelect></td>
-      <td style={{...TD,fontSize:11,color:EPIC,fontWeight:700}}>Epic</td>
-      <td colSpan={9} style={TD}/>
+      <td style={{...TD,fontSize:11,color:EPIC,fontWeight:700}}><InlineSelect value={epic.request_type||''} options={[{value:'',label:'Epic'},...(opts.requestTypes||[]).map((o:string)=>({value:o,label:o}))]} onChange={v=>upd({request_type:v})}>{epic.request_type?`Epic · ${epic.request_type}`:'Epic'}</InlineSelect></td>
+      <td style={{...TD,fontSize:11,color:'#7A8FA6'}}><InlineSelect value={epic.region||''} options={blank(opts.regions||[])} onChange={v=>upd({region:v})}>{epic.region||'—'}</InlineSelect></td>
+      <td style={{...TD,fontSize:11,color:'#7A8FA6'}}><InlineSelect value={epic.vendor||''} options={blank(opts.vendors||[])} onChange={v=>upd({vendor:v})}>{epic.vendor||'—'}</InlineSelect></td>
+      <td colSpan={7} style={TD}/>
       <td style={{...TD,fontSize:11,color:'#7A8FA6'}}><InlineDate value={epic.start_date} onSave={v=>upd({start_date:v})}/></td>
       <td style={{...TD,fontSize:11,color:'#7A8FA6'}}><InlineDate value={epic.end_date} onSave={v=>upd({end_date:v})}/></td>
       <td style={TD}/><td style={TD}/>
@@ -137,7 +147,7 @@ export async function convertEpicToStory(epic:any,{projects,items,setItems,setEp
   return data
 }
 
-export function EpicPanel({epic,projects,items,setItems,setEpics,statusOpts,priorities,teams,efforts,onClose,onConvert,onDelete,releases=[]}:any){
+export function EpicPanel({epic,projects,items,setItems,setEpics,statusOpts,priorities,teams,efforts,onClose,onConvert,onDelete,releases=[],opts={}}:any){
   const pr=epicProject(epic,projects)
   const its=epicStories(epic,items,projects)
   const candidates=items.filter((i:any)=>i.epic_id!==epic.id&&!ITEM_TERMINAL.includes(i.status)&&(!pr||i.parent_project===pr.name))
@@ -182,6 +192,10 @@ export function EpicPanel({epic,projects,items,setItems,setEpics,statusOpts,prio
           <div><div style={LABEL}>STATUS</div>{sel('status',statusOpts)}</div>
           <div><div style={LABEL}>TEAM</div>{sel('team',teams,'—')}</div>
           <div><div style={LABEL}>EFFORT</div>{sel('effort',efforts,'—')}</div>
+          <div><div style={LABEL}>SWIMLANE</div>{sel('swimlane',opts.swimlanes||[],'—')}</div>
+          <div><div style={LABEL}>REQUEST TYPE</div>{sel('request_type',opts.requestTypes||[],'—')}</div>
+          <div><div style={LABEL}>REGION</div>{sel('region',opts.regions||[],'—')}</div>
+          <div><div style={LABEL}>VENDOR</div>{sel('vendor',opts.vendors||[],'—')}</div>
         </div>
         <div><div style={LABEL}>RELEASE</div>
           <ReleaseSelect value={epic.release_month} releases={releases} onChange={(v:any)=>upd({release_month:v})} style={{...INPUT,cursor:'pointer'}}/></div>

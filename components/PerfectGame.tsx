@@ -2097,6 +2097,8 @@ function Backlog({items,setItems,projects,setProjects,space,ccrs=[],ccrItems=[],
     return pr&&pr.name===item.parent_project?e:null
   }
   const [selEpicId,setSelEpicId]=useState<any>(null)
+  const [dragEpic,setDragEpic]=useState<any>(null) // epic being dragged to a new rank
+  const [overEpic,setOverEpic]=useState<any>(null)
   // List, or quarter planning for tech debt / OpEx
   const [bview,setBviewState]=useState<string>(()=>{try{return localStorage.getItem('pg_backlog_view')||'list'}catch{return 'list'}})
   const setBview=(v:string)=>{setBviewState(v);try{localStorage.setItem('pg_backlog_view',v)}catch{}}
@@ -2431,16 +2433,34 @@ const sorted=items.filter(i=>!isItemDone(i)).sort((a,b)=>{
   const segTotal=segPts.new+segPts.sustain
   const segNewPct=segTotal?Math.round(segPts.new/segTotal*100):null
 
-  // Epics shown alongside stories. Filters that only stories carry (swimlane, type, region,
-  // vendor, flagged) hide epics while they're set.
+  // Epics shown alongside stories, with the same filters (flagged applies only to stories, so
+  // it hides epics), in epic rank order
   const epicProjName=(e:any)=>epicProject(e,projects)?.name||''
-  const visibleEpics=kind==='stories'||fs!=='All'||frt!=='All'||frg!=='All'||fvn!=='All'||sf||fep==='__none'?[]
+  const epicRankSort=(a:any,b:any)=>(a.manual_rank??1e9)-(b.manual_rank??1e9)||(PRIORITY_ORDER[a.priority]??4)-(PRIORITY_ORDER[b.priority]??4)||epicProjName(a).localeCompare(epicProjName(b))||(a.sort_order??0)-(b.sort_order??0)
+  const visibleEpics=kind==='stories'||sf||fep==='__none'?[]
     :(epics as any[]).filter(e=>spaceOf(e)===space&&!ITEM_TERMINAL.includes(e.status)
       &&(ft==='All'||e.team===ft)&&(fp==='All'||e.priority===fp)&&(fst==='All'||e.status===fst)&&(fef==='All'||e.effort===fef)
+      &&(fs==='All'||e.swimlane===fs)&&(frt==='All'||e.request_type===frt)&&(frg==='All'||e.region===frg)&&(fvn==='All'||e.vendor===fvn)
+      &&(frl==='All'||(frl==='__none'?!e.release_month:e.release_month===frl))
       &&(fpp==='All'||epicProjName(e)===fpp)&&(fep==='All'||fep===e.id)
       &&(seg==='all'||epicWorkType(e,projects)===seg)
       &&(!srch||e.name.toLowerCase().includes(srch.toLowerCase())))
-      .sort((a,b)=>(PRIORITY_ORDER[a.priority]??4)-(PRIORITY_ORDER[b.priority]??4)||epicProjName(a).localeCompare(epicProjName(b))||(a.sort_order??0)-(b.sort_order??0))
+      .sort(epicRankSort)
+  // Rank an epic at a position (1 = top) among the open epics, renumbering the rest
+  async function rankEpic(epic:any,pos:number){
+    const list=(epics as any[]).filter(e=>spaceOf(e)===space&&!ITEM_TERMINAL.includes(e.status)&&e.id!==epic.id).sort(epicRankSort)
+    list.splice(Math.max(0,Math.min(list.length,pos-1)),0,epic)
+    const changed=list.map((e,i)=>({e,r:i+1})).filter(({e,r})=>e.manual_rank!==r)
+    setEpics((prev:any[])=>prev.map(e=>{const c=changed.find(x=>x.e.id===e.id);return c?{...e,manual_rank:c.r}:e}))
+    for(const{e,r}of changed){const{error}=await supabase.from('epics').update({manual_rank:r}).eq('id',e.id);if(error){alert('Failed to rank the epic: '+error.message);return}}
+  }
+  function dropOnEpic(target:any){
+    const d=dragEpic;setDragEpic(null);setOverEpic(null)
+    if(!d||d.id===target.id)return
+    const ranked=(epics as any[]).filter(e=>spaceOf(e)===space&&!ITEM_TERMINAL.includes(e.status)&&e.id!==d.id).sort(epicRankSort)
+    rankEpic(d,ranked.findIndex(e=>e.id===target.id)+1)
+  }
+  const epicOpts={swimlanes:swimlaneOpts,requestTypes:rtOpts,regions:regionOpts,vendors}
   const selEpic=selEpicId?(epics as any[]).find(e=>e.id===selEpicId)||null:null
   const displayRows:any[]=(()=>{
     const stories=kind==='epics'?[]:filtered
@@ -2841,7 +2861,7 @@ const sorted=items.filter(i=>!isItemDone(i)).sort((a,b)=>{
             </thead>
             <tbody>
               {displayRows.map((item:any,idx:number)=>{
-                if(item.__epic)return <EpicRow key={'epic:'+item.__epic.id} releases={releases} setItems={setItems} setEpics={setEpics} statusOpts={statusOpts} epic={item.__epic} projects={projects} items={items} ccCount={cc.length}
+                if(item.__epic)return <EpicRow key={'epic:'+item.__epic.id} releases={releases} setItems={setItems} setEpics={setEpics} statusOpts={statusOpts} opts={epicOpts} onRank={rankEpic} onDragEpic={setDragEpic} onDropEpic={dropOnEpic} onOverEpic={(e:any)=>dragEpic&&setOverEpic(e.id)} dragOver={!!dragEpic&&overEpic===item.__epic.id} epic={item.__epic} projects={projects} items={items} ccCount={cc.length}
                   isSel={selEpicId===item.__epic.id} onSelect={()=>{setSelected(null);setSelEpicId(selEpicId===item.__epic.id?null:item.__epic.id)}}/>
                 if(item.__hdr)return(
                   <tr key={item.key}>
@@ -2969,7 +2989,7 @@ const sorted=items.filter(i=>!isItemDone(i)).sort((a,b)=>{
 
         {relMgr&&<ReleasesManager releases={releases} setReleases={setReleases} onClose={()=>setRelMgr(false)}
           counts={(k:string)=>[...items,...projects,...(epics as any[])].filter((x:any)=>x.release_month===k).length}/>}
-        {selEpic&&<EpicPanel key={selEpic.id} releases={releases} epic={selEpic} projects={projects} items={items} setItems={setItems} setEpics={setEpics}
+        {selEpic&&<EpicPanel key={selEpic.id} releases={releases} opts={epicOpts} epic={selEpic} projects={projects} items={items} setItems={setItems} setEpics={setEpics}
           statusOpts={statusOpts} priorities={['P1','P2','P3','P4']} teams={TEAMS} efforts={EFFORTS}
           onClose={()=>setSelEpicId(null)} onDelete={()=>deleteEpic(selEpic)}
           onConvert={async()=>{const it=await convertEpicToStory(selEpic,{projects,items,setItems,setEpics,nextId:nextItemId(items)});if(it){setSelEpicId(null);setSelected(it)}}}/>}
