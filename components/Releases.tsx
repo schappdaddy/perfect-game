@@ -113,6 +113,9 @@ export function QuarterPlanner({items,setItems,projects,setProjects,epics=[],set
   const [hideNoRel,setHideNoRelS]=useState<boolean>(()=>pref('pg_plan_hide_norel2',false))
   const [poolAll,setPoolAll]=useState(false) // include sustain work that already sits in another initiative
   const [poolTeam,setPoolTeam]=useState(true)
+  const [src,setSrcS]=useState<'td'|'init'>(()=>pref('pg_plan_src','td')) // Releases view: what the left panel lists
+  const [openInits,setOpenInits]=useState<Record<string,boolean>>({})
+  const setSrc=(v:any)=>{setSrcS(v);save('pg_plan_src',v)}
   const [dragId,setDragId]=useState<string|null>(null) // 'item:<id>' | 'epic:<id>'
   const [over,setOver]=useState<string|null>(null)
   const [mgr,setMgr]=useState(false)
@@ -134,8 +137,8 @@ export function QuarterPlanner({items,setItems,projects,setProjects,epics=[],set
 
   // Work is planned as epics or stories. A story that belongs to an epic moves with it, so it
   // isn't listed on its own wherever its epic is.
-  type Entry={kind:'item'|'epic',x:any,key:string,bucket:any}
-  const ent=(kind:'item'|'epic',x:any,bucket:any=null):Entry=>({kind,x,key:`${kind}:${x.id}`,bucket})
+  type Entry={kind:'item'|'epic'|'project',x:any,key:string,bucket:any}
+  const ent=(kind:'item'|'epic'|'project',x:any,bucket:any=null):Entry=>({kind,x,key:`${kind}:${x.id}`,bucket})
   const rank=(a:Entry,b:Entry)=>(a.x.manual_rank??1e9)-(b.x.manual_rank??1e9)||(PRI_ORDER[a.x.priority]||9)-(PRI_ORDER[b.x.priority]||9)||(a.x.created_at||'').localeCompare(b.x.created_at||'')
   const teamOk=(x:any)=>!poolTeam||!x.team||x.team===team
   const poolEpics=(epics as any[]).filter(e=>open(e)&&epicWorkTypeOf(e)==='sustain'&&!bucketIds.has(e.project_id)
@@ -148,7 +151,20 @@ export function QuarterPlanner({items,setItems,projects,setProjects,epics=[],set
   // Everything planned into this team's quarters, wherever it ships
   const planned:Entry[]=[...plannedEpics.map(e=>ent('epic',e,teamBuckets.find(b=>b.id===e.project_id))),
     ...(items as any[]).filter(i=>(i.space||'work')==='work'&&!coveredByEpic.has(i.epic_id)).map(i=>({i,b:teamBuckets.find(b=>b.name===i.parent_project)})).filter(({b})=>b).map(({i,b})=>ent('item',i,b))].sort(rank)
-  const ptsOf=(en:Entry)=>en.kind==='item'?(EFFORT_POINTS[en.x.effort]||0)
+  // Initiative work released in the same monthly releases (its initiative and dates are its own)
+  const INIT_DONE=['Complete','Cancelled','Done']
+  const inits=(projects as any[]).filter(p=>!p.sustain_quarter&&(p.space||'work')==='work'&&!INIT_DONE.includes(p.status)&&(!poolTeam||!p.team||p.team===team))
+    .sort((a,b)=>(a.start_date||'9999').localeCompare(b.start_date||'9999')||a.name.localeCompare(b.name))
+  const initIds=new Set(inits.map(p=>p.id)),initNames=new Set(inits.map(p=>p.name))
+  const initEpics=(epics as any[]).filter(e=>initIds.has(e.project_id)&&open(e))
+  const initItems=(items as any[]).filter(i=>initNames.has(i.parent_project)&&open(i))
+  const epicById=(id:any)=>(epics as any[]).find(e=>e.id===id)
+  const initEntries:Entry[]=[...inits.map(p=>ent('project',p)),...initEpics.map(e=>ent('epic',e)),...initItems.map(i=>ent('item',i))]
+  const initKeys=new Set(initEntries.map(e=>e.key))
+  // A story going out with its epic isn't listed again under the same release
+  const withEpic=(i:any)=>{const e=i.epic_id&&epicById(i.epic_id);return !!e&&initIds.has(e.project_id)&&(e.release_month||null)===(i.release_month||null)}
+  const ptsOf=(en:Entry):number=>en.kind==='item'?(EFFORT_POINTS[en.x.effort]||0)
+    :en.kind==='project'?initItems.filter(i=>i.parent_project===en.x.name).reduce((s,i)=>s+(EFFORT_POINTS[i.effort]||0),0)
     :(EFFORT_POINTS[en.x.effort]||storiesOf(en.x).filter(open).reduce((s,i)=>s+(EFFORT_POINTS[i.effort]||0),0))
   const pts=(list:Entry[])=>list.reduce((s,en)=>s+ptsOf(en),0)
   const isBlocked=(k:string)=>!!releaseOf(releases,k)?.no_release
@@ -168,6 +184,23 @@ export function QuarterPlanner({items,setItems,projects,setProjects,epics=[],set
     const{error}=await supabase.from('epics').update(fields).eq('id',id)
     if(error)alert('Failed to save the epic: '+error.message)
   }
+  async function updProject(id:any,fields:any){
+    setProjects((prev:any[])=>prev.map(p=>p.id===id?{...p,...fields}:p))
+    const{error}=await supabase.from('projects').update({...fields,updated_at:new Date().toISOString()}).eq('id',id)
+    if(error)alert('Failed to save the initiative: '+error.message)
+  }
+  // Initiative work only gets a release; its initiative and dates stay as planned
+  async function setRelease(en:Entry,month:string|null){
+    if(month&&isBlocked(month)){alert(`${fmtMonthKey(month)} has no release. Pick another month, or change it under 📦 Release dates.`);return}
+    const x=en.x
+    if((x.release_month||null)===month)return
+    if(en.kind==='project')await updProject(x.id,{release_month:month})
+    else if(en.kind==='item')await updItem(x.id,{release_month:month})
+    else{
+      await updEpic(x.id,{release_month:month})
+      for(const st of storiesOf(x))if(open(st)&&(!st.release_month||st.release_month===x.release_month))await updItem(st.id,{release_month:month})
+    }
+  }
   async function createBucket(qi:any){
     const name=`${qi.label} Tech Debt (${short})`
     const ex=(projects as any[]).find(p=>p.name.toLowerCase()===name.toLowerCase())
@@ -181,7 +214,7 @@ export function QuarterPlanner({items,setItems,projects,setProjects,epics=[],set
   }
   const findEntry=(key:string|null):Entry|null=>{
     if(!key)return null
-    return [...pool,...planned].find(e=>e.key===key)||null
+    return [...pool,...planned,...initEntries].find(e=>e.key===key)||null
   }
   // Put work in a quarter (null = back to the backlog) and/or a release (undefined = keep).
   async function setPlan(en:Entry,{qi,release}:{qi?:any,release?:string|null}){
@@ -232,12 +265,14 @@ export function QuarterPlanner({items,setItems,projects,setProjects,epics=[],set
   const take=()=>{const en=findEntry(dragId);setDragId(null);setOver(null);return en}
   async function dropOnPool(beforeKey:string|null){
     const en=take();if(!en)return
+    if(initKeys.has(en.key)){await setRelease(en,null);return}
     if(en.bucket)await setPlan(en,{qi:null})
     await reorderPool({...en,bucket:null},beforeKey)
   }
-  async function dropOnQuarter(qi:any){const en=take();if(en&&en.bucket?.sustain_quarter!==qi.qk)await setPlan(en,{qi})}
+  async function dropOnQuarter(qi:any){const en=take();if(en&&!initKeys.has(en.key)&&en.bucket?.sustain_quarter!==qi.qk)await setPlan(en,{qi})}
   async function dropOnRelease(month:string|null){
     const en=take();if(!en)return
+    if(initKeys.has(en.key)){await setRelease(en,month);return}
     if(!en.bucket){
       // From the backlog straight to a release: it's worked in the quarter the release is in
       const{fy,q}=month?fyQuarterOf(month):fq
@@ -253,8 +288,11 @@ export function QuarterPlanner({items,setItems,projects,setProjects,epics=[],set
   // A plain render function (not a component), so cards aren't remounted mid-drag
   const card=(en:Entry,o:{idx?:number,showFrom?:boolean,relPicker?:boolean,showQuarter?:boolean}={})=>{
     const x=en.x,isEpic=en.kind==='epic'
+    if(en.kind==='project')return initCard(en,o)
+    const isInit=initKeys.has(en.key)
     const sts=isEpic?storiesOf(x):[],done=sts.filter(i=>!open(i)).length
     const from=isEpic?(projects as any[]).find(p=>p.id===x.project_id)?.name:x.parent_project
+    const ep=!isEpic&&x.epic_id?epicById(x.epic_id):null
     const qi=en.bucket?qFromKey(en.bucket.sustain_quarter):null
     const later=qi&&x.release_month&&x.release_month>qi.months[2]
     return(
@@ -262,7 +300,7 @@ export function QuarterPlanner({items,setItems,projects,setProjects,epics=[],set
       onDragOver={o.idx!=null?e=>{e.preventDefault();e.stopPropagation();setOver('pool:'+en.key)}:undefined}
       onDrop={o.idx!=null?e=>{e.preventDefault();e.stopPropagation();dropOnPool(en.key)}:undefined}
       onClick={()=>isEpic?onOpenEpic?.(x):onOpenItem(x)}
-      style={{background:isEpic?'rgba(224,123,42,0.10)':'#1E3048',border:`1px solid ${isEpic?'rgba(224,123,42,0.45)':'#2A3D55'}`,borderLeft:isEpic?'3px solid #E07B2A':undefined,borderTop:over==='pool:'+en.key?'2px solid #C8973A':undefined,borderRadius:6,padding:'6px 8px',cursor:'grab',opacity:dragId===en.key?0.4:1,display:'flex',flexDirection:'column',gap:3}}>
+      style={{background:isEpic?'rgba(224,123,42,0.10)':'#1E3048',border:`1px solid ${isEpic?'rgba(224,123,42,0.45)':'#2A3D55'}`,borderLeft:isEpic?'3px solid #E07B2A':isInit?'3px solid #C8973A':undefined,borderTop:over==='pool:'+en.key?'2px solid #C8973A':undefined,borderRadius:6,padding:'6px 8px',cursor:'grab',opacity:dragId===en.key?0.4:1,display:'flex',flexDirection:'column',gap:3}}>
       <div style={{display:'flex',alignItems:'center',gap:6}}>
         {o.idx!=null&&<span style={{fontSize:10,fontWeight:800,color:'#C8973A',minWidth:16}}>{o.idx+1}</span>}
         {isEpic?<span style={{fontSize:9,fontWeight:800,color:'#E07B2A',letterSpacing:1}}>◆ EPIC</span>
@@ -273,7 +311,7 @@ export function QuarterPlanner({items,setItems,projects,setProjects,epics=[],set
       <div style={{fontSize:12,color:'#F4F6F8',lineHeight:1.3,fontWeight:isEpic?700:400}}>{x.name}</div>
       {o.showQuarter&&qi&&<div style={{fontSize:10,color:'#C8D4E0'}}>🗓 Worked in <b>{qi.label}</b>{later?<span style={{color:'#5DADE2'}}> · ships after</span>:''}</div>}
       {isEpic&&<div style={{fontSize:10,color:'#7A8FA6'}}>{sts.length} stor{sts.length===1?'y':'ies'}{sts.length?` · ${done} done`:''}</div>}
-      {o.showFrom&&from&&<div style={{fontSize:10,color:'#7A8FA6'}}>In {from}</div>}
+      {(o.showFrom||isInit)&&from&&<div style={{fontSize:10,color:isInit?'#C8973A':'#7A8FA6'}}>{isInit?'◈ ':'In '}{from}{ep?` › ${ep.name}`:''}</div>}
       {!poolTeam&&o.idx!=null&&x.team&&<div style={{fontSize:10,color:'#7A8FA6'}}>{TEAM_SHORT[x.team]||x.team}</div>}
       {o.relPicker&&qi&&(
         <div onClick={e=>e.stopPropagation()} style={{display:'flex',alignItems:'center',gap:5}}>
@@ -289,6 +327,24 @@ export function QuarterPlanner({items,setItems,projects,setProjects,epics=[],set
       )}
     </div>
   )}
+  // An initiative card: releasing the initiative means its go-live is in that release
+  function initCard(en:Entry,o:any){
+    const p=en.x,eps=initEpics.filter(e=>e.project_id===p.id),sts=initItems.filter(i=>i.parent_project===p.name)
+    const fmtD=(d:string)=>fmtMonthKey(d.slice(0,7))
+    return(
+      <div key={en.key} draggable onDragStart={e=>{setDragId(en.key);e.dataTransfer.effectAllowed='move'}} onDragEnd={()=>{setDragId(null);setOver(null)}}
+        title="Drag onto a release: the initiative goes live in it"
+        style={{background:'rgba(200,151,58,0.10)',border:'1px solid rgba(200,151,58,0.5)',borderLeft:'3px solid #C8973A',borderRadius:6,padding:'6px 8px',cursor:'grab',opacity:dragId===en.key?0.4:1,display:'flex',flexDirection:'column',gap:3}}>
+        <div style={{display:'flex',alignItems:'center',gap:6}}>
+          <span style={{fontSize:9,fontWeight:800,color:'#C8973A',letterSpacing:1}}>◈ INITIATIVE{o.goLive?' GO-LIVE':''}</span>
+          {p.work_type==='sustain'&&<span style={{fontSize:9,color:'#C8D4E0',background:'#4A5D72',borderRadius:3,padding:'0 4px'}}>SUSTAIN</span>}
+          {p.release_month&&!o.goLive&&<span style={{marginLeft:'auto',fontSize:9.5,fontWeight:700,color:'#5DADE2'}}>📦 {fmtMonthKey(p.release_month)}</span>}
+        </div>
+        <div style={{fontSize:12,fontWeight:800,color:'#F4F6F8',lineHeight:1.3}}>{p.name}</div>
+        <div style={{fontSize:10,color:'#7A8FA6'}}>{p.start_date?`${fmtD(p.start_date)} – ${p.ongoing||!p.end_date?'ongoing':fmtD(p.end_date)}`:'No dates'} · {eps.length} epic{eps.length!==1?'s':''} · {sts.length} stor{sts.length===1?'y':'ies'}</div>
+      </div>
+    )
+  }
   const colBox=(key:string,active:boolean,blocked=false,later=false)=>({display:'flex',flexDirection:'column' as const,minHeight:0,borderRadius:8,
     background:blocked?'repeating-linear-gradient(135deg,#0F1C2B,#0F1C2B 8px,#132234 8px,#132234 16px)':'#0F1C2B',
     border:`1px solid ${over===key?'#C8973A':later?'#2E5A78':active?'#3A4A5E':'#243447'}`})
@@ -298,7 +354,7 @@ export function QuarterPlanner({items,setItems,projects,setProjects,epics=[],set
 
   // Releases view: the months from the first quarter shown through the quarter after the last
   const relMonths=(()=>{const out:string[]=[];for(let n=0;n<15;n++)out.push(addMonths(quarters[0].months[0],n));return out})()
-  const relCols=relMonths.filter(k=>!(hideNoRel&&isBlocked(k)&&!planned.some(en=>en.x.release_month===k)))
+  const relCols=relMonths.filter(k=>!(hideNoRel&&isBlocked(k)&&![...planned,...initEntries].some(en=>en.x.release_month===k)))
   const shownQks=new Set(quarters.map(q=>q.qk))
   const inView=(en:Entry)=>shownQks.has(en.bucket?.sustain_quarter)||relMonths.includes(en.x.release_month)
 
@@ -323,6 +379,40 @@ export function QuarterPlanner({items,setItems,projects,setProjects,epics=[],set
         {/* Sustain backlog */}
         <div onDragOver={e=>{e.preventDefault();if(over!=='pool')setOver(o=>o?.startsWith('pool:')?o:'pool')}} onDrop={e=>{e.preventDefault();dropOnPool(null)}}
           style={{width:280,flexShrink:0,borderRight:'1px solid #243447',display:'flex',flexDirection:'column',background:over==='pool'?'rgba(200,151,58,0.06)':'transparent'}}>
+          {mode==='releases'&&<div style={{display:'flex',borderBottom:'1px solid #243447'}}>
+            {([['td','Tech debt backlog'],['init','Initiative work']] as const).map(([k,l])=>(
+              <button key={k} onClick={()=>setSrc(k)} style={{flex:1,background:src===k?'#0F1C2B':'#162436',color:src===k?'#F4F6F8':'#7A8FA6',border:'none',borderBottom:`2px solid ${src===k?'#C8973A':'transparent'}`,fontSize:11,fontWeight:700,padding:'8px 0',cursor:'pointer'}}>{l}</button>
+            ))}
+          </div>}
+          {mode==='releases'&&src==='init'?(<>
+            <div style={{padding:'10px 12px',borderBottom:'1px solid #243447'}}>
+              <div style={{fontSize:11,fontWeight:800,color:'#C8973A',letterSpacing:1}}>INITIATIVE WORK · {inits.length}</div>
+              <div style={{fontSize:10.5,color:'#7A8FA6',margin:'3px 0 6px'}}>Open initiatives and their epics and stories not in a release yet. Drag an initiative (its go-live), an epic or a story onto a release. Only the release changes; dates stay with the initiative. Drag back here to take it out.</div>
+              <label style={{display:'flex',gap:5,alignItems:'center',fontSize:10.5,color:'#7A8FA6',cursor:'pointer'}}><input type="checkbox" checked={poolTeam} onChange={e=>setPoolTeam(e.target.checked)} style={{accentColor:'#C8973A'}}/>Only {short} and unassigned</label>
+            </div>
+            <div style={colBody}>
+              {inits.map(p=>{
+                const eps=initEpics.filter(e=>e.project_id===p.id&&!e.release_month)
+                const sts=initItems.filter(i=>i.parent_project===p.name&&!i.release_month&&!(i.epic_id&&eps.some(e=>e.id===i.epic_id)))
+                const n=eps.length+sts.length,isOpen=!!openInits[p.id]
+                return(
+                  <div key={p.id} style={{display:'flex',flexDirection:'column',gap:5}}>
+                    <div style={{display:'flex',alignItems:'center',gap:4}}>
+                      <button onClick={()=>setOpenInits(s=>({...s,[p.id]:!s[p.id]}))} disabled={!n} title={n?`${isOpen?'Hide':'Show'} ${n} epic${n!==1?'s':''} or stor${n===1?'y':'ies'} without a release`:'Everything here has a release'}
+                        style={{background:'none',border:'none',color:n?'#C8973A':'#3A4A5E',cursor:n?'pointer':'default',fontSize:11,width:16,padding:0}}>{isOpen?'▾':'▸'}</button>
+                      <div style={{flex:1,minWidth:0}}>{initCard(ent('project',p),{})}</div>
+                    </div>
+                    {isOpen&&<div style={{display:'flex',flexDirection:'column',gap:5,paddingLeft:20}}>
+                      {eps.map(e=>card(ent('epic',e)))}
+                      {sts.map(i=>card(ent('item',i)))}
+                    </div>}
+                    {!isOpen&&n>0&&<div style={{fontSize:10,color:'#7A8FA6',paddingLeft:22,marginTop:-2}}>{n} to place</div>}
+                  </div>
+                )
+              })}
+              {!inits.length&&empty('No open initiatives for this team.')}
+            </div>
+          </>):(<>
           <div style={{padding:'10px 12px',borderBottom:'1px solid #243447'}}>
             <div style={{fontSize:11,fontWeight:800,color:'#8FA6BC',letterSpacing:1}}>SUSTAIN BACKLOG · {poolEpics.length} epic{poolEpics.length!==1?'s':''} · {poolItems.length} stor{poolItems.length===1?'y':'ies'}</div>
             <div style={{fontSize:10.5,color:'#7A8FA6',margin:'3px 0 6px'}}>Open Sustain epics and stories, in priority order. Drag to reorder, into a quarter, or straight into a release. Drag back here to unplan.</div>
@@ -333,6 +423,7 @@ export function QuarterPlanner({items,setItems,projects,setProjects,epics=[],set
             {pool.map((en,ix)=>card(en,{idx:ix,showFrom:true}))}
             {!pool.length&&empty('Nothing waiting. Mark epics or stories as Sustain (work type) to plan them here.')}
           </div>
+          </>)}
         </div>
 
         {mode==='quarters'?(
@@ -361,11 +452,11 @@ export function QuarterPlanner({items,setItems,projects,setProjects,epics=[],set
             })}
           </div>
         ):(
-          <div style={{flex:1,display:'grid',gridTemplateColumns:`minmax(200px,1fr) ${relCols.map(k=>isBlocked(k)&&!planned.some(en=>en.x.release_month===k)?'84px':'minmax(170px,1fr)').join(' ')}`,gap:8,padding:12,minHeight:0,overflowX:'auto'}}>
+          <div style={{flex:1,display:'grid',gridTemplateColumns:`minmax(200px,1fr) ${relCols.map(k=>isBlocked(k)&&![...planned,...initEntries].some(en=>en.x.release_month===k)?'84px':'minmax(170px,1fr)').join(' ')}`,gap:8,padding:12,minHeight:0,overflowX:'auto'}}>
             {(()=>{const list=planned.filter(en=>!en.x.release_month&&shownQks.has(en.bucket?.sustain_quarter));return(
               <div onDragOver={e=>{e.preventDefault();setOver('r:none')}} onDragLeave={()=>setOver(o=>o==='r:none'?null:o)} onDrop={e=>{e.preventDefault();dropOnRelease(null)}} style={colBox('r:none',false)}>
                 <div style={colHead}>
-                  <div style={{fontSize:12,fontWeight:800,color:'#F4F6F8'}}>Not in a release yet</div>
+                  <div style={{fontSize:12,fontWeight:800,color:'#F4F6F8'}}>Tech debt not in a release yet</div>
                   <div style={{fontSize:10.5,color:'#7A8FA6'}}>Planned in {quarters[0].label}–{quarters[3].label}</div>
                   <div style={{fontSize:10,color:'#7A8FA6',marginTop:2}}>{list.length} · {pts(list)} pts</div>
                 </div>
@@ -373,7 +464,9 @@ export function QuarterPlanner({items,setItems,projects,setProjects,epics=[],set
               </div>
             )})()}
             {relCols.map(k=>{
-              const list=planned.filter(en=>en.x.release_month===k&&inView(en)),blocked=isBlocked(k),slim=blocked&&!list.length
+              const td=planned.filter(en=>en.x.release_month===k&&inView(en))
+              const ini=initEntries.filter(en=>en.x.release_month===k&&!(en.kind==='item'&&withEpic(en.x)))
+              const list=[...ini.filter(en=>en.kind==='project'),...ini.filter(en=>en.kind!=='project'),...td],blocked=isBlocked(k),slim=blocked&&!list.length
               const r=releaseOf(releases,k),{fy,q}=fyQuarterOf(k)
               return(
                 <div key={k} onDragOver={e=>{e.preventDefault();setOver('r:'+k)}} onDragLeave={()=>setOver(o=>o==='r:'+k?null:o)} onDrop={e=>{e.preventDefault();dropOnRelease(k)}} style={colBox('r:'+k,false,blocked)}>
@@ -381,9 +474,9 @@ export function QuarterPlanner({items,setItems,projects,setProjects,epics=[],set
                     <div style={{fontSize:9,fontWeight:800,color:'#7A8FA6',letterSpacing:0.6}}>{quarterLabel(fy,q)}</div>
                     <div style={{fontSize:12,fontWeight:800,color:blocked?'#7A8FA6':'#F4F6F8'}}>{slim?fmtMonthKey(k):`${fmtMonthKey(k)} release`}</div>
                     <div style={{fontSize:10.5,color:blocked?'#D4820A':r?.release_date?'#C8973A':'#7A8FA6'}}>{blocked?`No release${r?.notes&&!slim?' · '+r.notes:''}`:releaseText(releases,k)}</div>
-                    {!slim&&<div style={{fontSize:10,color:'#7A8FA6',marginTop:2}}>{list.length} · {pts(list)} pts</div>}
+                    {!slim&&<div style={{fontSize:10,color:'#7A8FA6',marginTop:2}}>{ini.length?<span style={{color:'#C8973A'}}>{ini.length} from initiatives · </span>:''}{td.length} tech debt · {pts(list)} pts</div>}
                   </div>
-                  <div style={colBody}>{list.map(en=>card(en,{showQuarter:true}))}{!list.length&&!slim&&empty('Drag planned work here.')}</div>
+                  <div style={colBody}>{list.map(en=>en.kind==='project'?initCard(en,{goLive:true}):card(en,{showQuarter:true}))}{!list.length&&!slim&&empty('Drag planned work here.')}</div>
                 </div>
               )
             })}
