@@ -38,6 +38,9 @@ export function StrategyReport({strategy,entries,personMonth,people,roles,teams,
   // Which cost the tables show: everything, contractors only or FTEs only
   const [costView,setCostView]=useState<'cost'|'contractor'|'fte'>('cost')
   const [capGrain,setCapGrain]=useState<'quarter'|'fy'>('quarter')
+  // Show each FY's CapEx / OpEx under its total in the team and initiative tables
+  const [fySplit,setFySplitState]=useState<boolean>(()=>{try{return localStorage.getItem('pg_report_fysplit')!=='0'}catch{return true}})
+  const setFySplit=(v:boolean)=>{setFySplitState(v);try{localStorage.setItem('pg_report_fysplit',v?'1':'0')}catch{}}
   const inScope=(entries as any[]).filter(x=>scope==='all'||x.onTrack)
   const costed=inScope.filter(x=>x.cost&&x.cost.total>0)
   const fyOf=(x:any,fy:number,key:string)=>x.cost?.byFy[fy]?.[key]||0
@@ -47,6 +50,16 @@ export function StrategyReport({strategy,entries,personMonth,people,roles,teams,
   const projTotal=(x:any)=>sumAll([x])
   // CapEx / OpEx of whatever the Full budget / Contractors / FTE switch shows
   const ck=(m:'capex'|'opex')=>costView==='cost'?m:`${costView}_${m}`
+  // An FY cell: the total, with its CapEx / OpEx underneath when that's switched on
+  const fyCell=(list:any[],fy:number,style:any)=>{
+    const t=sumFy(list,fy),cx=sumFy(list,fy,ck('capex')),ox=sumFy(list,fy,ck('opex'))
+    return <td key={fy} style={{...style,verticalAlign:'top' as const}} title={t?`CapEx ${fmtUSD(cx)} · OpEx ${fmtUSD(ox)}`:undefined}>
+      {fmtK(t)}
+      {fySplit&&t>0&&<div style={{fontSize:9.5,fontWeight:400,color:'#7A8FA6',lineHeight:1.35,marginTop:1}}>
+        <div><span style={{color:'#5DADE2'}}>C</span> {fmtK(cx)}</div><div><span style={{color:'#C8973A'}}>O</span> {fmtK(ox)}</div>
+      </div>}
+    </td>
+  }
   const capPct=(list:any[])=>{const t=sumAll(list);return t?Math.round(sumAll(list,ck('capex'))/t*100):0}
   const viewLabel={cost:'Full budget',contractor:'Contractors',fte:'FTE'}[costView]
   // Contractor cost by vendor, per FY
@@ -132,11 +145,11 @@ export function StrategyReport({strategy,entries,personMonth,people,roles,teams,
 
   // ── CSV exports ────────────────────────────────────────────────────────────
   function exportBudget(){
-    const rows:any[][]=[['Team','Initiative','State','Work type','Start','End','Months','Developer','QA','Product Owner',...fys.map(fyLabel),'Total','CapEx','OpEx','Contractors','FTE','Not costed because']]
+    const rows:any[][]=[['Team','Initiative','State','Work type','Start','End','Months','Developer','QA','Product Owner',...fys.map(fyLabel),'Total','CapEx','OpEx','Contractors','FTE','Not costed because',...fys.flatMap((fy:number)=>[fyLabel(fy)+' CapEx',fyLabel(fy)+' OpEx'])]]
     for(const g of byTeam)for(const x of g.list){
-      rows.push([g.team,x.p.name,x.state,x.workType,x.s||'',x.s?x.e:'',x.s&&x.e?monthsBetween(x.s,x.e):'',...slotNames(x).map(n=>n||''),...fys.map((fy:number)=>Math.round(fyOf(x,fy,'cost'))),Math.round(sumAll([x],'cost')),Math.round(sumAll([x],'capex')),Math.round(sumAll([x],'opex')),Math.round(sumAll([x],'contractor')),Math.round(sumAll([x],'fte')),x.reason||''])
+      rows.push([g.team,x.p.name,x.state,x.workType,x.s||'',x.s?x.e:'',x.s&&x.e?monthsBetween(x.s,x.e):'',...slotNames(x).map(n=>n||''),...fys.map((fy:number)=>Math.round(fyOf(x,fy,'cost'))),Math.round(sumAll([x],'cost')),Math.round(sumAll([x],'capex')),Math.round(sumAll([x],'opex')),Math.round(sumAll([x],'contractor')),Math.round(sumAll([x],'fte')),x.reason||'',...fys.flatMap((fy:number)=>[Math.round(fyOf(x,fy,'capex')),Math.round(fyOf(x,fy,'opex'))])])
     }
-    rows.push(['All teams','Total','','','','','','','','',...fys.map((fy:number)=>Math.round(sumFy(costed,fy,'cost'))),Math.round(sumAll(costed,'cost')),Math.round(sumAll(costed,'capex')),Math.round(sumAll(costed,'opex')),Math.round(sumAll(costed,'contractor')),Math.round(sumAll(costed,'fte')),''])
+    rows.push(['All teams','Total','','','','','','','','',...fys.map((fy:number)=>Math.round(sumFy(costed,fy,'cost'))),Math.round(sumAll(costed,'cost')),Math.round(sumAll(costed,'capex')),Math.round(sumAll(costed,'opex')),Math.round(sumAll(costed,'contractor')),Math.round(sumAll(costed,'fte')),'',...fys.flatMap((fy:number)=>[Math.round(sumFy(costed,fy,'capex')),Math.round(sumFy(costed,fy,'opex'))])])
     download(`${strategy.name} - budget.csv`,rows)
   }
   function exportCapacity(){
@@ -170,6 +183,9 @@ export function StrategyReport({strategy,entries,personMonth,people,roles,teams,
               <button key={k} onClick={()=>setCostView(k)} style={{...BTN,border:'none',borderRadius:0,fontWeight:700,background:costView===k?'#C8973A':'#1E3048',color:costView===k?'#0D1B2A':'#F4F6F8'}}>{l}</button>
             ))}
           </div>
+          <label title="Show each fiscal year's CapEx (C) and OpEx (O) under its total" style={{display:'flex',alignItems:'center',gap:5,fontSize:11,color:'#7A8FA6',cursor:'pointer',whiteSpace:'nowrap' as const}}>
+            <input type="checkbox" checked={fySplit} onChange={e=>setFySplit(e.target.checked)} style={{accentColor:'#C8973A'}}/>CapEx/OpEx by FY
+          </label>
           <button onClick={exportBudget} style={BTN}>⬇ Budget CSV</button>
           <button onClick={exportCapacity} style={BTN}>⬇ Capacity CSV</button>
         </div>
@@ -315,7 +331,7 @@ export function StrategyReport({strategy,entries,personMonth,people,roles,teams,
               <tr key={g.team}>
                 <td style={{...LTD,fontWeight:700,color:'#F4F6F8'}}>{g.team}</td>
                 <td style={TD}>{c.length}/{g.list.length} costed</td>
-                {fys.map((fy:number)=><td key={fy} style={TD}>{fmtK(sumFy(c,fy))}</td>)}
+                {fys.map((fy:number)=>fyCell(c,fy,TD))}
                 <td style={{...TD,fontWeight:700,color:'#F4F6F8'}}>{fmtUSD(t)}</td>
                 <td style={TD}>{fmtK(sumAll(c,ck('capex')))}</td><td style={TD}>{fmtK(sumAll(c,ck('opex')))}</td>
                 <td style={TD}>{total?Math.round(t/total*100):0}%</td>
@@ -323,7 +339,7 @@ export function StrategyReport({strategy,entries,personMonth,people,roles,teams,
               </tr>)})}
             <tr>
               <td style={{...LTD,fontWeight:800,color:'#C8973A'}}>Total</td><td style={TD}/>
-              {fys.map((fy:number)=><td key={fy} style={{...TD,fontWeight:800,color:'#C8973A'}}>{fmtK(sumFy(costed,fy))}</td>)}
+              {fys.map((fy:number)=>fyCell(costed,fy,{...TD,fontWeight:800,color:'#C8973A'}))}
               <td style={{...TD,fontWeight:800,color:'#C8973A'}}>{fmtUSD(total)}</td>
               <td style={{...TD,fontWeight:700}}>{fmtK(sumAll(costed,ck('capex')))}</td><td style={{...TD,fontWeight:700}}>{fmtK(sumAll(costed,ck('opex')))}</td><td style={TD}/>
               <td style={{...TD,fontWeight:700}}>{sumAll(costed,'cost')?Math.round(sumAll(costed,'contractor')/sumAll(costed,'cost')*100)+'%':'—'}</td>
@@ -356,14 +372,14 @@ export function StrategyReport({strategy,entries,personMonth,people,roles,teams,
                     <td style={LTD}>{x.s&&x.e?`${fmtD(x.s)} – ${fmtD(x.e)} · ${monthsBetween(x.s,x.e)} mo`:<span style={{color:'#D4820A'}}>No dates</span>}</td>
                     <td style={{...LTD,fontSize:11}}>{names.map((n,i)=><span key={i} style={{color:n?'#C8C8D4':'#E74C3C'}}>{i?' · ':''}{n||'—'}</span>)}{x.roster.length>names.filter(Boolean).length&&<span style={{color:'#7A8FA6'}}> +{x.roster.length-names.filter(Boolean).length}</span>}</td>
                     {x.cost?.total>0?<>
-                      {fys.map((fy:number)=><td key={fy} style={TD}>{fmtK(fyCost(x,fy))}</td>)}
+                      {fys.map((fy:number)=>fyCell([x],fy,TD))}
                       <td style={{...TD,fontWeight:700,color:'#F4F6F8'}}>{fmtUSD(projTotal(x))}</td>
                       <td style={TD}>{fmtK(sumAll([x],ck('capex')))}</td><td style={TD}>{fmtK(sumAll([x],ck('opex')))}</td>
                     </>:<td colSpan={fys.length+3} style={{...TD,color:'#D4820A',textAlign:'center'}}>Not costed: {x.reason||'no cost'}</td>}
                   </tr>)})}
                 <tr>
                   <td colSpan={3} style={{...LTD,color:'#7A8FA6',fontWeight:700}}>{g.team} subtotal</td>
-                  {fys.map((fy:number)=><td key={fy} style={{...TD,fontWeight:700}}>{fmtK(sumFy(g.list,fy))}</td>)}
+                  {fys.map((fy:number)=>fyCell(g.list,fy,{...TD,fontWeight:700}))}
                   <td style={{...TD,fontWeight:800,color:'#F4F6F8'}}>{fmtUSD(sumAll(g.list))}</td>
                   <td style={{...TD,fontWeight:700}}>{fmtK(sumAll(g.list,ck('capex')))}</td><td style={{...TD,fontWeight:700}}>{fmtK(sumAll(g.list,ck('opex')))}</td>
                 </tr>
