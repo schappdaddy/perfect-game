@@ -57,7 +57,7 @@ export function StrategyReport({strategy,entries,personMonth,people,roles,teams,
   const vendorRows=[...vendors.entries()].map(([v,byFy])=>({v,byFy,total:Object.values(byFy).reduce((a,b)=>a+b,0)})).sort((a,b)=>b.total-a.total)
   const total=sumAll(costed)
   const personName=(id:any)=>(people as any[]).find(p=>p.id===id)?.name
-  const projName=(id:any)=>(entries as any[]).find(x=>x.p.id===id)?.p.name||'Another project'
+  const projName=(id:any)=>(entries as any[]).find(x=>x.p.id===id)?.p.name||'Another initiative'
 
   // ── Projects grouped by team ───────────────────────────────────────────────
   const teamNames=[...(teams as string[]),...(inScope.some(x=>!x.p.team||!teams.includes(x.p.team))?['No team']:[])]
@@ -132,7 +132,7 @@ export function StrategyReport({strategy,entries,personMonth,people,roles,teams,
 
   // ── CSV exports ────────────────────────────────────────────────────────────
   function exportBudget(){
-    const rows:any[][]=[['Team','Project','State','Work type','Start','End','Months','Developer','QA','Product Owner',...fys.map(fyLabel),'Total','CapEx','OpEx','Contractors','FTE','Not costed because']]
+    const rows:any[][]=[['Team','Initiative','State','Work type','Start','End','Months','Developer','QA','Product Owner',...fys.map(fyLabel),'Total','CapEx','OpEx','Contractors','FTE','Not costed because']]
     for(const g of byTeam)for(const x of g.list){
       rows.push([g.team,x.p.name,x.state,x.workType,x.s||'',x.s?x.e:'',x.s&&x.e?monthsBetween(x.s,x.e):'',...slotNames(x).map(n=>n||''),...fys.map((fy:number)=>Math.round(fyOf(x,fy,'cost'))),Math.round(sumAll([x],'cost')),Math.round(sumAll([x],'capex')),Math.round(sumAll([x],'opex')),Math.round(sumAll([x],'contractor')),Math.round(sumAll([x],'fte')),x.reason||''])
     }
@@ -141,7 +141,7 @@ export function StrategyReport({strategy,entries,personMonth,people,roles,teams,
   }
   function exportCapacity(){
     const qh=quarters.map((qt:any)=>`${fyLabel(qt.fy)} Q${qt.q}`)
-    const rows:any[][]=[['Team','Person','Role','Project',...qh,'Cost']]
+    const rows:any[][]=[['Team','Person','Role','Initiative',...qh,'Cost']]
     for(const g of staff)for(const x of g.list){
       rows.push([g.team,x.person.name,x.role+(x.person.type==='contractor'?` (contractor${x.person.vendor?', '+x.person.vendor:''})`:''),'All work',...x.cells.map((v:number)=>Math.round(v)+'%'),Math.round(x.cost)])
       const pm=personMonth.get(x.person.id)
@@ -163,7 +163,7 @@ export function StrategyReport({strategy,entries,personMonth,people,roles,teams,
         <div style={{marginLeft:'auto',display:'flex',gap:6,alignItems:'center'}}>
           <select value={scope} onChange={e=>setScope(e.target.value)} style={BTN}>
             <option value="all">Everything on this roadmap</option>
-            <option value="tracks">Projects on tracks only</option>
+            <option value="tracks">Initiatives on tracks only</option>
           </select>
           <div style={{display:'flex',border:'1px solid #243447',borderRadius:6,overflow:'hidden'}}>
             {([['cost','Full budget'],['contractor','Contractors'],['fte','FTE']] as const).map(([k,l])=>(
@@ -177,7 +177,7 @@ export function StrategyReport({strategy,entries,personMonth,people,roles,teams,
 
       {/* Headline numbers */}
       <div style={{display:'grid',gridTemplateColumns:'repeat(auto-fit,minmax(150px,1fr))',gap:10,marginBottom:22}}>
-        <Stat label={costView==='cost'?'Total budget':viewLabel+' budget'} value={fmtUSD(total)} sub={costView==='cost'?`${costed.length} costed project${costed.length!==1?'s':''}`:`${sumAll(costed,'cost')?Math.round(total/sumAll(costed,'cost')*100):0}% of ${fmtUSD(sumAll(costed,'cost'))} full budget`} gold/>
+        <Stat label={costView==='cost'?'Total budget':viewLabel+' budget'} value={fmtUSD(total)} sub={costView==='cost'?`${costed.length} costed initiative${costed.length!==1?'s':''}`:`${sumAll(costed,'cost')?Math.round(total/sumAll(costed,'cost')*100):0}% of ${fmtUSD(sumAll(costed,'cost'))} full budget`} gold/>
         {fys.map((fy:number)=><Stat key={fy} label={fyLabel(fy)+(fy===curFy?' (this FY)':'')} value={fmtUSD(sumFy(costed,fy))} sub={total?Math.round(sumFy(costed,fy)/total*100)+'% of total':''}/>)}
         <Stat label="CapEx · OpEx" value={`${capPct(costed)}% · ${total?100-capPct(costed):0}%`} sub={`${fmtK(sumAll(costed,ck('capex')))} CapEx · ${fmtK(sumAll(costed,ck('opex')))} OpEx`}/>
         <Stat label="Planned · Proposed" value={`${fmtK(sumAll(planned))} · ${fmtK(sumAll(proposed))}`} sub={`${planned.length} planned, ${proposed.length} proposed`}/>
@@ -275,8 +275,8 @@ export function StrategyReport({strategy,entries,personMonth,people,roles,teams,
           </tbody>
         </table>
         <div style={{padding:'6px 10px',fontSize:10.5,color:'#7A8FA6',lineHeight:1.5}}>
-          Team cost counts every active person on the team at 520 hours a quarter (2,080 a year) × their rate, so it&apos;s the same each quarter unless someone leaves. Assigned is the share of that time they&apos;re on projects in this strategy, split into CapEx and OpEx; unassigned time is OpEx.
-          People are counted under their own team, so Retail Program sits on its own line. Assigned can differ slightly from project totals, which use each month&apos;s actual working days; unnamed roles count only in project totals.
+          Team cost counts every active person on the team at 520 hours a quarter (2,080 a year) × their rate, so it&apos;s the same each quarter unless someone leaves. Assigned is the share of that time they&apos;re on initiatives in this strategy, split into CapEx and OpEx; unassigned time is OpEx.
+          People are counted under their own team, so Retail Program sits on its own line. Assigned can differ slightly from initiative totals, which use each month&apos;s actual working days; unnamed roles count only in initiative totals.
         </div>
       </div>
 
@@ -302,14 +302,14 @@ export function StrategyReport({strategy,entries,personMonth,people,roles,teams,
               </Fragment>)})}
           </tbody>
         </table>
-        <div style={{padding:'6px 10px',fontSize:10.5,color:'#7A8FA6'}}>CapEx is the CapEx-eligible roles&apos; share (their CapEx %, set on each role) of time on build projects. Support projects and other roles are OpEx.</div>
+        <div style={{padding:'6px 10px',fontSize:10.5,color:'#7A8FA6'}}>CapEx is the CapEx-eligible roles&apos; share (their CapEx %, set on each role) of time on build initiatives. Support initiatives and other roles are OpEx.</div>
       </div>
 
       {/* Budget by team */}
       <div style={SECTION}>BUDGET BY TEAM{costView!=='cost'?' · '+viewLabel.toUpperCase():''}</div>
       <div style={{...CARD,padding:0,overflowX:'auto',marginBottom:22}}>
         <table style={{borderCollapse:'collapse',width:'100%'}}>
-          <thead><tr><th style={{...TH,textAlign:'left'}}>Team</th><th style={TH}>Projects</th>{fys.map((fy:number)=><th key={fy} style={TH}>{fyLabel(fy)}</th>)}<th style={TH}>Total</th><th style={TH}>CapEx</th><th style={TH}>OpEx</th><th style={TH}>Share</th><th style={TH}>Contractor %</th></tr></thead>
+          <thead><tr><th style={{...TH,textAlign:'left'}}>Team</th><th style={TH}>Initiatives</th>{fys.map((fy:number)=><th key={fy} style={TH}>{fyLabel(fy)}</th>)}<th style={TH}>Total</th><th style={TH}>CapEx</th><th style={TH}>OpEx</th><th style={TH}>Share</th><th style={TH}>Contractor %</th></tr></thead>
           <tbody>
             {byTeam.map(g=>{const c=g.list.filter(x=>x.cost?.total>0);const t=sumAll(c);return(
               <tr key={g.team}>
@@ -330,15 +330,15 @@ export function StrategyReport({strategy,entries,personMonth,people,roles,teams,
             </tr>
           </tbody>
         </table>
-        <div style={{padding:'6px 10px',fontSize:10.5,color:'#7A8FA6'}}>A project&apos;s cost counts toward the team that owns it, including Retail Program people working on it.</div>
+        <div style={{padding:'6px 10px',fontSize:10.5,color:'#7A8FA6'}}>An initiative&apos;s cost counts toward the team that owns it, including Retail Program people working on it.</div>
       </div>
 
       {/* Budget by project */}
-      <div style={SECTION}>BUDGET BY PROJECT{costView!=='cost'?' · '+viewLabel.toUpperCase():''}</div>
+      <div style={SECTION}>BUDGET BY INITIATIVE{costView!=='cost'?' · '+viewLabel.toUpperCase():''}</div>
       <div style={{...CARD,padding:0,overflowX:'auto',marginBottom:22}}>
         <table style={{borderCollapse:'collapse',width:'100%'}}>
           <thead><tr>
-            <th style={{...TH,textAlign:'left'}}>Project</th><th style={{...TH,textAlign:'left'}}>Dates</th><th style={{...TH,textAlign:'left'}}>Dev · QA · PO</th>
+            <th style={{...TH,textAlign:'left'}}>Initiative</th><th style={{...TH,textAlign:'left'}}>Dates</th><th style={{...TH,textAlign:'left'}}>Dev · QA · PO</th>
             {fys.map((fy:number)=><th key={fy} style={TH}>{fyLabel(fy)}</th>)}<th style={TH}>Total</th><th style={TH}>CapEx</th><th style={TH}>OpEx</th>
           </tr></thead>
           <tbody>
@@ -371,19 +371,19 @@ export function StrategyReport({strategy,entries,personMonth,people,roles,teams,
             ))}
           </tbody>
         </table>
-        <div style={{padding:'6px 10px',fontSize:10.5,color:'#7A8FA6'}}>Ongoing projects are costed to the end of the strategy ({fmtD(winEnd)}). Click a project to open it on the roadmap.</div>
+        <div style={{padding:'6px 10px',fontSize:10.5,color:'#7A8FA6'}}>Ongoing initiatives are costed to the end of the strategy ({fmtD(winEnd)}). Click an initiative to open it on the roadmap.</div>
       </div>
 
       {/* Capacity by person */}
       <div style={{display:'flex',alignItems:'center',gap:12,flexWrap:'wrap' as const,marginBottom:8}}>
         <div style={{...SECTION,margin:0}}>CAPACITY BY PERSON</div>
-        <span style={{fontSize:11,color:'#7A8FA6'}}>{allStaff.length} people · {idleNow} with no work in this strategy{stretched?` · ${stretched} on 3+ projects at once`:''}</span>
+        <span style={{fontSize:11,color:'#7A8FA6'}}>{allStaff.length} people · {idleNow} with no work in this strategy{stretched?` · ${stretched} on 3+ initiatives at once`:''}</span>
         <div style={{marginLeft:'auto',display:'flex',gap:10,alignItems:'center',fontSize:11,color:'#7A8FA6'}}>
           <select value={teamFilter} onChange={e=>setTeamFilter(e.target.value)} style={BTN}>
             <option value="all">All teams</option>
             {personTeams.map(t=><option key={t} value={t}>{t}</option>)}
           </select>
-          <label style={{display:'flex',gap:5,alignItems:'center',cursor:'pointer'}}><input type="checkbox" checked={showProjects} onChange={e=>setShowProjects(e.target.checked)} style={{accentColor:'#C8973A'}}/>Show projects</label>
+          <label style={{display:'flex',gap:5,alignItems:'center',cursor:'pointer'}}><input type="checkbox" checked={showProjects} onChange={e=>setShowProjects(e.target.checked)} style={{accentColor:'#C8973A'}}/>Show initiatives</label>
           <label style={{display:'flex',gap:5,alignItems:'center',cursor:'pointer'}}><input type="checkbox" checked={hideIdle} onChange={e=>setHideIdle(e.target.checked)} style={{accentColor:'#C8973A'}}/>Hide people with no work</label>
         </div>
       </div>
@@ -391,7 +391,7 @@ export function StrategyReport({strategy,entries,personMonth,people,roles,teams,
         <table style={{borderCollapse:'collapse',width:'100%'}}>
           <thead>
             <tr><th style={{...TH,textAlign:'left'}}/>{fys.map((fy:number)=><th key={fy} colSpan={4} style={{...TH,textAlign:'center',borderLeft:'1px solid #243447'}}>{fyLabel(fy)}</th>)}<th style={TH}/></tr>
-            <tr><th style={{...TH,textAlign:'left',top:29}}>Person · project</th>{quarters.map((qt:any,i:number)=><th key={i} style={{...TH,top:29,textAlign:'center',minWidth:44,borderLeft:qt.q===1?'1px solid #243447':undefined}}>Q{qt.q}</th>)}<th style={{...TH,top:29}}>Cost</th></tr>
+            <tr><th style={{...TH,textAlign:'left',top:29}}>Person · initiative</th>{quarters.map((qt:any,i:number)=><th key={i} style={{...TH,top:29,textAlign:'center',minWidth:44,borderLeft:qt.q===1?'1px solid #243447':undefined}}>Q{qt.q}</th>)}<th style={{...TH,top:29}}>Cost</th></tr>
           </thead>
           <tbody>
             {staff.map(g=>(
@@ -414,7 +414,7 @@ export function StrategyReport({strategy,entries,personMonth,people,roles,teams,
                       <tr key={pid} onClick={()=>onOpen(pid)} style={{cursor:'pointer'}}>
                         <td style={{...LTD,paddingLeft:24,fontSize:11,color:'#A9B8C9',maxWidth:280,overflow:'hidden',textOverflow:'ellipsis'}}>↳ {projName(pid)}</td>
                         {quarters.map((qt:any,i:number)=>{const v=qPct(pm,qt,pid),all=x.cells[i];const shared=v>=1&&all-v>=1;return(
-                          <td key={i} title={shared?'Shared with other projects this quarter':''} style={{...TD,fontSize:11,textAlign:'center',color:v<1?'#2A3A4E':shared?'#C8973A':'#A9B8C9',borderLeft:qt.q===1?'1px solid #243447':undefined}}>{v<1?'':Math.round(v)+'%'}</td>)})}
+                          <td key={i} title={shared?'Shared with other initiatives this quarter':''} style={{...TD,fontSize:11,textAlign:'center',color:v<1?'#2A3A4E':shared?'#C8973A':'#A9B8C9',borderLeft:qt.q===1?'1px solid #243447':undefined}}>{v<1?'':Math.round(v)+'%'}</td>)})}
                         <td style={TD}/>
                       </tr>
                     ))}
@@ -424,8 +424,8 @@ export function StrategyReport({strategy,entries,personMonth,people,roles,teams,
           </tbody>
         </table>
         <div style={{padding:'6px 10px',fontSize:10.5,color:'#7A8FA6',lineHeight:1.5}}>
-          Each cell is the share of that quarter&apos;s working days the person is assigned. A person on two overlapping projects is 50% on each for that time; gold project figures mark quarters they&apos;re shared.
-          Unnamed roles (no person picked) aren&apos;t listed here but are included in project costs.
+          Each cell is the share of that quarter&apos;s working days the person is assigned. A person on two overlapping initiatives is 50% on each for that time; gold initiative figures mark quarters they&apos;re shared.
+          Unnamed roles (no person picked) aren&apos;t listed here but are included in initiative costs.
         </div>
       </div>
     </div>

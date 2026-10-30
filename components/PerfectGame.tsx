@@ -5,6 +5,7 @@ import * as XLSX from 'xlsx'
 import StrategyTab from './StrategyTab'
 import { EpicsSection } from './Epics'
 import { DependencyLayer, DepHandle, createDependency, deleteDependency, depKey } from './DependencyLayer'
+import { QuarterPlanner, ReleaseSelect, ReleasesManager, releaseOf, releaseText, fmtMonthKey } from './Releases'
 import { EpicRow, EpicPanel, epicProject, epicWorkType, convertStoryToEpic, convertEpicToStory } from './BacklogEpics'
 
 const T = {
@@ -45,7 +46,7 @@ const isItemDone=(i:any)=>ITEM_TERMINAL.includes(i?.status)
 // Capacity split: new-project work vs. sustain work (tech debt, system stabilization and
 // enhancements to existing things). A project carries its work type; an item follows its
 // project unless overridden, and items with no project fall back to their request type.
-const WORK_TYPES=[{key:'new',label:'New projects'},{key:'sustain',label:'Tech debt / Stabilization & Enhancements'}]
+const WORK_TYPES=[{key:'new',label:'New initiatives'},{key:'sustain',label:'Tech debt / Stabilization & Enhancements'}]
 const SUSTAIN_REQUEST_TYPES=['Bug','Tech Debt','Enhancement','Testing']
 const workTypeOfProject=(p:any)=>p?.work_type==='sustain'||p?.planning_state==='bau'?'sustain':'new'
 function workTypeOfItem(item:any,projects:any[]){
@@ -487,7 +488,7 @@ function sprintStats(sprint:any,items:any[],itemAssignments:any[],projects:any[]
       const it=sprintItems.find((x:any)=>x.id===a.item_id)
       const span=spansByItem.get(a.item_id)?.get(a.id)
       const days=span?assignmentDaysInSprint(span,sprint):0
-      return{itemName:it?.name||'—',itemCode:it?.item_id||'',projectName:it?.parent_project||'(No Project)',days}
+      return{itemName:it?.name||'—',itemCode:it?.item_id||'',projectName:it?.parent_project||'(No Initiative)',days}
     }).filter((b:any)=>b.days>0)
     const assignedDays=sprintBreakdown.reduce((s:number,b:any)=>s+b.days,0)
     return{person,assignedDays,sprintDays,sprintBreakdown,over:assignedDays>sprintDays+0.05,pct:sprintDays>0?assignedDays/sprintDays:0}
@@ -508,7 +509,7 @@ function sprintStats(sprint:any,items:any[],itemAssignments:any[],projects:any[]
   // Group by project for a readable summary, not a line-per-person wall
   const riskByProject=new Map<string,number>()
   for(const it of atRiskItems){
-    const key=it.parent_project||'(No Project)'
+    const key=it.parent_project||'(No Initiative)'
     riskByProject.set(key,(riskByProject.get(key)||0)+1)
   }
   const projectRisks=[...riskByProject.entries()].map(([project,count])=>({project,count})).sort((a,b)=>b.count-a.count)
@@ -592,7 +593,7 @@ function actualCapacityByMonth(items:any[],itemAssignments:any[],monthKeys:strin
         const prev=pm.get(k)||{days:0,pct:0}
         pm.set(k,{days:prev.days+overlapDays,pct:prev.pct+pctContribution})
         if(!bi.has(k))bi.set(k,[])
-        bi.get(k)!.push({itemName:item.name,itemCode:item.item_id,projectName:item.parent_project||'(No Project)',days:overlapDays,pct:pctContribution})
+        bi.get(k)!.push({itemName:item.name,itemCode:item.item_id,projectName:item.parent_project||'(No Initiative)',days:overlapDays,pct:pctContribution})
       }
     }
   }
@@ -851,16 +852,16 @@ function ViolationRow({v,project,fmt,d}:{v:any,project:any,fmt:any,d:any}) {
         <span style={{color:'#7A8FA6',fontFamily:'monospace',flexShrink:0}}>{v.item_id}</span>
         <span style={{color:'#F4F6F8',fontWeight:600,flexShrink:0}}>{v.name}</span>
         <span style={{color:'#E74C3C',flex:1}}>
-          {beforeStart&&`starts ${fmt(v.start_date)} — before project start`}
+          {beforeStart&&`starts ${fmt(v.start_date)} — before initiative start`}
           {beforeStart&&afterEnd&&' · '}
-          {afterEnd&&`ends ${fmt(v.end_date)} — after project end`}
+          {afterEnd&&`ends ${fmt(v.end_date)} — after initiative end`}
         </span>
         <span style={{color:'#C8973A',fontSize:11,flexShrink:0,fontWeight:600}}>{open?'▲ Close':'✏️ Fix dates'}</span>
       </div>
       {open&&(
         <div style={{padding:'12px 10px',background:'rgba(0,0,0,0.25)',borderTop:'1px solid rgba(192,57,43,0.2)'}}>
           <div style={{fontSize:10,color:'#7A8FA6',marginBottom:10}}>
-            Project window: <span style={{color:'#C8973A',fontWeight:700}}>{fmt(project.start_date)} → {fmt(project.end_date)}</span>
+            Initiative window: <span style={{color:'#C8973A',fontWeight:700}}>{fmt(project.start_date)} → {fmt(project.end_date)}</span>
           </div>
           <div style={{display:'flex',gap:10,alignItems:'flex-end',flexWrap:'wrap' as const}}>
             <div>
@@ -883,9 +884,9 @@ function ViolationRow({v,project,fmt,d}:{v:any,project:any,fmt:any,d:any}) {
             </button>
           </div>
           <div style={{marginTop:8,fontSize:10}}>
-            {!startOk&&<div style={{color:'#E74C3C'}}>⚠️ Start still before project start ({fmt(project.start_date)})</div>}
-            {!endOk&&<div style={{color:'#E74C3C'}}>⚠️ End still after project end ({fmt(project.end_date)})</div>}
-            {startOk&&endOk&&editStart&&editEnd&&<div style={{color:'#27AE60'}}>✓ Dates are within the project window</div>}
+            {!startOk&&<div style={{color:'#E74C3C'}}>⚠️ Start still before initiative start ({fmt(project.start_date)})</div>}
+            {!endOk&&<div style={{color:'#E74C3C'}}>⚠️ End still after initiative end ({fmt(project.end_date)})</div>}
+            {startOk&&endOk&&editStart&&editEnd&&<div style={{color:'#27AE60'}}>✓ Dates are within the initiative window</div>}
           </div>
         </div>
       )}
@@ -907,7 +908,7 @@ function AssignPicker({available,onAdd}:any){
     </div>
   )
 }
-function ProjectDetail({project,items,setItems,projects,setProjects,milestones,setMilestones,tasks,setTasks,onClose,d,fmt,ccrs=[],ccrItems=[],roles=[],people=[],projectRoles=[],setProjectRoles,itemAssignments=[],setItemAssignments,sprints=[],epics=[],setEpics}:any) {
+function ProjectDetail({project,items,setItems,projects,setProjects,milestones,setMilestones,tasks,setTasks,onClose,d,fmt,ccrs=[],ccrItems=[],roles=[],people=[],projectRoles=[],setProjectRoles,itemAssignments=[],setItemAssignments,sprints=[],epics=[],setEpics,releases=[]}:any) {
   async function updProjectField(fields:any){
     setProjects((prev:any[])=>prev.map(p=>p.id===project.id?{...p,...fields}:p))
     await supabase.from('projects').update(fields).eq('id',project.id)
@@ -1172,7 +1173,7 @@ function ProjectDetail({project,items,setItems,projects,setProjects,milestones,s
                       style={{background:bType===k?'#1E3048':'transparent',color:bType===k?'#F4F6F8':'#7A8FA6',border:'1px solid '+(bType===k?'#3A4A5E':'#243447'),borderRadius:5,padding:'2px 8px',fontSize:9,fontWeight:700,cursor:'pointer'}}>{label}</button>
                   ))}
                 </div>
-                <div style={{display:'flex',gap:3}} title="Work type for the capacity split: new project work, or sustain (tech debt, stabilization & enhancements)">
+                <div style={{display:'flex',gap:3}} title="Work type for the capacity split: new initiative work, or sustain (tech debt, stabilization & enhancements)">
                   {[['new','✦ New'],['sustain','⟳ Sustain']].map(([k,label])=>{
                     const on=workTypeOfProject(project)===k
                     return <button key={k} onClick={()=>updProjectField({work_type:k,...(project.planning_state==='bau'?{planning_state:'planned'}:{})})}
@@ -1184,6 +1185,8 @@ function ProjectDetail({project,items,setItems,projects,setProjects,milestones,s
                   <option value="">Effort not set — 0%</option>
                   {EFFORTS.map(e=><option key={e} value={e}>{e} ({EFFORT_ALLOC[e]}%)</option>)}
                 </select>
+                <span title="The monthly release this initiative goes live in"><ReleaseSelect value={project.release_month} releases={releases} onChange={(v:any)=>updProjectField({release_month:v})}
+                  style={{background:'#1E3048',border:'1px solid #3A4A5E',borderRadius:5,color:project.release_month?'#5DADE2':'#7A8FA6',fontSize:9,fontWeight:700,padding:'2px 6px',cursor:'pointer',maxWidth:150}}/></span>
                 <span style={{marginLeft:'auto',fontSize:9,fontWeight:700,color:stClr(bStatus),border:'1px solid '+stClr(bStatus),borderRadius:8,padding:'1px 8px'}}>{bStatus.toUpperCase()}</span>
               </div>
               <div style={{display:'flex',gap:6,marginBottom:10}}>
@@ -1196,7 +1199,7 @@ function ProjectDetail({project,items,setItems,projects,setProjects,milestones,s
                 {bStatus==='approved'&&<button onClick={()=>updProjectField({budget_status:'draft'})} style={{background:'none',border:'1px solid #243447',borderRadius:5,color:'#7A8FA6',fontSize:10,padding:'4px 8px',cursor:'pointer'}}>Withdraw</button>}
               </div>
               {fc.unset?(
-                <div style={{fontSize:10,color:'#7A8FA6',fontStyle:'italic',marginBottom:8}}>Set project start/end dates to forecast a budget.</div>
+                <div style={{fontSize:10,color:'#7A8FA6',fontStyle:'italic',marginBottom:8}}>Set initiative start/end dates to forecast a budget.</div>
               ):(
                 <>
                 <div style={{display:'flex',gap:16,fontSize:11,marginBottom:4}}>
@@ -1241,7 +1244,7 @@ function ProjectDetail({project,items,setItems,projects,setProjects,milestones,s
                   {roles.map((r:any)=><option key={r.id} value={r.id}>{r.name}</option>)}
                 </select>
                 {!prPerson&&<input type="number" value={prHead} onChange={e=>setPrHead(e.target.value)} title="Headcount" style={{width:38,background:'#0D1B2A',border:'1px dashed #243447',borderRadius:5,color:'#F4F6F8',fontSize:10,padding:'4px 4px'}}/>}
-                <input type="number" value={prAlloc} onChange={e=>setPrAlloc(e.target.value)} title={`Allocation % — defaulted from this project's Effort (${project.effort||'not set'})`} style={{width:44,background:'#0D1B2A',border:'1px dashed #243447',borderRadius:5,color:'#F4F6F8',fontSize:10,padding:'4px 4px'}}/>
+                <input type="number" value={prAlloc} onChange={e=>setPrAlloc(e.target.value)} title={`Allocation % — defaulted from this initiative's Effort (${project.effort||'not set'})`} style={{width:44,background:'#0D1B2A',border:'1px dashed #243447',borderRadius:5,color:'#F4F6F8',fontSize:10,padding:'4px 4px'}}/>
                 <button onClick={addProjectRole} disabled={!prPerson&&!prRole} style={{background:'#27AE60',border:'none',borderRadius:5,color:'#fff',fontSize:10,fontWeight:700,padding:'4px 9px',cursor:'pointer',opacity:(prPerson||prRole)?1:0.5}}>+</button>
               </div>
             </div>
@@ -1451,7 +1454,7 @@ function ProjectDetail({project,items,setItems,projects,setProjects,milestones,s
                               const planD=planHrs/8,actualD=actualHrs/8,overD=over!=null?over/8:null
                               return(
                                 <div style={{fontSize:9,color:(overD||0)>0?'#E74C3C':'#7A8FA6',marginTop:1,paddingLeft:2}}>
-                                  Plan: {Math.round(planD*10)/10}d across this project · Assigned so far: {Math.round(actualD*10)/10}d{(overD||0)>0?` — ${Math.round(overD!*10)/10}d over plan`:actualD<planD?` (${Math.round((planD-actualD)*10)/10}d remaining)`:''}
+                                  Plan: {Math.round(planD*10)/10}d across this initiative · Assigned so far: {Math.round(actualD*10)/10}d{(overD||0)>0?` — ${Math.round(overD!*10)/10}d over plan`:actualD<planD?` (${Math.round((planD-actualD)*10)/10}d remaining)`:''}
                                 </div>
                               )
                             })()}
@@ -1557,7 +1560,7 @@ function ProjectDetail({project,items,setItems,projects,setProjects,milestones,s
                 </div>
                 {cmtId===item.id&&(
                   <div onClick={e=>e.stopPropagation()} style={{display:'flex',gap:5,alignItems:'center',marginTop:6,padding:'5px 7px',border:'1px solid #27AE60',borderRadius:6,background:'rgba(39,174,96,0.06)'}}>
-                    <span style={{fontSize:9,color:'#27AE60',fontWeight:700}}>{project.ongoing?'∞ project — set item dates:':'Project undated — set item dates:'}</span>
+                    <span style={{fontSize:9,color:'#27AE60',fontWeight:700}}>{project.ongoing?'∞ initiative — set item dates:':'Initiative undated — set item dates:'}</span>
                     <input type="date" value={cmtStart} onChange={e=>setCmtStart(e.target.value)} style={{background:'#0F1C2B',border:'1px solid #243447',borderRadius:4,color:'#F4F6F8',fontSize:10,padding:'2px 5px'}}/>
                     <span style={{color:'#7A8FA6',fontSize:10}}>→</span>
                     <input type="date" value={cmtEnd} onChange={e=>setCmtEnd(e.target.value)} style={{background:'#0F1C2B',border:'1px solid #243447',borderRadius:4,color:'#F4F6F8',fontSize:10,padding:'2px 5px'}}/>
@@ -1593,7 +1596,7 @@ function ProjectDetail({project,items,setItems,projects,setProjects,milestones,s
     </div>
   )
 }
-function Projects({items,setItems,projects,setProjects,milestones,setMilestones,tasks,setTasks,space,ccrs,ccrItems,roles=[],people=[],projectRoles=[],setProjectRoles,itemAssignments=[],setItemAssignments,sprints=[],selectedProject,setSelectedProject,epics=[],setEpics}:{items:any[],setItems:any,projects:any[],setProjects:any,milestones:any[],setMilestones:any,tasks:any[],setTasks:any,space:string,ccrs:any[],ccrItems:any[],roles?:any[],people?:any[],projectRoles?:any[],setProjectRoles?:any,itemAssignments?:any[],setItemAssignments?:any,sprints?:any[],selectedProject:any,setSelectedProject:any,epics?:any[],setEpics?:any}) {
+function Projects({items,setItems,projects,setProjects,milestones,setMilestones,tasks,setTasks,space,ccrs,ccrItems,roles=[],people=[],projectRoles=[],setProjectRoles,itemAssignments=[],setItemAssignments,sprints=[],selectedProject,setSelectedProject,epics=[],setEpics,releases=[]}:{items:any[],setItems:any,projects:any[],setProjects:any,milestones:any[],setMilestones:any,tasks:any[],setTasks:any,space:string,ccrs:any[],ccrItems:any[],roles?:any[],people?:any[],projectRoles?:any[],setProjectRoles?:any,itemAssignments?:any[],setItemAssignments?:any,sprints?:any[],selectedProject:any,setSelectedProject:any,epics?:any[],setEpics?:any,releases?:any[]}) {
   const mobile=useIsMobile()
   const [adding,setAdding]=useState(false)
   const [editing,setEditing]=useState(null)
@@ -1671,19 +1674,19 @@ function Projects({items,setItems,projects,setProjects,milestones,setMilestones,
       const oldName=editing.name
       const newName=payload.name.trim()
       const{data,error}=await supabase.from('projects').update({...payload,updated_at:new Date().toISOString()}).eq('id',editing.id).select().single()
-      if(error){alert('Failed to save project: '+error.message);setSaving(false);return}
+      if(error){alert('Failed to save initiative: '+error.message);setSaving(false);return}
       if(data) setProjects(projects.map(p=>p.id===editing.id?data:p))
       // Items link to projects by name — a rename must cascade or every item is orphaned
       if(oldName&&newName&&oldName!==newName){
         setItems(items.map(i=>i.parent_project===oldName?{...i,parent_project:newName}:i))
         const{error:cascErr}=await supabase.from('items').update({parent_project:newName}).eq('parent_project',oldName)
-        if(cascErr)alert('Project renamed, but re-linking its items failed: '+cascErr.message+'\nRe-open and re-save the project to retry.')
+        if(cascErr)alert('Initiative renamed, but re-linking its items failed: '+cascErr.message+'\nRe-open and re-save the initiative to retry.')
       }
       await maybeCloseItems({...editing,name:newName},payload.status)
       setEditing(null)
     } else {
       const{data,error}=await supabase.from('projects').insert({...payload,sort_order:projects.length,space}).select().single()
-      if(error){alert('Failed to create project: '+error.message);setSaving(false);return}
+      if(error){alert('Failed to create initiative: '+error.message);setSaving(false);return}
       if(data) setProjects([...projects,data])
       setAdding(false)
     }
@@ -1698,10 +1701,10 @@ function Projects({items,setItems,projects,setProjects,milestones,setMilestones,
     const tk=tasks.filter(t=>t.project_id===id).length
     const extras=[ms&&`${ms} milestone${ms!==1?'s':''}`,tk&&`${tk} task${tk!==1?'s':''}`].filter(Boolean)
     if(!confirm(`Delete "${proj.name}"?`
-      +(its.length?`\n\nIts ${its.length} item${its.length!==1?'s':''} stay in the backlog with no project.`:'')
+      +(its.length?`\n\nIts ${its.length} item${its.length!==1?'s':''} stay in the backlog with no initiative.`:'')
       +`\n\nThis also permanently deletes its ${extras.length?extras.join(', ')+', ':''}budget roles, epics and dependencies.`)) return
     const{error}=await supabase.from('projects').delete().eq('id',id)
-    if(error){alert('Failed to delete project: '+error.message);return}
+    if(error){alert('Failed to delete initiative: '+error.message);return}
     setProjects(projects.filter(p=>p.id!==id))
     setMilestones(milestones.filter(m=>m.project_id!==id))
     setTasks((prev:any[])=>prev.filter(t=>t.project_id!==id))
@@ -1712,7 +1715,7 @@ function Projects({items,setItems,projects,setProjects,milestones,setMilestones,
     if(its.length){
       setItems(items.map(i=>i.parent_project===proj.name?{...i,parent_project:null,epic_id:null}:i))
       const{error:itemErr}=await supabase.from('items').update({parent_project:null,epic_id:null}).eq('parent_project',proj.name).eq('space',spaceOf(proj))
-      if(itemErr)alert('The project was deleted, but unlinking its items failed: '+itemErr.message)
+      if(itemErr)alert('The initiative was deleted, but unlinking its items failed: '+itemErr.message)
     }
   }
 
@@ -1788,7 +1791,7 @@ function Projects({items,setItems,projects,setProjects,milestones,setMilestones,
           <div style={{marginLeft:'auto'}}>
             <button onClick={()=>{setAdding(true);setEditing(null);setForm({...empty})}}
               style={{background:'#C8973A',color:'#0D1B2A',border:'none',borderRadius:6,padding:'5px 14px',fontSize:12,fontWeight:700,cursor:'pointer'}}>
-              + New Project
+              + New Initiative
             </button>
           </div>
         </div>
@@ -1924,8 +1927,8 @@ function Projects({items,setItems,projects,setProjects,milestones,setMilestones,
           {filtered.length===0&&(
             <div style={{textAlign:'center',padding:60,color:'#7A8FA6'}}>
               <div style={{fontSize:32,marginBottom:12}}>📋</div>
-              <div style={{fontSize:16,marginBottom:8}}>No projects yet</div>
-              <div style={{fontSize:13}}>Click "+ New Project" to get started</div>
+              <div style={{fontSize:16,marginBottom:8}}>No initiatives yet</div>
+              <div style={{fontSize:13}}>Click "+ New Initiative" to get started</div>
             </div>
           )}
         </div>
@@ -1934,6 +1937,7 @@ function Projects({items,setItems,projects,setProjects,milestones,setMilestones,
       {/* Project detail panel */}
       {selectedProject&&(
   <ProjectDetail
+    releases={releases}
     project={projects.find(p=>p.id===selectedProject.id)||selectedProject}
     epics={epics}
     setEpics={setEpics}
@@ -1964,10 +1968,10 @@ function Projects({items,setItems,projects,setProjects,milestones,setMilestones,
       {adding&&(
         <div style={{position:'fixed',inset:0,background:'rgba(0,0,0,0.7)',zIndex:200,display:'flex',alignItems:'center',justifyContent:'center'}}>
           <div style={{background:'#162436',border:'1px solid #243447',borderRadius:12,padding:28,width:520,maxHeight:'85vh',overflowY:'auto'}}>
-            <div style={{fontSize:16,fontWeight:700,color:'#F4F6F8',marginBottom:20}}>{editing?'Edit Project':'New Project'}</div>
+            <div style={{fontSize:16,fontWeight:700,color:'#F4F6F8',marginBottom:20}}>{editing?'Edit Initiative':'New Initiative'}</div>
             <div style={{display:'flex',flexDirection:'column',gap:14}}>
               <div>
-                <div style={{fontSize:11,color:'#7A8FA6',marginBottom:4}}>Project Name *</div>
+                <div style={{fontSize:11,color:'#7A8FA6',marginBottom:4}}>Initiative Name *</div>
                 <input value={form.name} onChange={e=>setForm(p=>({...p,name:e.target.value}))} placeholder="e.g. Peak Prep"
                   style={{width:'100%',background:'#1E3048',color:'#F4F6F8',border:'1px solid #243447',borderRadius:6,padding:'8px 10px',fontSize:13,boxSizing:'border-box' as const}}/>
               </div>
@@ -2012,7 +2016,7 @@ function Projects({items,setItems,projects,setProjects,milestones,setMilestones,
                 ∞ Ongoing / open-ended — no fixed end date (long-running vendor deliverables); track via milestones
               </label>
               <div>
-                <div style={{fontSize:11,color:'#7A8FA6',marginBottom:8}}>Project Color</div>
+                <div style={{fontSize:11,color:'#7A8FA6',marginBottom:8}}>Initiative Color</div>
                 <div style={{display:'flex',gap:8,flexWrap:'wrap' as const}}>
                   {COLORS.map(c=>(
                     <div key={c} onClick={()=>setForm(p=>({...p,color:c}))}
@@ -2025,7 +2029,7 @@ function Projects({items,setItems,projects,setProjects,milestones,setMilestones,
               <button onClick={()=>{setAdding(false);setEditing(null);setForm({...empty})}} style={sel}>Cancel</button>
               <button onClick={saveProject} disabled={saving||!form.name.trim()}
                 style={{background:'#C8973A',color:'#0D1B2A',border:'none',borderRadius:6,padding:'8px 20px',fontWeight:700,cursor:'pointer',fontSize:13,opacity:saving?0.7:1}}>
-                {saving?'Saving...':(editing?'Save Changes':'Create Project')}
+                {saving?'Saving...':(editing?'Save Changes':'Create Initiative')}
               </button>
             </div>
           </div>
@@ -2055,7 +2059,7 @@ function PanelField({label,field,type='text',selected,upd}:{label:string,field:s
   )
 }
 
-function Backlog({items,setItems,projects,setProjects,space,ccrs=[],ccrItems=[],setCcrItems,epics=[],setEpics,sustainPct=30}:{items:any[],setItems:any,projects:any[],setProjects:any,space:string,ccrs?:any[],ccrItems?:any[],setCcrItems?:any,epics?:any[],setEpics?:any,sustainPct?:number}) {
+function Backlog({items,setItems,projects,setProjects,space,ccrs=[],ccrItems=[],setCcrItems,epics=[],setEpics,sustainPct=30,releases=[],setReleases}:{items:any[],setItems:any,projects:any[],setProjects:any,space:string,ccrs?:any[],ccrItems?:any[],setCcrItems?:any,epics?:any[],setEpics?:any,sustainPct?:number,releases?:any[],setReleases?:any}) {
   // CCR membership helpers — the link is a junction row, edited from either side
   const itemCcrLink=(itemId:any)=>{const l=(ccrItems as any[]).find((x:any)=>x.item_id===itemId);return l?{link:l,ccr:(ccrs as any[]).find((c:any)=>c.id===l.ccr_id)}:null}
   async function detachItemCcr(itemId:any){
@@ -2092,6 +2096,11 @@ function Backlog({items,setItems,projects,setProjects,space,ccrs=[],ccrItems=[],
     return pr&&pr.name===item.parent_project?e:null
   }
   const [selEpicId,setSelEpicId]=useState<any>(null)
+  // List, or quarter planning for tech debt / OpEx
+  const [bview,setBviewState]=useState<string>(()=>{try{return localStorage.getItem('pg_backlog_view')||'list'}catch{return 'list'}})
+  const setBview=(v:string)=>{setBviewState(v);try{localStorage.setItem('pg_backlog_view',v)}catch{}}
+  const [frl,setFrl]=useState('All') // release filter: 'All' | '__none' | month
+  const [relMgr,setRelMgr]=useState(false)
   const [kind,setKindState]=useState<string>(()=>{try{return localStorage.getItem('pg_backlog_kind')||'all'}catch{return 'all'}}) // 'all' | 'epics' | 'stories'
   const setKind=(v:string)=>{setKindState(v);try{localStorage.setItem('pg_backlog_kind',v)}catch{}}
   const [frt,setFrt]=useState('All')
@@ -2185,7 +2194,7 @@ function Backlog({items,setItems,projects,setProjects,space,ccrs=[],ccrItems=[],
     const cPri=col(/^(priority|pri)$/)
     const cSt=col(/^status$/)
     const cDesc=col(/^description$/)
-    const cProj=col(/^project$/)
+    const cProj=col(/^(project|initiative)$/)
     const cEff=col(/^(size|effort)$/)
     const cVen=col(/^vendor$/)
     const cVDate=col(/^vendor ?(delivery ?)?date$/)
@@ -2219,7 +2228,7 @@ function Backlog({items,setItems,projects,setProjects,space,ccrs=[],ccrItems=[],
       if(v(cProj)){
         const pr:any=projByName.get(v(cProj).toLowerCase())
         if(pr){fields.parent_project=pr.name;if(pr.team)fields.team=pr.team}
-        else notes.push(`project "${v(cProj)}" not found — ignored`)
+        else notes.push(`initiative "${v(cProj)}" not found — ignored`)
       }
       if(jira)fields.jira_key=jira
       if(existing){
@@ -2238,7 +2247,7 @@ function Backlog({items,setItems,projects,setProjects,space,ccrs=[],ccrItems=[],
       if(!name)return{mode:'skip',key:jira||'(no key)',name:'',reason:'new row without a Summary/Name — nothing to create'}
       if(!fields.parent_project&&defaultProj){fields.parent_project=defaultProj.name;if(defaultProj.team)fields.team=defaultProj.team}
       return{mode:'insert',key:jira||'—',name,fields,notes,
-        summary:[fields.request_type||'Enhancement',fields.priority||'P3',fields.status||'New',fields.parent_project||'no project'].join(' · ')}
+        summary:[fields.request_type||'Enhancement',fields.priority||'P3',fields.status||'New',fields.parent_project||'no initiative'].join(' · ')}
     }).filter(Boolean)
     if(!(out as any[]).some((r:any)=>r.mode!=='skip')&&(out as any[]).length===0){setJrErr('No usable rows found.');return}
     setJrRows(out as any[])
@@ -2407,6 +2416,7 @@ const sorted=items.filter(i=>!isItemDone(i)).sort((a,b)=>{
     if(frt!=='All'&&item.request_type!==frt) return false
     if(frg!=='All'&&item.region!==frg) return false
     if(fvn!=='All'&&item.vendor!==fvn) return false
+    if(frl!=='All'&&(frl==='__none'?!!item.release_month:item.release_month!==frl)) return false
     if(fef!=='All'&&item.effort!==fef) return false
     if(sf&&!item.flagged) return false
     if(srch&&!item.name?.toLowerCase().includes(srch.toLowerCase())&&!item.item_id?.toLowerCase().includes(srch.toLowerCase())) return false
@@ -2444,7 +2454,7 @@ const sorted=items.filter(i=>!isItemDone(i)).sort((a,b)=>{
     for(const k of keys){
       const list=stories.filter(i=>(i.parent_project||'')===k)
       const pe=eps.filter(e=>epicProjName(e)===k)
-      out.push({__hdr:'project',key:'p:'+k,label:k||'No project',count:list.length,epicCount:pe.length})
+      out.push({__hdr:'project',key:'p:'+k,label:k||'No initiative',count:list.length,epicCount:pe.length})
       if(groupBy!=='epic'){out.push(...pe.map(e=>({__epic:e})),...list);continue}
       // Every epic of this project that's shown, or that holds a shown story, followed by its stories
       const pr=projects.find((p:any)=>p.name===k)
@@ -2495,7 +2505,7 @@ const sorted=items.filter(i=>!isItemDone(i)).sort((a,b)=>{
       'ID':i.item_id,'Item Name':i.name,'Description':i.description||'',
       'Priority':i.priority,'Rank':i.committed_priority??'',
       'Swimlane':i.swimlane||'','Status':i.status||'','Team':i.team||'',
-      'Effort':i.effort||'','Parent Project':i.parent_project||'','Epic':epicOf(i)?.name||'','Work Type':wtOf(i)==='sustain'?'Sustain':'New project',
+      'Effort':i.effort||'','Initiative':i.parent_project||'','Epic':epicOf(i)?.name||'','Work Type':wtOf(i)==='sustain'?'Sustain':'New initiative',
       'Request Type':i.request_type||'','Region':i.region||'','Vendor':i.vendor||'',
       'Vendor Date':i.vendor_delivery_date||'','WSJF':i.wsjf?parseFloat(i.wsjf):'',
       'RICE':rice(i)||'','Reach':i.reach||'','Impact':i.impact||'','Confidence':i.confidence??'',
@@ -2652,7 +2662,7 @@ const sorted=items.filter(i=>!isItemDone(i)).sort((a,b)=>{
             </div>
             <div style={{fontSize:11,color:'#7A8FA6',marginBottom:10,lineHeight:1.5}}>
               Works with Jira exports or hand-built files. Match by <b>RTL ID</b> or <b>Jira Key</b> → update; no match → insert (needs a Name/Summary).
-              Recognized columns: ID, Jira Key, Name, Type, Pri, Status, Description, Project, Size, Vendor, Vendor Date.
+              Recognized columns: ID, Jira Key, Name, Type, Pri, Status, Description, Initiative, Size, Vendor, Vendor Date.
               Blank cells never overwrite · unrecognized values are skipped with a note, never guessed.
             </div>
             <div style={{display:'flex',gap:8,alignItems:'center',marginBottom:10,flexWrap:'wrap' as const}}>
@@ -2660,8 +2670,8 @@ const sorted=items.filter(i=>!isItemDone(i)).sort((a,b)=>{
                 const f=e.target.files?.[0];if(!f)return
                 const rd=new FileReader();rd.onload=()=>analyzeCsv(String(rd.result||''));rd.readAsText(f)
               }} style={{fontSize:11,color:'#7A8FA6'}}/>
-              <select value={jrProj} onChange={e=>setJrProj(e.target.value)} title="Fallback project for new rows without a Project column value" style={{background:'#0D1B2A',border:'1px solid #243447',borderRadius:6,color:'#F4F6F8',fontSize:11,padding:'5px 8px',maxWidth:220}}>
-                <option value="">Default project for new rows: none</option>
+              <select value={jrProj} onChange={e=>setJrProj(e.target.value)} title="Fallback initiative for new rows without an Initiative column value" style={{background:'#0D1B2A',border:'1px solid #243447',borderRadius:6,color:'#F4F6F8',fontSize:11,padding:'5px 8px',maxWidth:220}}>
+                <option value="">Default initiative for new rows: none</option>
                 {projects.filter(p=>!PROJECT_TERMINAL.includes(p.status)).map(p=><option key={p.id} value={p.id}>{p.name}</option>)}
               </select>
             </div>
@@ -2719,10 +2729,17 @@ const sorted=items.filter(i=>!isItemDone(i)).sort((a,b)=>{
             {t.label} <span style={{fontSize:10,color:'#7A8FA6',marginLeft:4}}>{segCount(t.key)}</span>
           </button>
         ))}
-        {segNewPct!=null&&(()=>{
+        <div style={{display:'flex',border:'1px solid #243447',borderRadius:6,overflow:'hidden',marginLeft:12,marginBottom:4}}>
+          {[['list','≡ List'],['plan','🗓 Quarter planning']].map(([k,l])=>(
+            <button key={k} onClick={()=>setBview(k)} title={k==='plan'?'Plan tech debt and OpEx for a quarter, then into monthly releases':'The full backlog'}
+              style={{background:bview===k?'#C8973A':'#1E3048',color:bview===k?'#0D1B2A':'#C8C8D4',border:'none',fontSize:11,fontWeight:700,padding:'5px 10px',cursor:'pointer'}}>{l}</button>
+          ))}
+        </div>
+        <button onClick={()=>setRelMgr(true)} style={{background:'none',border:'1px solid #243447',borderRadius:6,color:'#C8C8D4',fontSize:11,padding:'5px 10px',cursor:'pointer',marginLeft:6,marginBottom:4}}>📦 Releases</button>
+        {bview!=='plan'&&segNewPct!=null&&(()=>{
           const target=100-sustainPct,off=Math.abs(segNewPct-target)>10
           return(
-            <div title={`Open items in the current filters, weighted by effort (S=1, M=2, L=3, XL=5). Target: ${target}% new projects, ${sustainPct}% sustain.`}
+            <div title={`Open items in the current filters, weighted by effort (S=1, M=2, L=3, XL=5). Target: ${target}% new initiatives, ${sustainPct}% sustain.`}
               style={{marginLeft:'auto',display:'flex',alignItems:'center',gap:8,fontSize:11,color:'#7A8FA6',padding:'0 0 4px'}}>
               <span>Effort split</span>
               <div style={{position:'relative',width:160,height:8,borderRadius:4,background:'#4A5D72',overflow:'hidden'}}>
@@ -2741,18 +2758,18 @@ const sorted=items.filter(i=>!isItemDone(i)).sort((a,b)=>{
         <select value={fp} onChange={e=>setFp(e.target.value)} style={sel}><option value="All">All Priorities</option>{PRIORITIES.map(p=><option key={p}>{p}</option>)}</select>
         <select value={fs} onChange={e=>setFs(e.target.value)} style={sel}><option value="All">All Swimlanes</option>{swimlaneOpts.map(s=><option key={s}>{s}</option>)}</select>
         <select value={fst} onChange={e=>setFst(e.target.value)} style={sel}><option value="All">All Statuses</option>{statusOpts.map(s=><option key={s}>{s}</option>)}</select>
-        <select value={fpp} onChange={e=>{setFpp(e.target.value);setFep('All')}} style={sel}><option value="All">All Projects</option>{[...new Set(items.map(i=>i.parent_project).filter(Boolean))].sort().map(p=><option key={p}>{p}</option>)}</select>
+        <select value={fpp} onChange={e=>{setFpp(e.target.value);setFep('All')}} style={sel}><option value="All">All Initiatives</option>{[...new Set(items.map(i=>i.parent_project).filter(Boolean))].sort().map(p=><option key={p}>{p}</option>)}</select>
         <select value={fep} onChange={e=>setFep(e.target.value)} style={sel}>
           <option value="All">All Epics</option>
           <option value="__none">No epic</option>
           {(epics as any[]).filter(e=>spaceOf(e)===space).map(e=>({e,pn:projects.find((p:any)=>p.id===e.project_id)?.name||''})).filter(({e,pn})=>(fpp==='All'||pn===fpp)&&(!e.project_id||pn))
             .sort((a,b)=>(a.pn||'~').localeCompare(b.pn||'~')||(a.e.sort_order??0)-(b.e.sort_order??0))
-            .map(({e,pn})=><option key={e.id} value={e.id}>{fpp==='All'?`${pn||'No project'} › ${e.name}`:e.name}</option>)}
+            .map(({e,pn})=><option key={e.id} value={e.id}>{fpp==='All'?`${pn||'No initiative'} › ${e.name}`:e.name}</option>)}
         </select>
-        <select value={groupBy} onChange={e=>setGroupBy(e.target.value)} title="Group the list by project, or by project and epic" style={{...sel,color:groupBy==='none'?'#7A8FA6':'#E07B2A',border:`1px solid ${groupBy==='none'?'#243447':'#E07B2A'}`}}>
+        <select value={groupBy} onChange={e=>setGroupBy(e.target.value)} title="Group the list by initiative, or by initiative and epic" style={{...sel,color:groupBy==='none'?'#7A8FA6':'#E07B2A',border:`1px solid ${groupBy==='none'?'#243447':'#E07B2A'}`}}>
           <option value="none">No grouping</option>
-          <option value="project">Group by project</option>
-          <option value="epic">Group by project › epic</option>
+          <option value="project">Group by initiative</option>
+          <option value="epic">Group by initiative › epic</option>
         </select>
         <select value={kind} onChange={e=>setKind(e.target.value)} title="Show epics, stories or both" style={{...sel,color:kind==='all'?'#7A8FA6':'#E07B2A',border:`1px solid ${kind==='all'?'#243447':'#E07B2A'}`}}>
           <option value="all">Epics & stories</option>
@@ -2762,6 +2779,11 @@ const sorted=items.filter(i=>!isItemDone(i)).sort((a,b)=>{
         <select value={frt} onChange={e=>setFrt(e.target.value)} style={sel}><option value="All">All Types</option>{rtOpts.map(r=><option key={r}>{r}</option>)}</select>
         <select value={frg} onChange={e=>setFrg(e.target.value)} style={sel}><option value="All">All Regions</option>{regionOpts.map(r=><option key={r}>{r}</option>)}</select>
         <select value={fvn} onChange={e=>setFvn(e.target.value)} style={sel}><option value="All">All Vendors</option>{vendors.map(v=><option key={v}>{v}</option>)}</select>
+        <select value={frl} onChange={e=>setFrl(e.target.value)} style={{...sel,color:frl==='All'?undefined:'#5DADE2'}}>
+          <option value="All">All Releases</option>
+          <option value="__none">No release</option>
+          {[...new Set([...items.map((i:any)=>i.release_month),...(releases as any[]).filter((r:any)=>!r.no_release).map((r:any)=>r.month)].filter(Boolean))].sort().map((k:any)=><option key={k} value={k}>📦 {fmtMonthKey(k)} · {releaseText(releases,k)}</option>)}
+        </select>
         <select value={fef} onChange={e=>setFef(e.target.value)} style={sel}><option value="All">All Efforts</option>{EFFORTS.map(e=><option key={e}>{e}</option>)}</select>
         <button onClick={()=>setSf(f=>!f)} style={{...sel,background:sf?'#7D2D00':'#1E3048',color:sf?'#FF8C42':'#7A8FA6',border:`1px solid ${sf?'#FF8C42':'#243447'}`}}>
           🚩{fc>0&&<span style={{background:'#C8973A',color:'#0D1B2A',borderRadius:10,padding:'0 5px',fontSize:10,fontWeight:700,marginLeft:3}}>{fc}</span>}
@@ -2770,19 +2792,23 @@ const sorted=items.filter(i=>!isItemDone(i)).sort((a,b)=>{
           <button onClick={exportExcel} title="Export current view to Excel in ranked order" style={{...sel,color:'#27AE60',border:'1px solid rgba(39,174,96,0.4)'}}>⬇ Excel</button>
           <button onClick={()=>{setJrOpen(true);setJrRows([]);setJrErr('');setJrDone('')}} title="Import CSV — Jira exports or hand-built files; matches by RTL ID or Jira Key to update, inserts the rest" style={{...sel,color:'#5DADE2',border:'1px solid rgba(93,173,226,0.4)'}}>⬆ Import CSV</button>
           <button onClick={()=>setSac(true)} style={{...sel,color:'#7A8FA6'}}>+ Column</button>
-          {setEpics&&<button onClick={addEpic} title={fpp!=='All'?`New epic in ${fpp}`:'New epic (set its project in the panel)'} style={{...sel,color:'#E07B2A',border:'1px solid rgba(224,123,42,0.5)',fontWeight:700}}>+ Epic</button>}
+          {setEpics&&<button onClick={addEpic} title={fpp!=='All'?`New epic in ${fpp}`:'New epic (set its initiative in the panel)'} style={{...sel,color:'#E07B2A',border:'1px solid rgba(224,123,42,0.5)',fontWeight:700}}>+ Epic</button>}
           <button onClick={()=>setAi(true)} style={{background:'#C8973A',color:'#0D1B2A',border:'none',borderRadius:6,padding:'5px 14px',fontSize:12,fontWeight:700,cursor:'pointer'}}>+ Add Item</button>
         </div>
       </div>
 
       <div style={{display:'flex',flex:1,overflow:'hidden'}}>
+        {bview==='plan'&&space==='work'?(
+          <QuarterPlanner items={items} setItems={setItems} projects={projects} setProjects={setProjects} releases={releases} setReleases={setReleases}
+            teams={TEAMS} workTypeOf={wtOf} onOpenItem={(i:any)=>{setSelEpicId(null);setSelected(i)}}/>
+        ):(
         <div data-backlog-table="true" style={{flex:1,overflowX:'auto',overflowY:'auto'}}>
           <table style={{width:'100%',borderCollapse:'collapse',minWidth:1400}}>
             <thead style={{position:'sticky',top:0,zIndex:10,background:'#162436'}}>
           <tr>
                 <th style={{...TH,width:32}}></th>
                 {[
-                  ['item_id','ID',85],['name','Item Name',200],['parent_project','Project',130],['epic','Epic',130],['work_type','Work',80],
+                  ['item_id','ID',85],['name','Item Name',200],['parent_project','Initiative',130],['epic','Epic',130],['work_type','Work',80],['release_month','Release',95],
                   ['priority','Priority',70],['committed_priority','Rank',55],
                   ['swimlane','Swimlane',110],['status','Status',130],['team','Team',50],
                   ['effort','Effort',55],
@@ -2812,7 +2838,7 @@ const sorted=items.filter(i=>!isItemDone(i)).sort((a,b)=>{
             </thead>
             <tbody>
               {displayRows.map((item:any,idx:number)=>{
-                if(item.__epic)return <EpicRow key={'epic:'+item.__epic.id} epic={item.__epic} projects={projects} items={items} ccCount={cc.length}
+                if(item.__epic)return <EpicRow key={'epic:'+item.__epic.id} releases={releases} epic={item.__epic} projects={projects} items={items} ccCount={cc.length}
                   isSel={selEpicId===item.__epic.id} onSelect={()=>{setSelected(null);setSelEpicId(selEpicId===item.__epic.id?null:item.__epic.id)}}/>
                 if(item.__hdr)return(
                   <tr key={item.key}>
@@ -2865,7 +2891,7 @@ const sorted=items.filter(i=>!isItemDone(i)).sort((a,b)=>{
                               ✓ committed
                             </span>
                           :!ITEM_TERMINAL.includes(item.status)&&(
-                            <span onClick={e=>{e.stopPropagation();commitBacklogItem(item)}} title="Commit — set real dates, either from the project's timeline or your own"
+                            <span onClick={e=>{e.stopPropagation();commitBacklogItem(item)}} title="Commit — set real dates, either from the initiative's timeline or your own"
                               style={{background:'none',color:'#7A8FA6',border:'1px dashed #243447',borderRadius:4,padding:'1px 6px',fontSize:9,fontWeight:700,flexShrink:0,cursor:'pointer'}}>
                               + Commit
                             </span>
@@ -2889,7 +2915,8 @@ const sorted=items.filter(i=>!isItemDone(i)).sort((a,b)=>{
                       :<span style={{fontSize:11,color:'#3A4A5E'}}>—</span>})()}</td>
                     <td style={TD}>{wtOf(item)==='sustain'
                       ?<span title="Sustain: tech debt, stabilization & enhancements" style={{fontSize:10,fontWeight:700,color:'#C8D4E0',background:'#4A5D72',borderRadius:4,padding:'2px 7px',whiteSpace:'nowrap' as const}}>⟳ Sustain</span>
-                      :<span title="New project work" style={{fontSize:10,fontWeight:700,color:'#C8973A',border:'1px solid rgba(200,151,58,0.5)',borderRadius:4,padding:'1px 7px',whiteSpace:'nowrap' as const}}>✦ New</span>}</td>
+                      :<span title="New initiative work" style={{fontSize:10,fontWeight:700,color:'#C8973A',border:'1px solid rgba(200,151,58,0.5)',borderRadius:4,padding:'1px 7px',whiteSpace:'nowrap' as const}}>✦ New</span>}</td>
+                    <td style={TD}>{item.release_month?<span title={`${fmtMonthKey(item.release_month)} release · ${releaseText(releases,item.release_month)}`} style={{fontSize:10,fontWeight:700,color:releaseOf(releases,item.release_month)?.no_release?'#D4820A':'#5DADE2',border:'1px solid rgba(93,173,226,0.4)',borderRadius:4,padding:'1px 6px',whiteSpace:'nowrap' as const}}>📦 {fmtMonthKey(item.release_month)}</span>:<span style={{fontSize:11,color:'#3A4A5E'}}>—</span>}</td>
                     <td style={TD}><span style={{background:pclr.bg,color:pclr.text,borderRadius:4,padding:'2px 8px',fontSize:10,fontWeight:700,whiteSpace:'nowrap' as const}}>{item.priority}</span></td>
                     <td style={{...TD,textAlign:'center' as const,padding:'0 4px'}} onClick={e=>e.stopPropagation()}>
                       {(item.priority==='P1'||item.priority==='P2')
@@ -2916,7 +2943,7 @@ const sorted=items.filter(i=>!isItemDone(i)).sort((a,b)=>{
                     <td style={{...TD,fontSize:11,color:'#7A8FA6'}}>{item.start_date||'—'}</td>
                     <td style={{...TD,fontSize:11,color:'#7A8FA6'}}>{item.end_date||'—'}</td>
                     <td style={{...TD,textAlign:'center' as const}}>
-                      {violation&&<span title="Outside project timeline" style={{fontSize:14}}>⚠️</span>}
+                      {violation&&<span title="Outside initiative timeline" style={{fontSize:14}}>⚠️</span>}
                     </td>
                     <td style={{...TD,textAlign:'center' as const}} onClick={e=>{e.stopPropagation();flag(item.id)}}>
                       <button title={item.flagged?`Flagged: ${item.flag_audience||'both'} — click to cycle`:'Click to flag for dev'} style={{background:'none',border:'none',cursor:'pointer',fontSize:15,opacity:item.flagged?1:0.25,whiteSpace:'nowrap' as const}}>🚩{item.flagged&&<span style={{fontSize:9,fontWeight:800,color:'#C8973A',verticalAlign:'top'}}>{flagLabel(item)}</span>}</button>
@@ -2929,8 +2956,11 @@ const sorted=items.filter(i=>!isItemDone(i)).sort((a,b)=>{
           </table>
           {displayRows.length===0&&<div style={{textAlign:'center',padding:60,color:'#7A8FA6'}}>No epics or stories match your filters.</div>}
         </div>
+        )}
 
-        {selEpic&&<EpicPanel key={selEpic.id} epic={selEpic} projects={projects} items={items} setItems={setItems} setEpics={setEpics}
+        {relMgr&&<ReleasesManager releases={releases} setReleases={setReleases} onClose={()=>setRelMgr(false)}
+          counts={(k:string)=>[...items,...projects,...(epics as any[])].filter((x:any)=>x.release_month===k).length}/>}
+        {selEpic&&<EpicPanel key={selEpic.id} releases={releases} epic={selEpic} projects={projects} items={items} setItems={setItems} setEpics={setEpics}
           statusOpts={statusOpts} priorities={['P1','P2','P3','P4']} teams={TEAMS} efforts={EFFORTS}
           onClose={()=>setSelEpicId(null)} onDelete={()=>deleteEpic(selEpic)}
           onConvert={async()=>{const it=await convertEpicToStory(selEpic,{projects,items,setItems,setEpics,nextId:nextItemId(items)});if(it){setSelEpicId(null);setSelected(it)}}}/>}
@@ -2941,7 +2971,7 @@ const sorted=items.filter(i=>!isItemDone(i)).sort((a,b)=>{
                 <div style={{fontSize:10,color:'#7A8FA6',fontFamily:'monospace'}}>{selected.item_id}</div>
                 <div style={{fontSize:13,fontWeight:700,color:'#F4F6F8',marginTop:2,lineHeight:1.3}}>{selected.name}</div>
               </div>
-              {hasViolation(selected)&&<span title="Outside project timeline" style={{fontSize:16}}>⚠️</span>}
+              {hasViolation(selected)&&<span title="Outside initiative timeline" style={{fontSize:16}}>⚠️</span>}
               <button onClick={()=>flag(selected.id)} title={selected.flagged?`Flagged: ${selected.flag_audience||'both'} — click to cycle`:'Click to flag for dev'} style={{background:'none',border:'none',cursor:'pointer',fontSize:18,opacity:selected.flagged?1:0.3}}>🚩{selected.flagged&&<span style={{fontSize:10,fontWeight:800,color:'#C8973A',verticalAlign:'top'}}>{flagLabel(selected)}</span>}</button>
               <button onClick={()=>setSelected(null)} style={{background:'none',border:'none',cursor:'pointer',fontSize:20,color:'#7A8FA6'}}>×</button>
             </div>
@@ -2949,7 +2979,7 @@ const sorted=items.filter(i=>!isItemDone(i)).sort((a,b)=>{
               const proj=projects.find(p=>p.name===selected.parent_project)
               return proj?(
                 <div style={{padding:'8px 16px',background:'rgba(192,57,43,0.1)',borderBottom:'1px solid rgba(192,57,43,0.3)',fontSize:11,color:'#E74C3C'}}>
-                  ⚠️ Outside project window: {proj.start_date} → {proj.end_date}
+                  ⚠️ Outside initiative window: {proj.start_date} → {proj.end_date}
                 </div>
               ):null
             })()}
@@ -2964,7 +2994,7 @@ const sorted=items.filter(i=>!isItemDone(i)).sort((a,b)=>{
               <EditableDropdown field="request_type" value={selected.request_type} options={rtOpts} setOptions={setRtOpts} label="Request Type"/>
               <EditableDropdown field="region" value={selected.region} options={regionOpts} setOptions={setRegionOpts} label="Region"/>
               <EditableDropdown field="vendor" value={selected.vendor} options={vendors} setOptions={setVendors} label="Vendor"/>
-              <EditableDropdown field="parent_project" value={selected.parent_project} options={parentOpts} setOptions={null} label="Parent Project"/>
+              <EditableDropdown field="parent_project" value={selected.parent_project} options={parentOpts} setOptions={null} label="Parent Initiative"/>
               {(()=>{
                 const proj=projects.find((p:any)=>p.name===selected.parent_project)
                 const opts=proj?(epics as any[]).filter(e=>e.project_id===proj.id):[]
@@ -2972,25 +3002,30 @@ const sorted=items.filter(i=>!isItemDone(i)).sort((a,b)=>{
                   <div>
                     <div style={{fontSize:11,color:'#7A8FA6',marginBottom:4,letterSpacing:0.5}}>EPIC</div>
                     <select value={opts.some(e=>e.id===selected.epic_id)?selected.epic_id:''} disabled={!proj} onChange={e=>upd(selected.id,'epic_id',e.target.value||null)}
-                      title={proj?(opts.length?'':'This project has no epics yet. Add them from the project panel.'):'Set a parent project first'}
+                      title={proj?(opts.length?'':'This initiative has no epics yet. Add them from the initiative panel.'):'Set a parent initiative first'}
                       style={{width:'100%',background:'#1E3048',color:'#F4F6F8',border:'1px solid #243447',borderRadius:6,padding:'7px 10px',fontSize:13,cursor:proj?'pointer':'not-allowed',opacity:proj?1:0.5}}>
-                      <option value="">{!proj?'Set a parent project first':opts.length?'No epic':'No epics in this project yet'}</option>
+                      <option value="">{!proj?'Set a parent initiative first':opts.length?'No epic':'No epics in this initiative yet'}</option>
                       {opts.map(e=><option key={e.id} value={e.id}>{e.name}</option>)}
                     </select>
                   </div>
                 )
               })()}
+              <div>
+                <div style={{fontSize:11,color:'#7A8FA6',marginBottom:4,letterSpacing:0.5}}>RELEASE</div>
+                <ReleaseSelect value={selected.release_month} releases={releases} onChange={(v:any)=>upd(selected.id,'release_month',v)}
+                  style={{width:'100%',background:'#1E3048',color:'#F4F6F8',border:'1px solid #243447',borderRadius:6,padding:'7px 10px',fontSize:13,cursor:'pointer'}}/>
+              </div>
               {space==='work'&&(()=>{
                 const proj=projects.find((p:any)=>p.name===selected.parent_project)
                 const auto=proj?workTypeOfProject(proj):(SUSTAIN_REQUEST_TYPES.includes(selected.request_type)?'sustain':'new')
-                const name=(k:string)=>k==='sustain'?'Sustain (tech debt, stabilization & enhancements)':'New project'
+                const name=(k:string)=>k==='sustain'?'Sustain (tech debt, stabilization & enhancements)':'New initiative'
                 return(
                   <div>
                     <div style={{fontSize:11,color:'#7A8FA6',marginBottom:4,letterSpacing:0.5}}>WORK TYPE</div>
                     <select value={selected.work_type||''} onChange={e=>upd(selected.id,'work_type',e.target.value||null)}
                       style={{width:'100%',background:'#1E3048',color:'#F4F6F8',border:'1px solid #243447',borderRadius:6,padding:'7px 10px',fontSize:13,cursor:'pointer'}}>
-                      <option value="">Automatic: {name(auto)}{proj?' (from project)':' (from request type)'}</option>
-                      <option value="new">New project</option>
+                      <option value="">Automatic: {name(auto)}{proj?' (from initiative)':' (from request type)'}</option>
+                      <option value="new">New initiative</option>
                       <option value="sustain">Sustain (tech debt, stabilization & enhancements)</option>
                     </select>
                   </div>
@@ -3119,8 +3154,12 @@ const sorted=items.filter(i=>!isItemDone(i)).sort((a,b)=>{
 }
 
 // ── ROADMAP ───────────────────────────────────────────────────────────────
-function Roadmap({items,setItems,projects,setProjects,milestones,setMilestones,tasks=[],setTasks,sprints=[],itemAssignments=[],projectRoles=[],people=[],roles=[],onOpenProject,deps=[],setDeps}:{items:any[],projects:any[],setItems:any,setProjects:any,milestones:any[],setMilestones?:any,tasks?:any[],setTasks?:any,sprints?:any[],itemAssignments?:any[],projectRoles?:any[],people?:any[],roles?:any[],onOpenProject?:(p:any)=>void,deps?:any[],setDeps?:any}) {
+function Roadmap({items,setItems,projects,setProjects,milestones,setMilestones,tasks=[],setTasks,sprints=[],itemAssignments=[],projectRoles=[],people=[],roles=[],onOpenProject,deps=[],setDeps,releases=[],setReleases,epics=[]}:{items:any[],projects:any[],setItems:any,setProjects:any,milestones:any[],setMilestones?:any,tasks?:any[],setTasks?:any,sprints?:any[],itemAssignments?:any[],projectRoles?:any[],people?:any[],roles?:any[],onOpenProject?:(p:any)=>void,deps?:any[],setDeps?:any,releases?:any[],setReleases?:any,epics?:any[]}) {
   const [showSprints,setShowSprints]=useState(false)
+  const [showReleases,setShowReleasesState]=useState<boolean>(()=>{try{return localStorage.getItem('pg_rm_releases')!=='0'}catch{return true}})
+  const setShowReleases=(v:boolean)=>{setShowReleasesState(v);try{localStorage.setItem('pg_rm_releases',v?'1':'0')}catch{}}
+  const [relPopover,setRelPopover]=useState<any>(null) // month key of the clicked release
+  const [relMgr,setRelMgr]=useState(false)
   const [sprintPopover,setSprintPopover]=useState<any>(null) // {start_date,end_date} of clicked band
   const [view,setView]=useState('quarter')
   const [colorBy,setColorBy]=useState('status')
@@ -3137,7 +3176,7 @@ function Roadmap({items,setItems,projects,setProjects,milestones,setMilestones,t
     setProjects((prev:any[])=>prev.map((p:any)=>p.id===quickProject.id?{...p,...fields}:p))
     setQuickProject((p:any)=>({...p,...fields}))
     const{error}=await supabase.from('projects').update(fields).eq('id',quickProject.id)
-    if(error){alert('Failed to update project: '+error.message);return}
+    if(error){alert('Failed to update initiative: '+error.message);return}
     if(fields.status&&PROJECT_TERMINAL.includes(fields.status)&&!wasTerminal){
       const open=items.filter((i:any)=>i.parent_project===quickProject.name&&!ITEM_TERMINAL.includes(i.status))
       if(open.length){
@@ -3537,9 +3576,25 @@ function Roadmap({items,setItems,projects,setProjects,milestones,setMilestones,t
   const COLORS=['#C0392B','#D4820A','#2E86AB','#27AE60','#8E44AD','#E74C3C','#C8973A','#1ABC9C','#2C3E50','#E67E22']
   const ROW_H=40,PARENT_H=52
 
+  // Monthly releases in view: dated ones at their date; tagged months without a date yet at
+  // the month's end (dashed); months marked as having no release are left out
+  const relMarks=(()=>{
+    if(!showReleases)return[]
+    const keys=new Set<string>([...(releases as any[]).map((r:any)=>r.month),...[...items,...projects,...(epics as any[])].map((x:any)=>x.release_month).filter(Boolean)])
+    return[...keys].map(k=>{
+      const r=releaseOf(releases,k)
+      if(r?.no_release)return null
+      const[y,m]=k.split('-').map(Number)
+      const date=r?.release_date||`${k}-${String(new Date(y,m,0).getDate()).padStart(2,'0')}`
+      const d=new Date(date+'T12:00:00')
+      if(d<totalStart||d>totalEnd)return null
+      return{k,date,dated:!!r?.release_date,x:pct(date)}
+    }).filter(Boolean) as any[]
+  })()
   function CfShading(){
     return(
-      <>{cols.map((col,ci)=>(
+      <>{relMarks.map((r:any)=><div key={'rel-'+r.k} style={{position:'absolute',top:0,bottom:0,left:r.x,width:0,borderLeft:`1px ${r.dated?'solid':'dashed'} rgba(93,173,226,0.45)`,zIndex:1,pointerEvents:'none'}}/>)}
+      {cols.map((col,ci)=>(
         <Fragment key={`sh-${col.key}`}>
           {col.isCodeFreeze&&<div style={{position:'absolute',top:0,bottom:0,left:ci*COL_W,width:COL_W,background:'rgba(192,57,43,0.07)',zIndex:0,borderLeft:'1px dashed rgba(192,57,43,0.3)',borderRight:'1px dashed rgba(192,57,43,0.3)',pointerEvents:'none'}}/>}
           {/* Weekend columns shaded full-height too — at Day zoom this is the difference
@@ -3597,7 +3652,7 @@ function Roadmap({items,setItems,projects,setProjects,milestones,setMilestones,t
         <div style={{display:'flex',alignItems:'center',gap:6}}>
           <span style={{fontSize:11,color:'#7A8FA6'}}>Color</span>
           <div style={{display:'flex',gap:3}}>
-            {[['project','Project'],['status','Status']].map(([k,label])=>(
+            {[['project','Initiative'],['status','Status']].map(([k,label])=>(
               <button key={k} onClick={()=>setColorBy(k)} style={{background:colorBy===k?'#C8973A':'#1E3048',color:colorBy===k?'#0D1B2A':'#7A8FA6',border:`1px solid ${colorBy===k?'#C8973A':'#243447'}`,borderRadius:6,padding:'3px 8px',fontSize:11,cursor:'pointer',fontWeight:colorBy===k?700:400}}>{label}</button>
             ))}
           </div>
@@ -3612,12 +3667,16 @@ function Roadmap({items,setItems,projects,setProjects,milestones,setMilestones,t
           </select>
           <button onClick={()=>setSortDir(d=>d==='asc'?'desc':'asc')} style={{...sel,fontSize:13,padding:'3px 10px'}}>{sortDir==='asc'?'↑':'↓'}</button>
         </div>}
-        <label style={{display:'flex',alignItems:'center',gap:5,fontSize:11,color:'#7A8FA6',cursor:'pointer',whiteSpace:'nowrap' as const}} title="Remove Complete/Cancelled projects from the board">
+        <label style={{display:'flex',alignItems:'center',gap:5,fontSize:11,color:'#7A8FA6',cursor:'pointer',whiteSpace:'nowrap' as const}} title="Remove Complete/Cancelled initiatives from the board">
           <input type="checkbox" checked={hideDone} onChange={e=>setHideDone(e.target.checked)} style={{accentColor:'#C8973A'}}/>Hide completed
         </label>
         <label style={{display:'flex',alignItems:'center',gap:5,fontSize:11,color:'#7A8FA6',cursor:'pointer',whiteSpace:'nowrap' as const}} title="Overlay sprint windows on the timeline">
           <input type="checkbox" checked={showSprints} onChange={e=>setShowSprints(e.target.checked)} style={{accentColor:'#C8973A'}}/>Sprints
         </label>
+        <label style={{display:'flex',alignItems:'center',gap:5,fontSize:12,color:'#7A8FA6',cursor:'pointer'}} title="Show the monthly releases">
+          <input type="checkbox" checked={showReleases} onChange={e=>setShowReleases(e.target.checked)} style={{accentColor:'#5DADE2'}}/>Releases
+        </label>
+        {showReleases&&setReleases&&<button onClick={()=>setRelMgr(true)} style={{background:'none',border:'1px solid #243447',borderRadius:6,color:'#C8C8D4',fontSize:11,padding:'3px 8px',cursor:'pointer'}}>📦 Set dates</button>}
         {!mobileR&&<div style={{display:'flex',alignItems:'center',gap:6}}>
           <span style={{fontSize:12,color:'#7A8FA6'}}>Zoom</span>
           <input type="range" min={0.5} max={3} step={0.1} value={zoom} onChange={e=>{
@@ -3636,7 +3695,7 @@ function Roadmap({items,setItems,projects,setProjects,milestones,setMilestones,t
         {!mobileR&&<button onClick={()=>setShowSettings(true)} style={{...sel,fontSize:11,padding:'4px 10px',color:'#E74C3C',border:'1px solid #E74C3C'}}>🔒 Code Freeze</button>}
         {totalViolations>0&&<div style={{background:'rgba(192,57,43,0.15)',border:'1px solid rgba(192,57,43,0.4)',borderRadius:6,padding:'4px 10px',fontSize:11,color:'#E74C3C'}}>⚠️ {totalViolations} violation{totalViolations!==1?'s':''}</div>}
         {!mobileR&&<div style={{display:'flex',gap:10,fontSize:11,marginLeft:'auto',color:'#7A8FA6',alignItems:'center'}}>
-          <span style={{whiteSpace:'nowrap' as const}}>{groups.length} projects · {withDates.length} committed · {uncommitted.length} backlog</span>
+          <span style={{whiteSpace:'nowrap' as const}}>{groups.length} initiatives · {withDates.length} committed · {uncommitted.length} backlog</span>
           <span style={{display:'flex',gap:8,flexWrap:'wrap' as const,alignItems:'center',justifyContent:'flex-end',opacity:0.85}}>
             {[...new Set(withDates.map(i=>i.status).filter(Boolean))].map((st:any)=>(
               <span key={st} style={{fontSize:9,color:sc(st),fontWeight:700,whiteSpace:'nowrap' as const}}>● {st}</span>
@@ -3694,7 +3753,7 @@ function Roadmap({items,setItems,projects,setProjects,milestones,setMilestones,t
           {/* Frozen label column */}
           <div style={{width:220,flexShrink:0,overflowY:'hidden',borderRight:'1px solid #243447',zIndex:6,background:'#0D1B2A',boxShadow:'4px 0 12px rgba(0,0,0,0.6)',display:'flex',flexDirection:'column'}}>
             <div style={{height:36,flexShrink:0,background:'#162436',borderBottom:'1px solid #243447',padding:'0 12px',fontSize:11,fontWeight:700,color:'#7A8FA6',letterSpacing:1,display:'flex',alignItems:'center'}}>
-              PROJECT / ITEM
+              INITIATIVE / ITEM
             </div>
             {/* Matching spacer for the sprint ruler on the bar side — without this, the
                 label column and the bars fall out of sync by exactly the ruler's height
@@ -3715,7 +3774,7 @@ function Roadmap({items,setItems,projects,setProjects,milestones,setMilestones,t
                       </button>
                       <div style={{overflow:'hidden',flex:1}}>
                         <div style={{display:'flex',alignItems:'center',gap:5,marginBottom:2}}>
-                          <span onClick={()=>setQuickProject(group)} title="Click to edit this project" style={{fontSize:12,fontWeight:700,color:'#F4F6F8',overflow:'hidden',whiteSpace:'nowrap' as const,textOverflow:'ellipsis',maxWidth:110,cursor:'pointer'}}>{group.name}{group.ongoing?' ∞':''}</span>
+                          <span onClick={()=>setQuickProject(group)} title="Click to edit this initiative" style={{fontSize:12,fontWeight:700,color:'#F4F6F8',overflow:'hidden',whiteSpace:'nowrap' as const,textOverflow:'ellipsis',maxWidth:110,cursor:'pointer'}}>{group.name}{group.ongoing?' ∞':''}</span>
                           <span style={{fontSize:10,color:rc,fontWeight:700,flexShrink:0}}>{group.rag==='Green'?'🟢':group.rag==='Amber'?'🟡':group.rag==='Red'?'🔴':'⚪'}</span>
                           {group.violations.length>0&&<span style={{fontSize:9,color:'#E74C3C',flexShrink:0}}>⚠️</span>}
                         </div>
@@ -3747,7 +3806,7 @@ function Roadmap({items,setItems,projects,setProjects,milestones,setMilestones,t
                       {getCollapsed()['__orphans']?'▶':'▼'}
                     </button>
                     <div>
-                      <div style={{fontSize:12,fontWeight:700,color:'#7A8FA6'}}>No Project Assigned</div>
+                      <div style={{fontSize:12,fontWeight:700,color:'#7A8FA6'}}>No Initiative Assigned</div>
                       <div style={{fontSize:10,color:'#7A8FA6'}}>{orphans.length} items</div>
                     </div>
                   </div>
@@ -3855,6 +3914,42 @@ function Roadmap({items,setItems,projects,setProjects,milestones,setMilestones,t
                   ))}
                 </div>
               )}
+
+              {showReleases&&relMarks.length>0&&(
+                <div style={{position:'sticky' as const,top:showSprints&&sprintBands.length>0?60:36,zIndex:9,height:24,background:'#0D1B2A',borderBottom:'1px solid #243447'}}>
+                  {relMarks.map((r:any)=>{
+                    const tagged=[...projects.filter((p:any)=>p.release_month===r.k).map((p:any)=>({kind:'Initiative',name:p.name})),
+                      ...(epics as any[]).filter((e:any)=>e.release_month===r.k).map((e:any)=>({kind:'Epic',name:e.name})),
+                      ...items.filter((i:any)=>i.release_month===r.k).map((i:any)=>({kind:'Story',name:i.name,id:i.item_id}))]
+                    return(
+                      <div key={r.k} style={{position:'absolute',left:r.x,top:0,bottom:0,transform:'translateX(-50%)',display:'flex',alignItems:'center'}}>
+                        <span onClick={()=>setRelPopover(relPopover===r.k?null:r.k)} title={`${fmtMonthKey(r.k)} release${r.dated?' · '+r.date:' · date not set'}\n${tagged.length} tagged. Click for the list.`}
+                          style={{background:r.dated?'#5DADE2':'transparent',color:r.dated?'#0D1B2A':'#5DADE2',border:'1px '+(r.dated?'solid':'dashed')+' #5DADE2',fontSize:10,fontWeight:800,padding:'1px 7px',borderRadius:10,whiteSpace:'nowrap' as const,cursor:'pointer'}}>
+                          📦 {fmtMonthKey(r.k).slice(0,3)}{tagged.length?` · ${tagged.length}`:''}
+                        </span>
+                        {relPopover===r.k&&(
+                          <div onClick={e=>e.stopPropagation()} style={{position:'absolute',top:24,left:'50%',transform:'translateX(-50%)',background:'#162436',border:'1px solid #5DADE2',borderRadius:8,padding:'10px 12px',width:280,maxHeight:320,overflowY:'auto',zIndex:30,boxShadow:'0 8px 24px rgba(0,0,0,0.5)'}}>
+                            <div style={{display:'flex',alignItems:'center',marginBottom:6}}>
+                              <span style={{fontSize:12,fontWeight:800,color:'#F4F6F8',flex:1}}>📦 {fmtMonthKey(r.k)} release</span>
+                              <button onClick={()=>setRelPopover(null)} style={{background:'none',border:'none',color:'#7A8FA6',cursor:'pointer',fontSize:16}}>×</button>
+                            </div>
+                            <div style={{fontSize:11,color:'#7A8FA6',marginBottom:6}}>{r.dated?r.date:'Date not set yet'}</div>
+                            {tagged.map((t:any,ix:number)=>(
+                              <div key={ix} style={{display:'flex',gap:6,fontSize:11,padding:'3px 0',borderTop:'1px solid #1C2C3F'}}>
+                                <span style={{color:t.kind==='Initiative'?'#C8973A':t.kind==='Epic'?'#E07B2A':'#7A8FA6',fontSize:9.5,fontWeight:700,width:58,flexShrink:0}}>{t.kind.toUpperCase()}</span>
+                                <span style={{color:'#F4F6F8'}}>{t.id?<span style={{color:'#7A8FA6',fontFamily:'monospace'}}>{t.id} </span>:null}{t.name}</span>
+                              </div>
+                            ))}
+                            {!tagged.length&&<div style={{fontSize:11,color:'#3A4A5E',fontStyle:'italic'}}>Nothing tagged to this release yet.</div>}
+                          </div>
+                        )}
+                      </div>
+                    )
+                  })}
+                </div>
+              )}
+              {relMgr&&setReleases&&<ReleasesManager releases={releases} setReleases={setReleases} onClose={()=>setRelMgr(false)}
+                counts={(k:string)=>[...items,...projects,...(epics as any[])].filter((x:any)=>x.release_month===k).length}/>}
 
               {/* Project groups */}
               {groups.map((group:any)=>{
@@ -3988,7 +4083,7 @@ function Roadmap({items,setItems,projects,setProjects,milestones,setMilestones,t
               <div style={{borderBottom:'1px solid #243447',flexShrink:0}}>
                 <button onClick={()=>setProjectsPanelOpen(o=>!o)} style={{background:'none',border:'none',cursor:'pointer',padding:'10px 12px',display:'flex',alignItems:'center',gap:6,color:'#2E86AB',fontSize:11,fontWeight:700,letterSpacing:1,width:'100%',whiteSpace:'nowrap' as const}}>
                   <span style={{fontSize:10}}>{projectsPanelOpen?'▼':'▶'}</span>
-                  <span>◈ PROJECTS ({filteredProjects.filter(p=>(!p.start_date||!p.end_date)&&!p.ongoing).length})</span>
+                  <span>◈ INITIATIVES ({filteredProjects.filter(p=>(!p.start_date||!p.end_date)&&!p.ongoing).length})</span>
                   <span style={{marginLeft:'auto',fontSize:9,color:'#7A8FA6',fontWeight:400}}>drag to set dates</span>
                 </button>
                 {projectsPanelOpen&&(
@@ -4021,7 +4116,7 @@ function Roadmap({items,setItems,projects,setProjects,milestones,setMilestones,t
                         </div>
                       )
                     })}
-                    {filteredProjects.filter(p=>!p.start_date||!p.end_date).length===0&&<div style={{fontSize:11,color:'#7A8FA6',fontStyle:'italic',padding:'8px 4px'}}>All projects dated ✓</div>}
+                    {filteredProjects.filter(p=>!p.start_date||!p.end_date).length===0&&<div style={{fontSize:11,color:'#7A8FA6',fontStyle:'italic',padding:'8px 4px'}}>All initiatives dated ✓</div>}
                   </div>
                 )}
               </div>
@@ -4034,7 +4129,7 @@ function Roadmap({items,setItems,projects,setProjects,milestones,setMilestones,t
                 </button>
                 {backlogSectionOpen&&(
                   <div style={{padding:'8px 8px 10px'}}>
-                    <div style={{fontSize:10,color:'#7A8FA6',marginBottom:8,lineHeight:1.5}}>Drag onto a project row · Drag roadmap bars here to remove</div>
+                    <div style={{fontSize:10,color:'#7A8FA6',marginBottom:8,lineHeight:1.5}}>Drag onto an initiative row · Drag roadmap bars here to remove</div>
                     {uncommitted.length===0&&!backlogHover&&<div style={{textAlign:'center' as const,padding:16,color:'#7A8FA6',fontSize:11}}><div style={{fontSize:18,marginBottom:6}}>🎯</div>All items committed!</div>}
                     {uncommitted.map(item=>{
                       const pclr=pc(item.priority)
@@ -4089,7 +4184,7 @@ function Roadmap({items,setItems,projects,setProjects,milestones,setMilestones,t
         <div style={{position:'fixed',inset:0,background:'rgba(0,0,0,0.7)',zIndex:200,display:'flex',alignItems:'center',justifyContent:'center'}}>
           <div style={{background:'#162436',border:'1px solid #243447',borderRadius:12,padding:28,width:460}}>
             <div style={{fontSize:16,fontWeight:700,color:'#F4F6F8',marginBottom:4}}>Edit Item</div>
-            <div style={{fontSize:10,color:'#7A8FA6',fontFamily:'monospace',marginBottom:20}}>{editing.item_id} · {editing.parent_project||'No project'}</div>
+            <div style={{fontSize:10,color:'#7A8FA6',fontFamily:'monospace',marginBottom:20}}>{editing.item_id} · {editing.parent_project||'No initiative'}</div>
             <div style={{marginBottom:12}}>
               <div style={{fontSize:11,color:'#7A8FA6',marginBottom:4}}>Name</div>
               <input value={editForm.name} onChange={e=>setEditForm(p=>({...p,name:e.target.value}))} style={{width:'100%',background:'#1E3048',color:'#F4F6F8',border:'1px solid #243447',borderRadius:6,padding:'7px 10px',fontSize:13,boxSizing:'border-box' as const}}/>
@@ -4125,14 +4220,14 @@ function Roadmap({items,setItems,projects,setProjects,milestones,setMilestones,t
               </div>
             </div>
             <div style={{marginBottom:12}}>
-              <div style={{fontSize:11,color:'#7A8FA6',marginBottom:4}}>Assign to Project</div>
+              <div style={{fontSize:11,color:'#7A8FA6',marginBottom:4}}>Assign to Initiative</div>
               <select value={editing.parent_project||''} onChange={async e=>{
                 const v=e.target.value
                 setEditing({...editing,parent_project:v})
                 setItems(items.map(i=>i.id===editing.id?{...i,parent_project:v}:i))
                 await supabase.from('items').update({parent_project:v}).eq('id',editing.id)
               }} style={{width:'100%',background:'#1E3048',color:'#F4F6F8',border:'1px solid #243447',borderRadius:6,padding:'7px 8px',fontSize:12}}>
-                <option value="">— No project —</option>
+                <option value="">— No initiative —</option>
                 {projects.map(p=><option key={p.id} value={p.name}>{p.name}</option>)}
               </select>
             </div>
@@ -4210,7 +4305,7 @@ function Roadmap({items,setItems,projects,setProjects,milestones,setMilestones,t
               <button onClick={()=>setDetailItem(null)} style={{marginLeft:'auto',background:'none',border:'none',color:'#7A8FA6',fontSize:18,cursor:'pointer',lineHeight:1}}>✕</button>
             </div>
             <div style={{display:'flex',flexWrap:'wrap' as const,gap:6,margin:'8px 0 14px'}}>
-              {[['Swimlane',detailItem.swimlane],['Team',detailItem.team],['Effort',detailItem.effort],['Type',detailItem.request_type],['Region',detailItem.region],['Vendor',detailItem.vendor],['Project',detailItem.parent_project],['WSJF',detailItem.wsjf?parseFloat(detailItem.wsjf).toFixed(1):null],['RICE',rice(detailItem)]].filter(([,v])=>v).map(([k,v])=>(
+              {[['Swimlane',detailItem.swimlane],['Team',detailItem.team],['Effort',detailItem.effort],['Type',detailItem.request_type],['Region',detailItem.region],['Vendor',detailItem.vendor],['Initiative',detailItem.parent_project],['WSJF',detailItem.wsjf?parseFloat(detailItem.wsjf).toFixed(1):null],['RICE',rice(detailItem)]].filter(([,v])=>v).map(([k,v])=>(
                 <span key={k as string} style={{background:'#1E3048',border:'1px solid #243447',borderRadius:4,padding:'3px 8px',fontSize:10,color:'#7A8FA6'}}>{k}: <span style={{color:'#F4F6F8',fontWeight:600}}>{v}</span></span>
               ))}
             </div>
@@ -4348,7 +4443,7 @@ function Roadmap({items,setItems,projects,setProjects,milestones,setMilestones,t
                   {i.end_date&&<span style={{color:'#7A8FA6',fontSize:10,flexShrink:0}}>{i.end_date}</span>}
                   {committedI(i)
                     ?<button onClick={()=>qpUncommitItem(i)} title="Uncommit — clear dates, return to backlog" style={{background:'none',border:'1px solid rgba(231,76,60,0.4)',borderRadius:4,color:'#E74C3C',fontSize:9,fontWeight:700,padding:'1px 7px',cursor:'pointer',flexShrink:0}}>✕ Uncommit</button>
-                    :<button onClick={()=>qpCommitItem(i)} title="Commit — set dates to the project timeline" style={{background:'none',border:'1px solid rgba(39,174,96,0.4)',borderRadius:4,color:'#27AE60',fontSize:9,fontWeight:700,padding:'1px 7px',cursor:'pointer',flexShrink:0}}>✓ Commit</button>}
+                    :<button onClick={()=>qpCommitItem(i)} title="Commit — set dates to the initiative timeline" style={{background:'none',border:'1px solid rgba(39,174,96,0.4)',borderRadius:4,color:'#27AE60',fontSize:9,fontWeight:700,padding:'1px 7px',cursor:'pointer',flexShrink:0}}>✓ Commit</button>}
                 </div>
               )
               const rowWithCommit=(i:any)=>(
@@ -4356,7 +4451,7 @@ function Roadmap({items,setItems,projects,setProjects,milestones,setMilestones,t
                   {row(i)}
                   {qpMcId===i.id&&(
                     <div style={{display:'flex',gap:5,alignItems:'center',margin:'2px 0 6px',padding:'5px 7px',border:'1px solid #27AE60',borderRadius:6,background:'rgba(39,174,96,0.06)',flexWrap:'wrap' as const}}>
-                      <span style={{fontSize:9,color:'#27AE60',fontWeight:700}}>{quickProject.ongoing?'∞ project — set item dates:':'Project undated — set item dates:'}</span>
+                      <span style={{fontSize:9,color:'#27AE60',fontWeight:700}}>{quickProject.ongoing?'∞ initiative — set item dates:':'Initiative undated — set item dates:'}</span>
                       <input type="date" value={qpMcStart} onChange={e=>setQpMcStart(e.target.value)} style={{background:'#0D1B2A',border:'1px solid #243447',borderRadius:4,color:'#F4F6F8',fontSize:10,padding:'2px 5px'}}/>
                       <span style={{color:'#7A8FA6',fontSize:10}}>→</span>
                       <input type="date" value={qpMcEnd} onChange={e=>setQpMcEnd(e.target.value)} style={{background:'#0D1B2A',border:'1px solid #243447',borderRadius:4,color:'#F4F6F8',fontSize:10,padding:'2px 5px'}}/>
@@ -4398,7 +4493,7 @@ function Roadmap({items,setItems,projects,setProjects,milestones,setMilestones,t
               </>)
             })()}
             <div style={{borderTop:'1px solid #243447',marginTop:14,paddingTop:10}}>
-              <div style={{fontSize:10,fontWeight:700,letterSpacing:1,color:'#7A8FA6',marginBottom:6}}>+ ADD ITEM TO THIS PROJECT</div>
+              <div style={{fontSize:10,fontWeight:700,letterSpacing:1,color:'#7A8FA6',marginBottom:6}}>+ ADD ITEM TO THIS INITIATIVE</div>
               <div style={{display:'flex',gap:6}}>
                 <input placeholder="New item name..." value={qpQiName} onChange={e=>setQpQiName(e.target.value)} onKeyDown={e=>{if(e.key==='Enter')qpSubmitQuickItem()}}
                   style={{flex:1,background:'#0D1B2A',border:'1px solid #243447',borderRadius:6,color:'#F4F6F8',fontSize:11,padding:'5px 8px'}}/>
@@ -4410,7 +4505,7 @@ function Roadmap({items,setItems,projects,setProjects,milestones,setMilestones,t
                 </select>
                 <button onClick={qpSubmitQuickItem} disabled={!qpQiName.trim()} style={{background:'#C8973A',border:'none',borderRadius:6,color:'#0D1B2A',fontSize:11,fontWeight:700,padding:'5px 12px',cursor:'pointer',opacity:!qpQiName.trim()?0.5:1}}>+ Add</button>
               </div>
-              <div style={{fontSize:9,color:'#5C6E80',marginTop:4}}>Lands uncommitted with defaults (New · M · {'{'}team from project{'}'}) — refine in the Backlog anytime</div>
+              <div style={{fontSize:9,color:'#5C6E80',marginTop:4}}>Lands uncommitted with defaults (New · M · {'{'}team from initiative{'}'}) — refine in the Backlog anytime</div>
             </div>
           </div>
         </div>
@@ -4560,7 +4655,7 @@ function Teams({items,projects,milestones,ccrs,ccrItems}:{items:any[],projects:a
     // Items with no project — by convention these are bugs: one prioritized queue
     const noProj=rankedX.filter(i=>!i.parent_project||!teamProjNames.has(i.parent_project))
     const bugsHtml=noProj.length?`<div style="${H2}">Backlog (${noProj.length})</div>
-      <div style="font-size:12px;color:#595959;margin-bottom:6px;">No project attached — prioritized, work top to bottom.</div>
+      <div style="font-size:12px;color:#595959;margin-bottom:6px;">No initiative attached — prioritized, work top to bottom.</div>
       <table cellspacing="0" style="border-collapse:collapse;width:100%;table-layout:fixed;">
       <colgroup><col style="width:28px;"/><col style="width:68px;"/><col style="width:300px;"/><col style="width:100px;"/><col style="width:36px;"/><col style="width:36px;"/><col style="width:140px;"/><col style="width:72px;"/></colgroup>
       <tr><th style="${TH_}">#</th><th style="${TH_}">ID</th><th style="${TH_}">Item</th><th style="${TH_}">Type</th><th style="${TH_}">Pri</th><th style="${TH_}">Size</th><th style="${TH_}">Status</th><th style="${TH_}">Target</th></tr>
@@ -4577,14 +4672,14 @@ function Teams({items,projects,milestones,ccrs,ccrItems}:{items:any[],projects:a
     const upc=milestones.filter(m=>!m.completed&&teamProjects.some((p:any)=>p.id===m.project_id)).sort((a,b)=>a.date<b.date?-1:1)
     const msHtml=upc.length?`<div style="${H2}">Milestones (${upc.length})</div>
       <table cellspacing="0" style="border-collapse:collapse;width:100%;">
-      <tr><th style="${TH_}width:70px;">Date</th><th style="${TH_}width:220px;">Project</th><th style="${TH_}">Milestone</th></tr>
+      <tr><th style="${TH_}width:70px;">Date</th><th style="${TH_}width:220px;">Initiative</th><th style="${TH_}">Milestone</th></tr>
       ${upc.map(m=>{const pr=projects.find(p=>p.id===m.project_id);return `<tr><td style="${TD_}white-space:nowrap;">${hs(fmtD(m.date))}</td><td style="${TD_}">${pr?.name||''}</td><td style="${TD_}">${m.name}${m.type&&m.type!=='Milestone'?` <span style="color:#595959;font-size:11px;">(${m.type})</span>`:''}</td></tr>`}).join('')}</table>`:''
     const devFlags=items.filter(i=>i.team===team&&flagDev(i))
     const teamFlaggedProj=teamProjects.filter((p:any)=>flagDev(p)&&!PROJECT_TERMINAL.includes(p.status))
-    const teamProjFlagTable=teamFlaggedProj.length?`<div style="font-size:13px;font-weight:bold;color:#595959;margin:4px 0 3px;">Projects (${teamFlaggedProj.length})</div>
+    const teamProjFlagTable=teamFlaggedProj.length?`<div style="font-size:13px;font-weight:bold;color:#595959;margin:4px 0 3px;">Initiatives (${teamFlaggedProj.length})</div>
       <table cellspacing="0" style="border-collapse:collapse;width:100%;table-layout:fixed;margin-bottom:8px;">
       <colgroup><col style="width:240px;"/><col style="width:110px;"/><col style="width:494px;"/></colgroup>
-      <tr><th style="${TH_}">Project</th><th style="${TH_}">Status</th><th style="${TH_}">Notes</th></tr>
+      <tr><th style="${TH_}">Initiative</th><th style="${TH_}">Status</th><th style="${TH_}">Notes</th></tr>
       ${teamFlaggedProj.map((p:any)=>`<tr>
         <td style="${TD_}overflow:hidden;"><b>${p.name}</b></td>
         <td style="${TD_}overflow:hidden;">${hs(p.status)}</td>
@@ -4595,12 +4690,12 @@ function Teams({items,projects,milestones,ccrs,ccrItems}:{items:any[],projects:a
       ${devFlags.length&&teamFlaggedProj.length?`<div style="font-size:13px;font-weight:bold;color:#595959;margin:4px 0 3px;">Items (${devFlags.length})</div>`:''}`+(devFlags.length?`
       <table cellspacing="0" style="border-collapse:collapse;width:100%;table-layout:fixed;">
       <colgroup><col style="width:60px;"/><col style="width:240px;"/><col style="width:150px;"/><col style="width:394px;"/></colgroup>
-      <tr><th style="${TH_}">ID</th><th style="${TH_}">Item</th><th style="${TH_}">Project</th><th style="${TH_}">Notes</th></tr>
+      <tr><th style="${TH_}">ID</th><th style="${TH_}">Item</th><th style="${TH_}">Initiative</th><th style="${TH_}">Notes</th></tr>
       ${devFlags.map(i=>`<tr><td style="${TD_}white-space:nowrap;">${hs(i.item_id)}</td><td style="${TD_}font-weight:bold;">${i.name}</td><td style="${TD_}">${i.parent_project||'<span style="color:#7F7F7F;">—</span>'}</td><td style="${TD_}line-height:1.5;">${i.notes||'<span style="color:#7F7F7F;font-style:italic;">—</span>'}</td></tr>`).join('')}</table>`:''):''
     const html=`<div style="font-family:Calibri,'Segoe UI',Arial,sans-serif;max-width:900px;color:#222222;">
       <div style="font-size:22px;font-weight:bold;color:#1F1F1F;">${team} — Work Queue</div>
       <div style="font-size:13px;color:#595959;margin-bottom:12px;">${today}</div>
-      <div style="font-size:13px;color:#222222;margin-bottom:4px;"><b>${inFlight.length} committed</b> · <b>${upNext.length} in backlog</b>${noProj.length?` · ${noProj.length} backlog (no project)`:''}${(devFlags.length+teamFlaggedProj.length)?` · ${devFlags.length+teamFlaggedProj.length} for discussion`:''}</div>
+      <div style="font-size:13px;color:#222222;margin-bottom:4px;"><b>${inFlight.length} committed</b> · <b>${upNext.length} in backlog</b>${noProj.length?` · ${noProj.length} backlog (no initiative)`:''}${(devFlags.length+teamFlaggedProj.length)?` · ${devFlags.length+teamFlaggedProj.length} for discussion`:''}</div>
       ${roadmapHtml}
       ${msHtml}
       ${projectsHtml}
@@ -4649,12 +4744,12 @@ function Teams({items,projects,milestones,ccrs,ccrItems}:{items:any[],projects:a
     const total=fresh.length+freshProjects.length+freshMs.length+vendorChanged.length+freshCcrs.length
     const html=`<div style="font-family:Calibri,'Segoe UI',Arial,sans-serif;max-width:960px;color:#222222;">
       <div style="font-size:20px;font-weight:bold;color:#1F1F1F;">${team} — What's New (Last ${newDays} Days)</div>
-      <div style="font-size:13px;color:#595959;margin:2px 0 12px;">${today} · ${fresh.length} item${fresh.length!==1?'s':''} · ${freshProjects.length} project${freshProjects.length!==1?'s':''} · ${freshMs.length} milestone${freshMs.length!==1?'s':''} · ${vendorChanged.length} vendor date change${vendorChanged.length!==1?'s':''} · ${freshCcrs.length} CCR${freshCcrs.length!==1?'s':''}</div>
+      <div style="font-size:13px;color:#595959;margin:2px 0 12px;">${today} · ${fresh.length} item${fresh.length!==1?'s':''} · ${freshProjects.length} initiative${freshProjects.length!==1?'s':''} · ${freshMs.length} milestone${freshMs.length!==1?'s':''} · ${vendorChanged.length} vendor date change${vendorChanged.length!==1?'s':''} · ${freshCcrs.length} CCR${freshCcrs.length!==1?'s':''}</div>
       ${total===0?`<div style="font-size:13px;color:#595959;font-style:italic;">Nothing new in this window.</div>`:''}
-      ${freshProjects.length?`<div style="${SH}">New Projects (${freshProjects.length})</div>
+      ${freshProjects.length?`<div style="${SH}">New Initiatives (${freshProjects.length})</div>
       <table cellspacing="0" style="border-collapse:collapse;width:100%;table-layout:fixed;">
       <colgroup><col style="width:60px;"/><col style="width:360px;"/><col style="width:34px;"/><col style="width:130px;"/><col style="width:170px;"/></colgroup>
-      <tr><th style="${TH_}">Added</th><th style="${TH_}">Project</th><th style="${TH_}">Pri</th><th style="${TH_}">Status</th><th style="${TH_}">Timeline</th></tr>
+      <tr><th style="${TH_}">Added</th><th style="${TH_}">Initiative</th><th style="${TH_}">Pri</th><th style="${TH_}">Status</th><th style="${TH_}">Timeline</th></tr>
       ${freshProjects.map((p:any)=>`<tr>
         <td style="${TD_}white-space:nowrap;">${hs(fmtD(p.created_at))}</td>
         <td style="${TD_}overflow:hidden;"><b>${p.name}</b>${p.description?`<div style="font-size:11px;color:#595959;margin-top:1px;">${p.description}</div>`:''}</td>
@@ -4665,7 +4760,7 @@ function Teams({items,projects,milestones,ccrs,ccrItems}:{items:any[],projects:a
       ${fresh.length?`<div style="${SH}">New Items (${fresh.length})</div>
       <table cellspacing="0" style="border-collapse:collapse;width:100%;table-layout:fixed;">
       <colgroup><col style="width:60px;"/><col style="width:66px;"/><col style="width:300px;"/><col style="width:150px;"/><col style="width:96px;"/><col style="width:34px;"/><col style="width:34px;"/><col style="width:130px;"/></colgroup>
-      <tr><th style="${TH_}">Added</th><th style="${TH_}">ID</th><th style="${TH_}">Item</th><th style="${TH_}">Project</th><th style="${TH_}">Type</th><th style="${TH_}">Pri</th><th style="${TH_}">Size</th><th style="${TH_}">Status</th></tr>
+      <tr><th style="${TH_}">Added</th><th style="${TH_}">ID</th><th style="${TH_}">Item</th><th style="${TH_}">Initiative</th><th style="${TH_}">Type</th><th style="${TH_}">Pri</th><th style="${TH_}">Size</th><th style="${TH_}">Status</th></tr>
       ${fresh.map(i=>`<tr>
         <td style="${TD_}white-space:nowrap;">${hs(fmtD(i.created_at))}</td>
         <td style="${TD_}white-space:nowrap;overflow:hidden;">${hs(i.item_id)}</td>
@@ -4679,7 +4774,7 @@ function Teams({items,projects,milestones,ccrs,ccrItems}:{items:any[],projects:a
       ${freshMs.length?`<div style="${SH}">New Milestones (${freshMs.length})</div>
       <table cellspacing="0" style="border-collapse:collapse;width:100%;table-layout:fixed;">
       <colgroup><col style="width:60px;"/><col style="width:76px;"/><col style="width:220px;"/><col style="width:470px;"/></colgroup>
-      <tr><th style="${TH_}">Added</th><th style="${TH_}">Date</th><th style="${TH_}">Project</th><th style="${TH_}">Milestone</th></tr>
+      <tr><th style="${TH_}">Added</th><th style="${TH_}">Date</th><th style="${TH_}">Initiative</th><th style="${TH_}">Milestone</th></tr>
       ${freshMs.map((m:any)=>{const pr:any=projById.get(m.project_id);return `<tr>
         <td style="${TD_}white-space:nowrap;">${hs(fmtD(m.created_at))}</td>
         <td style="${TD_}white-space:nowrap;font-weight:bold;">${hs(fmtD(m.date))}</td>
@@ -4689,7 +4784,7 @@ function Teams({items,projects,milestones,ccrs,ccrItems}:{items:any[],projects:a
       ${vendorChanged.length?`<div style="${SH}">Vendor Date Changes (${vendorChanged.length})</div>
       <table cellspacing="0" style="border-collapse:collapse;width:100%;table-layout:fixed;">
       <colgroup><col style="width:60px;"/><col style="width:66px;"/><col style="width:330px;"/><col style="width:180px;"/><col style="width:110px;"/></colgroup>
-      <tr><th style="${TH_}">Changed</th><th style="${TH_}">ID</th><th style="${TH_}">Item</th><th style="${TH_}">Project</th><th style="${TH_}">New Vendor Date</th></tr>
+      <tr><th style="${TH_}">Changed</th><th style="${TH_}">ID</th><th style="${TH_}">Item</th><th style="${TH_}">Initiative</th><th style="${TH_}">New Vendor Date</th></tr>
       ${vendorChanged.map(i=>`<tr>
         <td style="${TD_}white-space:nowrap;">${hs(fmtD(i.vendor_date_changed_at))}</td>
         <td style="${TD_}white-space:nowrap;overflow:hidden;">${hs(i.item_id)}</td>
@@ -4700,7 +4795,7 @@ function Teams({items,projects,milestones,ccrs,ccrItems}:{items:any[],projects:a
       ${freshCcrs.length?`<div style="${SH}">New Change Requests (${freshCcrs.length})</div>
       <table cellspacing="0" style="border-collapse:collapse;width:100%;table-layout:fixed;">
       <colgroup><col style="width:60px;"/><col style="width:330px;"/><col style="width:110px;"/><col style="width:110px;"/><col style="width:180px;"/><col style="width:90px;"/></colgroup>
-      <tr><th style="${TH_}">Added</th><th style="${TH_}">Change Request</th><th style="${TH_}">CCR #</th><th style="${TH_}">Status</th><th style="${TH_}">Project</th><th style="${TH_}">Target</th></tr>
+      <tr><th style="${TH_}">Added</th><th style="${TH_}">Change Request</th><th style="${TH_}">CCR #</th><th style="${TH_}">Status</th><th style="${TH_}">Initiative</th><th style="${TH_}">Target</th></tr>
       ${freshCcrs.map((c:any)=>{const pr:any=c.project_id?projById.get(c.project_id):null;return `<tr>
         <td style="${TD_}white-space:nowrap;">${hs(fmtD(c.created_at))}</td>
         <td style="${TD_}overflow:hidden;"><b>${c.title}</b></td>
@@ -4804,7 +4899,7 @@ function Teams({items,projects,milestones,ccrs,ccrItems}:{items:any[],projects:a
           <div key={pname} style={{marginBottom:22}}>
             <div style={{display:'flex',alignItems:'center',gap:10,background:'#162436',borderTop:'1px solid #243447',borderRight:'1px solid #243447',borderBottom:'1px solid #243447',borderLeft:`4px solid ${project?.color||'#3A4A5E'}`,borderRadius:'8px 8px 0 0',padding:'10px 14px'}}>
               {project?.rag&&<span title={project.rag} style={{width:10,height:10,borderRadius:'50%',background:RAG[project.rag]||'#7A8FA6',flexShrink:0}}/>}
-              <span style={{fontSize:14,fontWeight:800,letterSpacing:0.3}}>{pname==='__none__'?'No Project Assigned':pname}</span>
+              <span style={{fontSize:14,fontWeight:800,letterSpacing:0.3}}>{pname==='__none__'?'No Initiative Assigned':pname}</span>
               {project?.status&&<span style={{fontSize:11,color:'#7A8FA6'}}>{project.status}</span>}
               {project?.start_date&&project?.end_date&&<span style={{fontSize:11,color:'#7A8FA6'}}>{project.start_date} → {project.end_date}</span>}
               <span style={{marginLeft:'auto',fontSize:11,color:'#7A8FA6'}}>{gItems.length} item{gItems.length!==1?'s':''}</span>
@@ -4936,7 +5031,7 @@ function ComposeUpdate({projects,milestones,items,onClose}:{projects:any[],miles
       }).join('')}</tr>`
       roadmapHtml=`<div style="${H2}">Roadmap</div>
       <table cellspacing="0" style="border-collapse:collapse;width:100%;table-layout:fixed;"><colgroup><col style="width:200px;"/>${months.map(()=>'<col/>').join('')}</colgroup>${header}${rows}</table>
-      <div style="font-size:11px;color:#595959;margin:4px 0 0;">◆ upcoming milestone&nbsp;&nbsp;→ continues beyond window&nbsp;&nbsp;<span style="background:#B7C4D0;padding:0 6px;">&nbsp;</span> ∞ ongoing (vendor-dependent)&nbsp;&nbsp;<span style="color:#C0392B;">Oct–Dec: code freeze</span>&nbsp;&nbsp;(committed projects only)</div>`
+      <div style="font-size:11px;color:#595959;margin:4px 0 0;">◆ upcoming milestone&nbsp;&nbsp;→ continues beyond window&nbsp;&nbsp;<span style="background:#B7C4D0;padding:0 6px;">&nbsp;</span> ∞ ongoing (vendor-dependent)&nbsp;&nbsp;<span style="color:#C0392B;">Oct–Dec: code freeze</span>&nbsp;&nbsp;(committed initiatives only)</div>`
     }
 
     // Item sections
@@ -4954,16 +5049,16 @@ function ComposeUpdate({projects,milestones,items,onClose}:{projects:any[],miles
       <td style="${TD_}overflow:hidden;">${hs(i.status)}</td>
       <td style="${TD_}overflow:hidden;">${hs(i.team)}</td>
     </tr>`
-    const itemHead=(n?:boolean)=>`${n?'<colgroup><col style="width:26px;"/><col style="width:68px;"/><col style="width:300px;"/><col style="width:160px;"/><col style="width:36px;"/><col style="width:140px;"/><col style="width:140px;"/></colgroup>':'<colgroup><col style="width:68px;"/><col style="width:300px;"/><col style="width:160px;"/><col style="width:36px;"/><col style="width:140px;"/><col style="width:140px;"/></colgroup>'}<tr>${n?`<th style="${TH_}">#</th>`:''}<th style="${TH_}">ID</th><th style="${TH_}">Item</th><th style="${TH_}">Project</th><th style="${TH_}">Pri</th><th style="${TH_}">Status</th><th style="${TH_}">Team</th></tr>`
+    const itemHead=(n?:boolean)=>`${n?'<colgroup><col style="width:26px;"/><col style="width:68px;"/><col style="width:300px;"/><col style="width:160px;"/><col style="width:36px;"/><col style="width:140px;"/><col style="width:140px;"/></colgroup>':'<colgroup><col style="width:68px;"/><col style="width:300px;"/><col style="width:160px;"/><col style="width:36px;"/><col style="width:140px;"/><col style="width:140px;"/></colgroup>'}<tr>${n?`<th style="${TH_}">#</th>`:''}<th style="${TH_}">ID</th><th style="${TH_}">Item</th><th style="${TH_}">Initiative</th><th style="${TH_}">Pri</th><th style="${TH_}">Status</th><th style="${TH_}">Team</th></tr>`
     const p12Html=p12.length?`<div style="${H2}">Critical Items (P1 / P2)</div>
       <table cellspacing="0" style="border-collapse:collapse;width:100%;table-layout:fixed;">${itemHead()}${p12.map((i:any)=>itemRow(i)).join('')}</table>`:''
     const top10Html=top10.length?`<div style="${H2}">Top 10 Backlog — Not Yet Committed</div>
       <table cellspacing="0" style="border-collapse:collapse;width:100%;table-layout:fixed;">${itemHead(true)}${top10.map((i:any,n:number)=>itemRow(i,n+1)).join('')}</table>`:''
     const flaggedProj=projects.filter((p:any)=>flagStk(p)&&!PROJECT_TERMINAL.includes(p.status))
-    const flaggedProjTable=flaggedProj.length?`<div style="font-size:13px;font-weight:bold;color:#595959;margin:4px 0 3px;">Projects (${flaggedProj.length})</div>
+    const flaggedProjTable=flaggedProj.length?`<div style="font-size:13px;font-weight:bold;color:#595959;margin:4px 0 3px;">Initiatives (${flaggedProj.length})</div>
       <table cellspacing="0" style="border-collapse:collapse;width:100%;table-layout:fixed;margin-bottom:8px;">
       <colgroup><col style="width:240px;"/><col style="width:110px;"/><col style="width:70px;"/><col style="width:424px;"/></colgroup>
-      <tr><th style="${TH_}">Project</th><th style="${TH_}">Status</th><th style="${TH_}">RAG</th><th style="${TH_}">Discussion Notes</th></tr>
+      <tr><th style="${TH_}">Initiative</th><th style="${TH_}">Status</th><th style="${TH_}">RAG</th><th style="${TH_}">Discussion Notes</th></tr>
       ${flaggedProj.map((p:any)=>`<tr>
         <td style="${TD_}overflow:hidden;"><b>${p.name}</b></td>
         <td style="${TD_}overflow:hidden;">${hs(p.status)}</td>
@@ -4975,7 +5070,7 @@ function ComposeUpdate({projects,milestones,items,onClose}:{projects:any[],miles
       ${flagged.length&&flaggedProj.length?`<div style="font-size:13px;font-weight:bold;color:#595959;margin:4px 0 3px;">Items (${flagged.length})</div>`:''}`+(flagged.length?`
       <table cellspacing="0" style="border-collapse:collapse;width:100%;table-layout:fixed;">
       <colgroup><col style="width:68px;"/><col style="width:240px;"/><col style="width:150px;"/><col style="width:36px;"/><col style="width:350px;"/></colgroup>
-      <tr><th style="${TH_}">ID</th><th style="${TH_}">Item</th><th style="${TH_}">Project</th><th style="${TH_}">Pri</th><th style="${TH_}">Discussion Notes</th></tr>
+      <tr><th style="${TH_}">ID</th><th style="${TH_}">Item</th><th style="${TH_}">Initiative</th><th style="${TH_}">Pri</th><th style="${TH_}">Discussion Notes</th></tr>
       ${flagged.map((i:any)=>`<tr>
         <td style="${TD_}white-space:nowrap;">${hs(i.item_id)}</td>
         <td style="${TD_}font-weight:bold;">${i.name}</td>
@@ -5017,10 +5112,10 @@ function ComposeUpdate({projects,milestones,items,onClose}:{projects:any[],miles
     const yr=new Date().getFullYear()
     const closedRecent=projects.filter((p:any)=>p.status==='Complete'&&p.end_date&&new Date(p.end_date+'T12:00:00').getFullYear()===yr)
       .sort((a:any,b:any)=>a.end_date<b.end_date?1:-1)
-    const closedHtml=closedRecent.length?`<div style="${H2}">Completed Projects — ${yr} (${closedRecent.length})</div>
+    const closedHtml=closedRecent.length?`<div style="${H2}">Completed Initiatives — ${yr} (${closedRecent.length})</div>
       <table cellspacing="0" style="border-collapse:collapse;width:100%;table-layout:fixed;">
       <colgroup><col style="width:560px;"/><col style="width:120px;"/></colgroup>
-      <tr><th style="${TH_}">Project</th><th style="${TH_}">Completed</th></tr>
+      <tr><th style="${TH_}">Initiative</th><th style="${TH_}">Completed</th></tr>
       ${closedRecent.map((p:any)=>`<tr>
         <td style="${TD_}overflow:hidden;"><b>${p.name}</b></td>
         <td style="${TD_}white-space:nowrap;font-weight:bold;">${hs(fmtD(p.end_date))}</td>
@@ -5028,7 +5123,7 @@ function ComposeUpdate({projects,milestones,items,onClose}:{projects:any[],miles
     const milestonesHtml=upcoming.length?`<div style="${H2}">Milestones (${upcoming.length})</div>
       <table cellspacing="0" style="border-collapse:collapse;width:100%;table-layout:fixed;">
       <colgroup><col style="width:70px;"/><col style="width:220px;"/><col style="width:560px;"/></colgroup>
-      <tr><th style="${TH_}">Date</th><th style="${TH_}">Project</th><th style="${TH_}">Milestone</th></tr>
+      <tr><th style="${TH_}">Date</th><th style="${TH_}">Initiative</th><th style="${TH_}">Milestone</th></tr>
       ${upcoming.map(m=>{
         const pr=projects.find(p=>p.id===m.project_id)
         return `<tr><td style="${TD_}white-space:nowrap;">${hs(fmtD(m.date))}</td><td style="${TD_}">${pr?.name||''}</td><td style="${TD_}">${m.name}</td></tr>`
@@ -5036,15 +5131,15 @@ function ComposeUpdate({projects,milestones,items,onClose}:{projects:any[],miles
     const html=`<div style="font-family:Calibri,'Segoe UI',Arial,sans-serif;max-width:900px;color:#222222;">
       <div style="font-size:22px;font-weight:bold;color:#1F1F1F;">Retail Technology — Program Update</div>
       <div style="font-size:13px;color:#595959;margin-bottom:12px;">${today}</div>
-      <div style="font-size:13px;color:#222222;margin-bottom:4px;"><b>${selected.length} active project${selected.length!==1?'s':''}:</b> <span style="color:#217346;font-weight:bold;">${g} Green</span>, <span style="color:#B8860B;font-weight:bold;">${a} Amber</span>, <span style="color:#C0392B;font-weight:bold;">${r} Red</span></div>
+      <div style="font-size:13px;color:#222222;margin-bottom:4px;"><b>${selected.length} active initiative${selected.length!==1?'s':''}:</b> <span style="color:#217346;font-weight:bold;">${g} Green</span>, <span style="color:#B8860B;font-weight:bold;">${a} Amber</span>, <span style="color:#C0392B;font-weight:bold;">${r} Red</span></div>
       ${p12Html}
       ${roadmapHtml}
       ${milestonesHtml}
       ${(()=>{
         const onRoadmap=selected.filter(p=>(p.start_date&&p.end_date)||(p.ongoing&&p.start_date))
         const backlogP=selected.filter(p=>!((p.start_date&&p.end_date)||(p.ongoing&&p.start_date)))
-        return `${onRoadmap.length?`<div style="${H2}">Project Updates — On Roadmap</div>${onRoadmap.map(p=>projBlock(p)).join('')}`:''}
-        ${backlogP.length?`<div style="${H2}">Project Updates — Backlog</div>${backlogP.map(p=>projBlock(p,'BACKLOG')).join('')}`:''}`
+        return `${onRoadmap.length?`<div style="${H2}">Initiative Updates — On Roadmap</div>${onRoadmap.map(p=>projBlock(p)).join('')}`:''}
+        ${backlogP.length?`<div style="${H2}">Initiative Updates — Backlog</div>${backlogP.map(p=>projBlock(p,'BACKLOG')).join('')}`:''}`
       })()}
       ${flaggedHtml}
       ${top10Html}
@@ -5142,7 +5237,7 @@ function Stakeholder({items,projects,milestones}:{items:any[],projects:any[],mil
 
       {/* Stats */}
       <div style={{display:'grid',gridTemplateColumns:'repeat(4,1fr)',gap:12,marginBottom:24}}>
-        {([['P1 Active',p1.length,'#C00000'],['P2 Active',p2.length,'#D4820A'],['Projects',projects.length,'#2E86AB'],['For Discussion',disc.length,'#C8973A']] as [string,number,string][]).map(([label,val,color])=>(
+        {([['P1 Active',p1.length,'#C00000'],['P2 Active',p2.length,'#D4820A'],['Initiatives',projects.length,'#2E86AB'],['For Discussion',disc.length,'#C8973A']] as [string,number,string][]).map(([label,val,color])=>(
           <div key={label} style={{background:'#162436',border:'1px solid #243447',borderRadius:10,padding:'16px 20px'}}>
             <div style={{fontSize:28,fontWeight:700,color,lineHeight:1}}>{val}</div>
             <div style={{fontSize:12,color:'#7A8FA6',marginTop:4}}>{label}</div>
@@ -5153,7 +5248,7 @@ function Stakeholder({items,projects,milestones}:{items:any[],projects:any[],mil
       {/* Project RAG summary */}
       {(redProjects.length>0||amberProjects.length>0)&&(
         <div style={{marginBottom:20}}>
-          <div style={{fontSize:13,fontWeight:700,color:'#7A8FA6',letterSpacing:1,marginBottom:10}}>PROJECT HEALTH</div>
+          <div style={{fontSize:13,fontWeight:700,color:'#7A8FA6',letterSpacing:1,marginBottom:10}}>INITIATIVE HEALTH</div>
           {[...redProjects,...amberProjects].map(project=>{
             const ragColor=RAG_COLORS[project.rag]
             const pclr=pc(project.priority)
@@ -5199,7 +5294,7 @@ function Stakeholder({items,projects,milestones}:{items:any[],projects:any[],mil
             if(!fp.length)return null
             return(
               <>
-              <div style={{fontSize:13,fontWeight:700,color:'#C8973A',letterSpacing:1,marginBottom:10,marginTop:20}}>◈ FLAGGED PROJECTS</div>
+              <div style={{fontSize:13,fontWeight:700,color:'#C8973A',letterSpacing:1,marginBottom:10,marginTop:20}}>◈ FLAGGED INITIATIVES</div>
               {fp.map((p:any)=>(
                 <div key={p.id} style={{background:'#162436',border:'1px solid rgba(200,151,58,0.35)',borderRadius:8,padding:'10px 16px',marginBottom:6,display:'flex',alignItems:'flex-start',gap:12}}>
                   <span style={{width:10,height:10,borderRadius:2,background:p.color||'#3A4A5E',marginTop:3,flexShrink:0}}/>
@@ -5362,7 +5457,7 @@ function Desk({items,setItems,projects,setProjects,milestones,setMilestones,task
     setProjects((prev:any[])=>prev.map(p=>p.id===projView.id?{...p,...fields}:p))
     setProjView((p:any)=>({...p,...fields}))
     const{error}=await supabase.from('projects').update(fields).eq('id',projView.id)
-    if(error){alert('Failed to update project: '+error.message);return}
+    if(error){alert('Failed to update initiative: '+error.message);return}
     // Terminal transition: offer to close the project's open items (same flow as the Projects tab)
     if(fields.status&&PROJECT_TERMINAL.includes(fields.status)&&!wasTerminal){
       const open=items.filter(i=>i.parent_project===projView.name&&!ITEM_TERMINAL.includes(i.status))
@@ -5651,7 +5746,7 @@ function Desk({items,setItems,projects,setProjects,milestones,setMilestones,task
                     style={{width:'100%',boxSizing:'border-box' as const,background:'#0D1B2A',border:'1px solid #243447',borderRadius:6,color:'#F4F6F8',fontSize:11,padding:'5px 8px',marginBottom:5}}/>
                   <div style={{display:'flex',gap:5}}>
                     <select value={ncProj} onChange={e=>setNcProj(e.target.value)} style={{flex:1,minWidth:0,background:'#0D1B2A',border:'1px solid #243447',borderRadius:6,color:'#F4F6F8',fontSize:10,padding:'4px 6px'}}>
-                      <option value="">No project</option>
+                      <option value="">No initiative</option>
                       {projects.filter(p=>spaceOf(p)==='work'&&!PROJECT_TERMINAL.includes(p.status)).map(p=><option key={p.id} value={p.id}>{p.name}</option>)}
                     </select>
                     <input type="date" value={ncDate} onChange={e=>setNcDate(e.target.value)} style={{background:'#0D1B2A',border:'1px solid #243447',borderRadius:6,color:'#F4F6F8',fontSize:10,padding:'4px 5px'}}/>
@@ -5686,7 +5781,7 @@ function Desk({items,setItems,projects,setProjects,milestones,setMilestones,task
             {open&&list.length===0&&projList.length===0&&<div style={{fontSize:11,color:'#7A8FA6',fontStyle:'italic'}}>Nothing flagged</div>}
             {open&&projList.length>0&&(
               <>
-              <div style={{fontSize:9,fontWeight:700,letterSpacing:1,color:'#7A8FA6',margin:'2px 0 5px'}}>◈ PROJECTS ({projList.length})</div>
+              <div style={{fontSize:9,fontWeight:700,letterSpacing:1,color:'#7A8FA6',margin:'2px 0 5px'}}>◈ INITIATIVES ({projList.length})</div>
               {projList.map(projRow)}
               {list.length>0&&<div style={{fontSize:9,fontWeight:700,letterSpacing:1,color:'#7A8FA6',margin:'8px 0 5px'}}>≡ ITEMS ({list.length})</div>}
               </>
@@ -5927,9 +6022,9 @@ function Desk({items,setItems,projects,setProjects,milestones,setMilestones,task
           </>}
         </div>
         <div style={railCard as any}>
-          <RailHead k="proj">◈ PRIORITY PROJECTS ({activeProjects.length})</RailHead>
+          <RailHead k="proj">◈ PRIORITY INITIATIVES ({activeProjects.length})</RailHead>
           {railOpen.proj&&<>
-          {activeProjects.length===0&&<div style={{fontSize:11,color:'#7A8FA6',fontStyle:'italic'}}>No active projects</div>}
+          {activeProjects.length===0&&<div style={{fontSize:11,color:'#7A8FA6',fontStyle:'italic'}}>No active initiatives</div>}
           {activeProjects.map((p,pi)=>{
             const pis=projItems(p)
             const shown=pis.slice(0,5)
@@ -6125,7 +6220,7 @@ function Desk({items,setItems,projects,setProjects,milestones,setMilestones,task
                   {i.end_date&&<span style={{color:'#7A8FA6',fontSize:10,flexShrink:0}}>{i.end_date}</span>}
                   {committedI(i)
                     ?<button onClick={()=>uncommitItem(i)} title="Uncommit — clear dates, return to backlog" style={{background:'none',border:'1px solid rgba(231,76,60,0.4)',borderRadius:4,color:'#E74C3C',fontSize:9,fontWeight:700,padding:'1px 7px',cursor:'pointer',flexShrink:0}}>✕ Uncommit</button>
-                    :<button onClick={()=>commitItem(i)} title="Commit — set dates to the project timeline" style={{background:'none',border:'1px solid rgba(39,174,96,0.4)',borderRadius:4,color:'#27AE60',fontSize:9,fontWeight:700,padding:'1px 7px',cursor:'pointer',flexShrink:0}}>✓ Commit</button>}
+                    :<button onClick={()=>commitItem(i)} title="Commit — set dates to the initiative timeline" style={{background:'none',border:'1px solid rgba(39,174,96,0.4)',borderRadius:4,color:'#27AE60',fontSize:9,fontWeight:700,padding:'1px 7px',cursor:'pointer',flexShrink:0}}>✓ Commit</button>}
                 </div>
               )
               const rowWithCommit=(i:any)=>(
@@ -6133,7 +6228,7 @@ function Desk({items,setItems,projects,setProjects,milestones,setMilestones,task
                   {row(i)}
                   {mcId===i.id&&(
                     <div style={{display:'flex',gap:5,alignItems:'center',margin:'2px 0 6px',padding:'5px 7px',border:'1px solid #27AE60',borderRadius:6,background:'rgba(39,174,96,0.06)',flexWrap:'wrap' as const}}>
-                      <span style={{fontSize:9,color:'#27AE60',fontWeight:700}}>{projView.ongoing?'∞ project — set item dates:':'Project undated — set item dates:'}</span>
+                      <span style={{fontSize:9,color:'#27AE60',fontWeight:700}}>{projView.ongoing?'∞ initiative — set item dates:':'Initiative undated — set item dates:'}</span>
                       <input type="date" value={mcStart} onChange={e=>setMcStart(e.target.value)} style={{background:'#0D1B2A',border:'1px solid #243447',borderRadius:4,color:'#F4F6F8',fontSize:10,padding:'2px 5px'}}/>
                       <span style={{color:'#7A8FA6',fontSize:10}}>→</span>
                       <input type="date" value={mcEnd} onChange={e=>setMcEnd(e.target.value)} style={{background:'#0D1B2A',border:'1px solid #243447',borderRadius:4,color:'#F4F6F8',fontSize:10,padding:'2px 5px'}}/>
@@ -6175,7 +6270,7 @@ function Desk({items,setItems,projects,setProjects,milestones,setMilestones,task
               </>)
             })()}
             <div style={{borderTop:'1px solid #243447',marginTop:14,paddingTop:10}}>
-              <div style={{fontSize:10,fontWeight:700,letterSpacing:1,color:'#7A8FA6',marginBottom:6}}>+ ADD ITEM TO THIS PROJECT</div>
+              <div style={{fontSize:10,fontWeight:700,letterSpacing:1,color:'#7A8FA6',marginBottom:6}}>+ ADD ITEM TO THIS INITIATIVE</div>
               <div style={{display:'flex',gap:6}}>
                 <input placeholder="New item name..." value={qiName} onChange={e=>setQiName(e.target.value)} onKeyDown={e=>{if(e.key==='Enter')submitQuickItem()}}
                   style={{flex:1,background:'#0D1B2A',border:'1px solid #243447',borderRadius:6,color:'#F4F6F8',fontSize:11,padding:'5px 8px'}}/>
@@ -6187,7 +6282,7 @@ function Desk({items,setItems,projects,setProjects,milestones,setMilestones,task
                 </select>
                 <button onClick={submitQuickItem} disabled={!qiName.trim()} style={{background:'#C8973A',border:'none',borderRadius:6,color:'#0D1B2A',fontSize:11,fontWeight:700,padding:'5px 12px',cursor:'pointer',opacity:!qiName.trim()?0.5:1}}>+ Add</button>
               </div>
-              <div style={{fontSize:9,color:'#5C6E80',marginTop:4}}>Lands uncommitted with defaults (New · M · {'{'}team from project{'}'}) — refine in the Backlog anytime</div>
+              <div style={{fontSize:9,color:'#5C6E80',marginTop:4}}>Lands uncommitted with defaults (New · M · {'{'}team from initiative{'}'}) — refine in the Backlog anytime</div>
             </div>
           </div>
         </div>
@@ -6344,7 +6439,7 @@ function SprintsTab({items,setItems,projects,projectRoles,people,setPeople,roles
   const groupByProject=(list:any[])=>{
     const map=new Map<string,any[]>()
     for(const it of list){
-      const key=it.parent_project||'(No Project)'
+      const key=it.parent_project||'(No Initiative)'
       if(!map.has(key))map.set(key,[])
       map.get(key)!.push(it)
     }
@@ -6473,7 +6568,7 @@ function SprintsTab({items,setItems,projects,projectRoles,people,setPeople,roles
                               const person=people.find((p:any)=>p.id===a.person_id)
                               const flagged=stats.notBudgeted.some((n:any)=>n.id===a.id)
                               return(
-                                <span key={a.id} title={flagged?'Not originally budgeted for this project':undefined}
+                                <span key={a.id} title={flagged?'Not originally budgeted for this initiative':undefined}
                                   style={{fontSize:9,background:flagged?'rgba(232,185,90,0.15)':'#1E3048',border:'1px solid '+(flagged?'#E8B95A':'#243447'),borderRadius:10,padding:'2px 7px',color:flagged?'#E8B95A':'#F4F6F8',display:'flex',alignItems:'center',gap:4}}>
                                   {person?.name||'—'} · {((a.hours||0)/8).toFixed(1)}d{flagged?' ⚠':''}
                                   <span onClick={()=>removeAssignment(a.id,it.id)} style={{cursor:'pointer',color:'#7A8FA6'}}>✕</span>
@@ -6536,7 +6631,7 @@ function SprintsTab({items,setItems,projects,projectRoles,people,setPeople,roles
               style={{background:'#27AE60',border:'none',borderRadius:6,color:'#fff',fontSize:11,fontWeight:700,padding:'6px 14px',cursor:'pointer',opacity:newSprintStart[team]?1:0.5}}>+ New Sprint</button>
           </div>
 
-          <div style={{fontSize:11,fontWeight:700,color:'#5DADE2',letterSpacing:1,marginBottom:8}}>READY BACKLOG — BY PROJECT</div>
+          <div style={{fontSize:11,fontWeight:700,color:'#5DADE2',letterSpacing:1,marginBottom:8}}>READY BACKLOG — BY INITIATIVE</div>
           {readyBacklog.length===0&&<div style={{fontSize:11,color:'#7A8FA6',fontStyle:'italic'}}>Nothing left in the backlog right now.</div>}
           {readyGroups.map(([projName,groupItems]:any)=>{
             const proj=projects.find((p:any)=>p.name===projName)
@@ -6720,14 +6815,14 @@ function BudgetTab({roles,setRoles,people,setPeople,projects,items,projectRoles,
 
       // ── 1. Portfolio Summary (Dashboard tab) ──
       const ws1=wb.addWorksheet('Portfolio Summary')
-      ws1.columns=[{header:'Project',key:'p',width:32},{header:'Forecast',key:'f',width:14},{header:'Actual to Date',key:'a',width:16},{header:'Delta',key:'d',width:12},{header:'% Timeline Elapsed',key:'e',width:18},{header:'% Budget Spent',key:'s',width:15}]
+      ws1.columns=[{header:'Initiative',key:'p',width:32},{header:'Forecast',key:'f',width:14},{header:'Actual to Date',key:'a',width:16},{header:'Delta',key:'d',width:12},{header:'% Timeline Elapsed',key:'e',width:18},{header:'% Budget Spent',key:'s',width:15}]
       rollup.forEach((r:any)=>ws1.addRow({p:r.project.name,f:Math.round(r.fc.total),a:Math.round(r.ac.total),d:Math.round(r.ac.total-r.fc.total),e:r.elapsedPct==null?null:r.elapsedPct,s:r.spentPct==null?null:r.spentPct}))
       const t1=ws1.addRow({p:'TOTAL',f:Math.round(portfolioForecast),a:Math.round(portfolioActual),d:Math.round(portfolioActual-portfolioForecast)})
       styleSheet(ws1,{moneyCols:[2,3,4],pctCols:[5,6],totalRow:t1.number})
 
       // ── 2. Per-Project Detail (Dashboard drill-down) ──
       const ws2=wb.addWorksheet('Per-Project Detail')
-      ws2.columns=[{header:'Project',key:'p',width:28},{header:'Layer',key:'l',width:10},{header:'Role',key:'r',width:18},{header:'Hours / Alloc',key:'h',width:16},{header:'Rate',key:'ra',width:10},{header:'Cost',key:'c',width:12}]
+      ws2.columns=[{header:'Initiative',key:'p',width:28},{header:'Layer',key:'l',width:10},{header:'Role',key:'r',width:18},{header:'Hours / Alloc',key:'h',width:16},{header:'Rate',key:'ra',width:10},{header:'Cost',key:'c',width:12}]
       rollup.forEach((r:any)=>{
         boldRow(ws2,ws2.addRow({p:r.project.name,l:'FORECAST'}).number,'FF5DADE2')
         r.fc.byRole.forEach((b:any)=>ws2.addRow({r:b.role,h:`${b.headcount}x @ ${b.allocation_pct}%`,ra:b.rate,c:Math.round(b.cost)}))
@@ -6898,7 +6993,7 @@ function BudgetTab({roles,setRoles,people,setPeople,projects,items,projectRoles,
 
       {view==='rates'&&(
         <div style={{maxWidth:640}}>
-          <div style={{fontSize:11,color:'#7A8FA6',marginBottom:12,lineHeight:1.5}}>The rate card. Every project roster row and roster person pulls its default rate from here.</div>
+          <div style={{fontSize:11,color:'#7A8FA6',marginBottom:12,lineHeight:1.5}}>The rate card. Every initiative roster row and roster person pulls its default rate from here.</div>
           {roles.map((r:any)=>(
             <div key={r.id} style={{display:'flex',alignItems:'center',gap:8,background:'#12202F',border:'1px solid #243447',borderRadius:8,padding:'8px 12px',marginBottom:6}}>
               <input value={r.name} onChange={e=>updRole(r.id,{name:e.target.value})} style={{flex:1,background:'transparent',border:'none',color:'#F4F6F8',fontSize:13,fontWeight:600}}/>
@@ -6907,7 +7002,7 @@ function BudgetTab({roles,setRoles,people,setPeople,projects,items,projectRoles,
                 <input type="number" value={r.hourly_rate} onChange={e=>updRole(r.id,{hourly_rate:parseFloat(e.target.value)||0})} style={{width:70,background:'#0D1B2A',border:'1px solid #243447',borderRadius:5,color:'#F4F6F8',fontSize:12,padding:'4px 6px'}}/>
                 <span style={{color:'#7A8FA6',fontSize:11}}>/hr</span>
               </div>
-              <label style={{display:'flex',alignItems:'center',gap:4,fontSize:10,color:'#7A8FA6',cursor:'pointer'}} title="Can this role's time be capitalized on a Build project?">
+              <label style={{display:'flex',alignItems:'center',gap:4,fontSize:10,color:'#7A8FA6',cursor:'pointer'}} title="Can this role's time be capitalized on a Build initiative?">
                 <input type="checkbox" checked={r.capex_eligible??true} onChange={e=>updRole(r.id,{capex_eligible:e.target.checked})}/>CapEx
               </label>
               {(r.capex_eligible??true)&&(
@@ -7112,10 +7207,10 @@ function BudgetTab({roles,setRoles,people,setPeople,projects,items,projectRoles,
                     <div>
                       <div style={{fontSize:9,color:'#7A8FA6',marginBottom:3}}>1 · TEAM COST</div>
                       <div style={{fontSize:16,fontWeight:800,color:'#F4F6F8'}}>{fmtUSD(sTeam)}</div>
-                      <div style={{fontSize:9,color:'#7A8FA6'}}>fixed roster cost, all approved projects</div>
+                      <div style={{fontSize:9,color:'#7A8FA6'}}>fixed roster cost, all approved initiatives</div>
                     </div>
                     <div style={{borderLeft:'1px solid #243447',paddingLeft:28}}>
-                      <div style={{fontSize:9,color:'#7A8FA6',marginBottom:3}}>2 · PROJECT COST</div>
+                      <div style={{fontSize:9,color:'#7A8FA6',marginBottom:3}}>2 · INITIATIVE COST</div>
                       <div style={{fontSize:11,color:'#7A8FA6'}}>CapEx Approved <b style={{color:'#F4F6F8'}}>{fmtUSD(sAlloc.capex)}</b> · Actual <b style={{color:sAct.capex>sAlloc.capex&&sAlloc.capex>0?'#E74C3C':'#27AE60'}}>{fmtUSD(sAct.capex)}</b></div>
                       <div style={{fontSize:11,color:'#7A8FA6'}}>OpEx Approved <b style={{color:'#F4F6F8'}}>{fmtUSD(sAlloc.opex)}</b> · Actual <b style={{color:sAct.opex>sAlloc.opex&&sAlloc.opex>0?'#E74C3C':'#27AE60'}}>{fmtUSD(sAct.opex)}</b></div>
                       {anyCeil&&<div style={{fontSize:11,color:'#7A8FA6'}}>Finance Ceiling <b style={{color:'#F4F6F8'}}>{fmtUSD(sCeil.capex+sCeil.opex)}</b></div>}
@@ -7123,7 +7218,7 @@ function BudgetTab({roles,setRoles,people,setPeople,projects,items,projectRoles,
                     <div style={{borderLeft:'1px solid #243447',paddingLeft:28}}>
                       <div style={{fontSize:9,color:'#7A8FA6',marginBottom:3}}>3 · TOTALS</div>
                       <div style={{fontSize:11,color:'#7A8FA6'}}>Unallocated (OpEx) <b style={{color:sUnalloc>0?'#7A8FA6':'#E74C3C'}}>{fmtUSD(sTeam-sProjectTotal)}</b></div>
-                      <div style={{fontSize:11,color:'#7A8FA6'}}>Project Total <b style={{color:'#F4F6F8'}}>{fmtUSD(sProjectTotal)}</b></div>
+                      <div style={{fontSize:11,color:'#7A8FA6'}}>Initiative Total <b style={{color:'#F4F6F8'}}>{fmtUSD(sProjectTotal)}</b></div>
                       <div style={{fontSize:11,color:'#27AE60',fontWeight:700}}>= Team Cost {fmtUSD(sTeam)}</div>
                     </div>
                   </div>
@@ -7151,7 +7246,7 @@ function BudgetTab({roles,setRoles,people,setPeople,projects,items,projectRoles,
                     <div style={{fontSize:11,fontWeight:700,color:'#F4F6F8',marginBottom:8}}>FY{fy} Total</div>
                     <div style={{fontSize:9,color:'#7A8FA6'}}>1 · Team Cost</div>
                     <div style={{fontSize:13,fontWeight:800,color:'#F4F6F8',marginBottom:8}}>{fmtUSD(dTeam)}</div>
-                    <div style={{fontSize:9,color:'#7A8FA6'}}>2 · Project Cost</div>
+                    <div style={{fontSize:9,color:'#7A8FA6'}}>2 · Initiative Cost</div>
                     <div style={{fontSize:10,color:'#7A8FA6'}}>CapEx <b style={{color:'#F4F6F8'}}>{fmtUSD(dAlloc.capex)}</b> (act <span style={{color:dAct.capex>dAlloc.capex&&dAlloc.capex>0?'#E74C3C':'#27AE60'}}>{fmtUSD(dAct.capex)}</span>)</div>
                     <div style={{fontSize:10,color:'#7A8FA6',marginBottom:8}}>OpEx <b style={{color:'#F4F6F8'}}>{fmtUSD(dAlloc.opex)}</b> (act <span style={{color:dAct.opex>dAlloc.opex&&dAlloc.opex>0?'#E74C3C':'#27AE60'}}>{fmtUSD(dAct.opex)}</span>)</div>
                     <div style={{fontSize:9,color:'#7A8FA6'}}>3 · Totals</div>
@@ -7175,7 +7270,7 @@ function BudgetTab({roles,setRoles,people,setPeople,projects,items,projectRoles,
                     const hist=history(dept,q)
                     const isSel=sel&&sel.dept===dept&&sel.q===q
                     return(
-                      <div key={q} onClick={()=>setRfSel(isSel?null:{dept,q})} title="Click to see contributing projects and edit the finance ceiling"
+                      <div key={q} onClick={()=>setRfSel(isSel?null:{dept,q})} title="Click to see contributing initiatives and edit the finance ceiling"
                         style={{background:'#12202F',border:'1px solid '+(isSel?'#C8973A':'#243447'),borderRadius:10,padding:'10px 14px',width:240,cursor:'pointer'}}>
                         <div style={{display:'flex',alignItems:'center',gap:6,marginBottom:8}}>
                           <span style={{fontSize:12,fontWeight:700,color:'#F4F6F8'}}>Q{q}</span>
@@ -7185,7 +7280,7 @@ function BudgetTab({roles,setRoles,people,setPeople,projects,items,projectRoles,
                         <div style={{fontSize:9,color:'#7A8FA6',marginBottom:2}}>1 · TEAM COST</div>
                         <div style={{fontSize:13,fontWeight:800,color:'#F4F6F8',marginBottom:8}}>{fmtUSD(teamCostQ)}</div>
 
-                        <div style={{fontSize:9,color:'#7A8FA6',marginBottom:2}}>2 · PROJECT COST</div>
+                        <div style={{fontSize:9,color:'#7A8FA6',marginBottom:2}}>2 · INITIATIVE COST</div>
                         <div style={{fontSize:9,color:'#7A8FA6',marginBottom:1}}>CapEx</div>
                         <div style={{display:'flex',justifyContent:'space-between',fontSize:10,marginBottom:2}}>
                           <span style={{color:'#7A8FA6'}}>Approved</span><span style={{color:'#F4F6F8',fontWeight:700}}>{fmtUSD(r.allocCapex)}</span>
@@ -7226,7 +7321,7 @@ function BudgetTab({roles,setRoles,people,setPeople,projects,items,projectRoles,
                           <span style={{color:'#27AE60'}}>= Team Cost</span><span style={{color:'#27AE60'}}>{fmtUSD(teamCostQ)}</span>
                         </div>
 
-                        {r.allocCapex===0&&r.allocOpex===0&&(r.actCapex+r.actOpex)>0&&<div style={{fontSize:9,color:'#E8B95A',marginTop:6,fontStyle:'italic'}}>Spend logged but no approved project budget found — check project approval status.</div>}
+                        {r.allocCapex===0&&r.allocOpex===0&&(r.actCapex+r.actOpex)>0&&<div style={{fontSize:9,color:'#E8B95A',marginTop:6,fontStyle:'italic'}}>Spend logged but no approved initiative budget found — check initiative approval status.</div>}
                         {((r.allocCapex>0&&r.actCapex>r.allocCapex)||(r.allocOpex>0&&r.actOpex>r.allocOpex))&&<div style={{fontSize:9,color:'#E74C3C',marginTop:6,fontWeight:700}}>⚠ Actual spend exceeds the approved budget</div>}
                         {hist.length>1&&<div style={{fontSize:8,color:'#7A8FA6',marginTop:6}}>{hist.length} finance revisions</div>}
                       </div>
@@ -7271,12 +7366,12 @@ function BudgetTab({roles,setRoles,people,setPeople,projects,items,projectRoles,
                   </table>
                 )}
 
-                <div style={{fontSize:10,fontWeight:700,letterSpacing:1,color:'#5DADE2',marginBottom:6}}>CONTRIBUTING PROJECTS</div>
-                {selProjects.length===0&&<div style={{fontSize:11,color:'#7A8FA6',fontStyle:'italic',marginBottom:14}}>No approved projects touch this department/quarter yet — the full Team Cost is unallocated.</div>}
+                <div style={{fontSize:10,fontWeight:700,letterSpacing:1,color:'#5DADE2',marginBottom:6}}>CONTRIBUTING INITIATIVES</div>
+                {selProjects.length===0&&<div style={{fontSize:11,color:'#7A8FA6',fontStyle:'italic',marginBottom:14}}>No approved initiatives touch this department/quarter yet — the full Team Cost is unallocated.</div>}
                 {selProjects.length>0&&(
                   <table style={{width:'100%',borderCollapse:'collapse',fontSize:11,marginBottom:16}}>
                     <thead><tr>
-                      <th style={{textAlign:'left',padding:'4px 6px',color:'#7A8FA6',borderBottom:'1px solid #243447'}}>Project</th>
+                      <th style={{textAlign:'left',padding:'4px 6px',color:'#7A8FA6',borderBottom:'1px solid #243447'}}>Initiative</th>
                       <th style={{textAlign:'right',padding:'4px 6px',color:'#7A8FA6',borderBottom:'1px solid #243447'}}>CapEx Alloc</th>
                       <th style={{textAlign:'right',padding:'4px 6px',color:'#7A8FA6',borderBottom:'1px solid #243447'}}>CapEx Actual</th>
                       <th style={{textAlign:'right',padding:'4px 6px',color:'#7A8FA6',borderBottom:'1px solid #243447'}}>OpEx Alloc</th>
@@ -7364,7 +7459,7 @@ function BudgetTab({roles,setRoles,people,setPeople,projects,items,projectRoles,
                 {[thisFY-1,thisFY,thisFY+1].map(y=><option key={y} value={y}>FY{y}</option>)}
               </select>
             </div>
-            <div style={{fontSize:11,color:'#7A8FA6',marginBottom:6,lineHeight:1.5}}>Real spend (actual hours × rate) on approved projects, by vendor — CapEx/OpEx split per the role/project-type rule.</div>
+            <div style={{fontSize:11,color:'#7A8FA6',marginBottom:6,lineHeight:1.5}}>Real spend (actual hours × rate) on approved initiatives, by vendor — CapEx/OpEx split per the role/project-type rule.</div>
             <div style={{display:'flex',gap:14,fontSize:10,color:'#7A8FA6',marginBottom:10}}>
               <span><span style={{display:'inline-block',width:8,height:8,borderRadius:2,background:'#5DADE2',marginRight:5}}/>CapEx</span>
               <span><span style={{display:'inline-block',width:8,height:8,borderRadius:2,background:'#7A8FA6',marginRight:5}}/>OpEx</span>
@@ -7483,7 +7578,7 @@ function BudgetTab({roles,setRoles,people,setPeople,projects,items,projectRoles,
               </div>
             )}
           <div style={{overflowX:'auto'}}>
-            <div style={{fontSize:11,color:'#7A8FA6',marginBottom:12,lineHeight:1.5}}>Allocation % per person per month, summed across every project they're named on (only rows linked to a roster person count here — generic/unassigned rows aren't real capacity yet). Click any % to see which projects it's coming from. The lighter <b>Actual</b> row underneath is real work — sourced from Sprint Planning's assignments (and Budget's own assignment editor, same records), sized against real calendar days.</div>
+            <div style={{fontSize:11,color:'#7A8FA6',marginBottom:12,lineHeight:1.5}}>Allocation % per person per month, summed across every initiative they're named on (only rows linked to a roster person count here — generic/unassigned rows aren't real capacity yet). Click any % to see which initiatives it's coming from. The lighter <b>Actual</b> row underneath is real work — sourced from Sprint Planning's assignments (and Budget's own assignment editor, same records), sized against real calendar days.</div>
             <table style={{borderCollapse:'collapse',fontSize:11,minWidth:640}}>
               <thead><tr>
                 <th style={{textAlign:'left',padding:'6px 10px',color:'#7A8FA6',borderBottom:'1px solid #243447',position:'sticky' as const,left:0,background:'#0D1B2A'}}>Person</th>
@@ -7507,7 +7602,7 @@ function BudgetTab({roles,setRoles,people,setPeople,projects,items,projectRoles,
                           return(
                             <td key={k} style={{textAlign:'center',padding:'4px 10px'}}>
                               {pct>0?(
-                                <div onClick={()=>setCapSel(isSel?null:{personId:p.id,key:k})} title="Click for project breakdown"
+                                <div onClick={()=>setCapSel(isSel?null:{personId:p.id,key:k})} title="Click for initiative breakdown"
                                   style={{cursor:'pointer',borderRadius:4,padding:'1px 4px',background:isSel?'#1E3048':'transparent',border:isSel?'1px solid #C8973A':'1px solid transparent'}}>
                                   <span style={{fontWeight:700,color:pctColor(pct)}}>{pct}%</span>
                                 </div>
@@ -7586,7 +7681,7 @@ function BudgetTab({roles,setRoles,people,setPeople,projects,items,projectRoles,
                 <div style={{display:'flex',justifyContent:'space-between',fontSize:11,marginBottom:8,paddingBottom:8,borderBottom:'1px solid #243447'}}>
                   <span style={{color:'#7A8FA6'}}>Full cost this month</span><span style={{color:'#F4F6F8',fontWeight:700}}>{fmtUSD(selFull)}</span>
                 </div>
-                {selProjects.length===0&&<div style={{fontSize:11,color:'#E74C3C',fontStyle:'italic'}}>Not allocated to any project this month — full cost is unfilled bench time.</div>}
+                {selProjects.length===0&&<div style={{fontSize:11,color:'#E74C3C',fontStyle:'italic'}}>Not allocated to any initiative this month — full cost is unfilled bench time.</div>}
                 {selProjects.map((p:any,ix:number)=>(
                   <div key={ix} style={{display:'flex',alignItems:'center',gap:8,fontSize:11,padding:'4px 0',borderBottom:ix<selProjects.length-1?'1px solid #1A2838':'none'}}>
                     <span style={{width:8,height:8,borderRadius:2,background:p.color||'#3A4A5E',flexShrink:0}}/>
@@ -7608,7 +7703,7 @@ function BudgetTab({roles,setRoles,people,setPeople,projects,items,projectRoles,
             )}
           <div style={{overflowX:'auto'}}>
             <div style={{fontSize:11,color:'#7A8FA6',marginBottom:12,lineHeight:1.5}}>
-              What we'd pay each person at full utilization vs. what's actually allocated to projects — the gap is bench cost: paying for capacity that isn't booked to anything. Click a cell for the project breakdown.
+              What we'd pay each person at full utilization vs. what's actually allocated to initiatives — the gap is bench cost: paying for capacity that isn't booked to anything. Click a cell for the initiative breakdown.
             </div>
             <table style={{borderCollapse:'collapse',fontSize:11,minWidth:640}}>
               <thead><tr>
@@ -7635,7 +7730,7 @@ function BudgetTab({roles,setRoles,people,setPeople,projects,items,projectRoles,
                           return(
                             <td key={k} style={{textAlign:'center',padding:'4px 10px'}}>
                               {full>0?(
-                                <div onClick={()=>setTcSel(isSel?null:{personId:p.id,key:k})} title="Click for project breakdown"
+                                <div onClick={()=>setTcSel(isSel?null:{personId:p.id,key:k})} title="Click for initiative breakdown"
                                   style={{cursor:'pointer',borderRadius:4,padding:'2px 4px',background:isSel?'#1E3048':'transparent',border:isSel?'1px solid #C8973A':'1px solid transparent'}}>
                                   <div style={{fontWeight:700,color:fillColor(pct)}}>{fmtUSD(alloc)}</div>
                                   <div style={{fontSize:9,color:'#7A8FA6'}}>of {fmtUSD(full)}</div>
@@ -7700,7 +7795,7 @@ function BudgetTab({roles,setRoles,people,setPeople,projects,items,projectRoles,
               </select>
             </div>
             <div style={{fontSize:11,color:'#7A8FA6',marginBottom:16,lineHeight:1.5}}>
-              Each team's cost is fixed — you're paying for it whether or not it's assigned to a project. <b style={{color:'#27AE60'}}>Approved</b> shows what's actually claimed today; <b style={{color:'#5DADE2'}}>Requested</b> and <b style={{color:'#E8B95A'}}>Draft</b> show what the pipeline would claim if approved. Click any department card to see exactly who/what makes up its number.
+              Each team's cost is fixed — you're paying for it whether or not it's assigned to an initiative. <b style={{color:'#27AE60'}}>Approved</b> shows what's actually claimed today; <b style={{color:'#5DADE2'}}>Requested</b> and <b style={{color:'#E8B95A'}}>Draft</b> show what the pipeline would claim if approved. Click any department card to see exactly who/what makes up its number.
             </div>
             {sel&&(
               <div style={{background:'#12202F',border:'1px solid #C8973A',borderRadius:10,padding:'14px 18px',marginBottom:20,maxWidth:640}}>
@@ -7708,11 +7803,11 @@ function BudgetTab({roles,setRoles,people,setPeople,projects,items,projectRoles,
                   <span style={{fontSize:13,fontWeight:700,color:'#F4F6F8'}}>{sel.team} — {sel.dept}</span>
                   <button onClick={()=>setTbSel(null)} style={{marginLeft:'auto',background:'none',border:'none',color:'#7A8FA6',fontSize:14,cursor:'pointer'}}>✕</button>
                 </div>
-                {selClaims.length===0&&<div style={{fontSize:11,color:'#7A8FA6',fontStyle:'italic'}}>No project claims here — this department's cost is entirely unallocated right now.</div>}
+                {selClaims.length===0&&<div style={{fontSize:11,color:'#7A8FA6',fontStyle:'italic'}}>No initiative claims here — this department's cost is entirely unallocated right now.</div>}
                 {selClaims.length>0&&(
                   <table style={{width:'100%',borderCollapse:'collapse',fontSize:11}}>
                     <thead><tr>
-                      <th style={{textAlign:'left',padding:'4px 6px',color:'#7A8FA6',borderBottom:'1px solid #243447'}}>Project</th>
+                      <th style={{textAlign:'left',padding:'4px 6px',color:'#7A8FA6',borderBottom:'1px solid #243447'}}>Initiative</th>
                       <th style={{textAlign:'left',padding:'4px 6px',color:'#7A8FA6',borderBottom:'1px solid #243447'}}>Person</th>
                       <th style={{textAlign:'left',padding:'4px 6px',color:'#7A8FA6',borderBottom:'1px solid #243447'}}>Role</th>
                       <th style={{textAlign:'right',padding:'4px 6px',color:'#7A8FA6',borderBottom:'1px solid #243447'}}>Alloc</th>
@@ -7813,7 +7908,7 @@ function BudgetTab({roles,setRoles,people,setPeople,projects,items,projectRoles,
               <div style={{fontSize:11,color:'#7A8FA6'}}>Delta</div>
             </div>
           </div>
-          {rollup.length===0&&<div style={{fontSize:12,color:'#7A8FA6',fontStyle:'italic'}}>No active projects with dates set.</div>}
+          {rollup.length===0&&<div style={{fontSize:12,color:'#7A8FA6',fontStyle:'italic'}}>No active initiatives with dates set.</div>}
           {rollup.map(({project,fc,ac,elapsedPct,spentPct}:any)=>{
             const flag=elapsedPct!=null&&spentPct!=null&&spentPct-elapsedPct>15
             return(
@@ -7822,7 +7917,7 @@ function BudgetTab({roles,setRoles,people,setPeople,projects,items,projectRoles,
                   <span style={{width:9,height:9,borderRadius:2,background:project.color||'#3A4A5E'}}/>
                   <span style={{fontSize:14,fontWeight:700,color:'#F4F6F8'}}>{project.name}</span>
                   {flag&&<span style={{fontSize:9,fontWeight:700,color:'#E74C3C',border:'1px solid #E74C3C',borderRadius:8,padding:'1px 7px'}}>BURNING FAST</span>}
-                  {fc.unset&&<span style={{fontSize:10,color:'#7A8FA6',fontStyle:'italic'}}>— set project dates to forecast</span>}
+                  {fc.unset&&<span style={{fontSize:10,color:'#7A8FA6',fontStyle:'italic'}}>— set initiative dates to forecast</span>}
                 </div>
                 {!fc.unset&&(
                   <>
@@ -7887,7 +7982,7 @@ function DoneTab({items,setItems,projects,setProjects,ccrs,ccrItems,space}:{item
 
   return(
     <div style={{height:'100%',overflowY:'auto',padding:'20px 28px'}}>
-      <div style={{fontSize:12,color:'#7A8FA6',marginBottom:18}}>History of completed work — records land here automatically when marked {ITEM_TERMINAL.join(' / ')} (items) or {PROJECT_TERMINAL.join(' / ')} (projects)</div>
+      <div style={{fontSize:12,color:'#7A8FA6',marginBottom:18}}>History of completed work — records land here automatically when marked {ITEM_TERMINAL.join(' / ')} (items) or {PROJECT_TERMINAL.join(' / ')} (initiatives)</div>
 
       {/* Closed change requests */}
       {space==='work'&&(()=>{
@@ -7930,18 +8025,18 @@ function DoneTab({items,setItems,projects,setProjects,ccrs,ccrItems,space}:{item
       })()}
       {/* Projects */}
       <div style={{background:'#12202F',border:'1px solid #243447',borderRadius:10,padding:'14px 18px',marginBottom:20}}>
-        <button onClick={()=>setProjOpen(o=>!o)} style={secBtn(projOpen) as any}><span style={{fontSize:11}}>{projOpen?'▾':'▸'}</span>◈ PROJECTS ({doneProjects.length})</button>
+        <button onClick={()=>setProjOpen(o=>!o)} style={secBtn(projOpen) as any}><span style={{fontSize:11}}>{projOpen?'▾':'▸'}</span>◈ INITIATIVES ({doneProjects.length})</button>
         {projOpen&&(
           <>
           <div style={{display:'flex',gap:8,marginBottom:12,flexWrap:'wrap' as const}}>
-            <input placeholder="Search projects..." value={pSrch} onChange={e=>setPSrch(e.target.value)} style={{...selS,width:200}}/>
+            <input placeholder="Search initiatives..." value={pSrch} onChange={e=>setPSrch(e.target.value)} style={{...selS,width:200}}/>
             <select value={pTeam} onChange={e=>setPTeam(e.target.value)} style={selS}><option value="All">All Teams</option>{TEAMS.map(t=><option key={t}>{t}</option>)}</select>
             <select value={pStatus} onChange={e=>setPStatus(e.target.value)} style={selS}><option value="All">All Statuses</option>{PROJECT_TERMINAL.map(t=><option key={t}>{t}</option>)}</select>
           </div>
-          {doneProjects.length===0&&<div style={{fontSize:12,color:'#7A8FA6',fontStyle:'italic'}}>No completed projects{pSrch||pTeam!=='All'||pStatus!=='All'?' matching filters':''}</div>}
+          {doneProjects.length===0&&<div style={{fontSize:12,color:'#7A8FA6',fontStyle:'italic'}}>No completed initiatives{pSrch||pTeam!=='All'||pStatus!=='All'?' matching filters':''}</div>}
           {doneProjects.length>0&&(
             <table style={{borderCollapse:'collapse',width:'100%'}}>
-              <thead><tr><th style={THD}>Project</th><th style={THD}>Status</th><th style={THD}>Priority</th><th style={THD}>Team</th><th style={THD}>Timeline</th><th style={THD}>Items</th></tr></thead>
+              <thead><tr><th style={THD}>Initiative</th><th style={THD}>Status</th><th style={THD}>Priority</th><th style={THD}>Team</th><th style={THD}>Timeline</th><th style={THD}>Items</th></tr></thead>
               <tbody>{doneProjects.map(p=>{
                 const pi=items.filter(i=>i.parent_project===p.name)
                 return(
@@ -7980,13 +8075,13 @@ function DoneTab({items,setItems,projects,setProjects,ccrs,ccrItems,space}:{item
             <select value={iTeam} onChange={e=>setITeam(e.target.value)} style={selS}><option value="All">All Teams</option>{TEAMS.map(t=><option key={t}>{t}</option>)}</select>
             <select value={iPri} onChange={e=>setIPri(e.target.value)} style={selS}><option value="All">All Priorities</option>{PRIORITIES.map(t=><option key={t}>{t}</option>)}</select>
             <select value={iSwim} onChange={e=>setISwim(e.target.value)} style={selS}><option value="All">All Swimlanes</option>{swimOpts.map(t=><option key={t}>{t}</option>)}</select>
-            <select value={iProj} onChange={e=>setIProj(e.target.value)} style={selS}><option value="All">All Projects</option>{projOpts.map(t=><option key={t}>{t}</option>)}</select>
+            <select value={iProj} onChange={e=>setIProj(e.target.value)} style={selS}><option value="All">All Initiatives</option>{projOpts.map(t=><option key={t}>{t}</option>)}</select>
             <select value={iStatus} onChange={e=>setIStatus(e.target.value)} style={selS}><option value="All">All Statuses</option>{ITEM_TERMINAL.map(t=><option key={t}>{t}</option>)}</select>
           </div>
           {doneItems.length===0&&<div style={{fontSize:12,color:'#7A8FA6',fontStyle:'italic'}}>No done items{iSrch||iTeam!=='All'||iPri!=='All'||iSwim!=='All'||iProj!=='All'||iStatus!=='All'?' matching filters':''}</div>}
           {doneItems.length>0&&(
             <table style={{borderCollapse:'collapse',width:'100%'}}>
-              <thead><tr><th style={THD}>ID</th><th style={THD}>Item</th><th style={THD}>Status</th><th style={THD}>Priority</th><th style={THD}>Swimlane</th><th style={THD}>Team</th><th style={THD}>Project</th><th style={THD}>CCR</th><th style={THD}>End Date</th></tr></thead>
+              <thead><tr><th style={THD}>ID</th><th style={THD}>Item</th><th style={THD}>Status</th><th style={THD}>Priority</th><th style={THD}>Swimlane</th><th style={THD}>Team</th><th style={THD}>Initiative</th><th style={THD}>CCR</th><th style={THD}>End Date</th></tr></thead>
               <tbody>{doneItems.map(i=>(
                 <tr key={i.id}>
                   <td style={{...TDD,fontFamily:'monospace',fontSize:10,color:'#7A8FA6'}}>{i.item_id}</td>
@@ -8184,7 +8279,7 @@ function Assistant({open,setOpen,seed,setSeed,items:itemsProp,setItems,projects:
         let team=inp.team||null,parent=null
         if(inp.project){
           const pr=findProject(inp.project)
-          if(!pr)return{error:`No project matched "${inp.project}"`,projects:projects.filter((p:any)=>spaceOf(p)===space&&!PROJECT_TERMINAL.includes(p.status)).map((p:any)=>p.name)}
+          if(!pr)return{error:`No initiative matched "${inp.project}"`,projects:projects.filter((p:any)=>spaceOf(p)===space&&!PROJECT_TERMINAL.includes(p.status)).map((p:any)=>p.name)}
           parent=pr.name;team=team||pr.team||null
         }
         if(team){const t=TEAMS.find(x=>x.toLowerCase().includes(String(team).toLowerCase()));if(t)team=t}
@@ -8202,7 +8297,7 @@ function Assistant({open,setOpen,seed,setSeed,items:itemsProp,setItems,projects:
         let projectId=null,pname=null
         if(inp.project){
           const pr=findProject(inp.project)
-          if(!pr)return{error:`No project matched "${inp.project}"`,projects:projects.filter((p:any)=>spaceOf(p)===space&&!PROJECT_TERMINAL.includes(p.status)).map((p:any)=>p.name)}
+          if(!pr)return{error:`No initiative matched "${inp.project}"`,projects:projects.filter((p:any)=>spaceOf(p)===space&&!PROJECT_TERMINAL.includes(p.status)).map((p:any)=>p.name)}
           projectId=pr.id;pname=pr.name
         }
         const{data,error}=await supabase.from('ccrs').insert({title:inp.title,project_id:projectId,target_date:inp.target_date||null,status:'To Create'}).select().single()
@@ -8214,7 +8309,7 @@ function Assistant({open,setOpen,seed,setSeed,items:itemsProp,setItems,projects:
         let projectId=null,pname='General',tSpace=space
         if(inp.project){
           const pr=findProject(inp.project)
-          if(!pr)return{error:`No project matched "${inp.project}"`,projects:projects.filter((p:any)=>spaceOf(p)===space&&!PROJECT_TERMINAL.includes(p.status)).map((p:any)=>p.name)}
+          if(!pr)return{error:`No initiative matched "${inp.project}"`,projects:projects.filter((p:any)=>spaceOf(p)===space&&!PROJECT_TERMINAL.includes(p.status)).map((p:any)=>p.name)}
           projectId=pr.id;pname=pr.name;tSpace=spaceOf(pr)
         }
         const ok=await addProjectTask(setTasks,projectId,inp.title,inp.due_date||null,tSpace)
@@ -8350,7 +8445,7 @@ function Assistant({open,setOpen,seed,setSeed,items:itemsProp,setItems,projects:
         if(fields.start_date&&fields.end_date&&fields.end_date<fields.start_date)return{error:'end_date is before start_date'}
         if(Object.keys(fields).length&&!st)return{error:'No strategy exists yet. Create one first.'}
         if(!pr){
-          if(!inp.create_if_missing)return{error:`No project matched "${inp.project}". Set create_if_missing to add it as a new proposed project.`,projects:L.projects.filter((p:any)=>spaceOf(p)==='work'&&!PROJECT_TERMINAL.includes(p.status)).map((p:any)=>p.name)}
+          if(!inp.create_if_missing)return{error:`No initiative matched "${inp.project}". Set create_if_missing to add it as a new proposed initiative.`,projects:L.projects.filter((p:any)=>spaceOf(p)==='work'&&!PROJECT_TERMINAL.includes(p.status)).map((p:any)=>p.name)}
           const team=inp.team?TEAMS.find(x=>x.toLowerCase().includes(String(inp.team).toLowerCase()))||null:null
           const{data,error}=await supabase.from('projects').insert({name:String(inp.project).trim(),team,status:'Planning',priority:'P3',rag:'Green',color:'#E07B2A',description:inp.description||'',
             sort_order:L.projects.length,space:'work',planning_state:'proposed',...own}).select().single()
@@ -8371,8 +8466,8 @@ function Assistant({open,setOpen,seed,setSeed,items:itemsProp,setItems,projects:
       }
       if(name==='add_dependency'||name==='remove_dependency'){
         const a=findProject(inp.project),b=findProject(inp.depends_on)
-        if(!a||!b)return{error:`No project matched "${!a?inp.project:inp.depends_on}"`}
-        if(a.id===b.id)return{error:'A project cannot depend on itself'}
+        if(!a||!b)return{error:`No initiative matched "${!a?inp.project:inp.depends_on}"`}
+        if(a.id===b.id)return{error:'An initiative cannot depend on itself'}
         const st=findStrategy(inp.strategy)
         if(!st)return{error:'No strategy exists yet.'}
         const existing=L.deps.find((d:any)=>d.strategy_id===st.id&&d.blocked_type==='project'&&d.blocked_id===a.id&&d.blocker_type==='project'&&d.blocker_id===b.id)
@@ -8392,14 +8487,14 @@ function Assistant({open,setOpen,seed,setSeed,items:itemsProp,setItems,projects:
       }
       if(name==='list_project_items'){
         const pr=findProject(inp.project)
-        if(!pr)return{error:`No project matched "${inp.project}"`}
+        if(!pr)return{error:`No initiative matched "${inp.project}"`}
         const pe=L.epics.filter((e:any)=>e.project_id===pr.id)
         return{project:pr.name,epics:pe.map((e:any)=>e.name),
           items:L.items.filter((i:any)=>i.parent_project===pr.name).map((i:any)=>({id:i.item_id,name:i.name,type:i.request_type,status:i.status,description:(i.description||'').slice(0,160),epic:pe.find((e:any)=>e.id===i.epic_id)?.name||null}))}
       }
       if(name==='create_epic'){
         const pr=findProject(inp.project)
-        if(!pr)return{error:`No project matched "${inp.project}"`}
+        if(!pr)return{error:`No initiative matched "${inp.project}"`}
         if(L.epics.some((e:any)=>e.project_id===pr.id&&e.name.toLowerCase()===String(inp.name).toLowerCase()))return{unchanged:`Epic "${inp.name}" already exists in ${pr.name}`}
         const{data,error}=await supabase.from('epics').insert({project_id:pr.id,name:inp.name,description:inp.description||null,space:spaceOf(pr),
           sort_order:L.epics.filter((e:any)=>e.project_id===pr.id).length}).select().single()
@@ -8409,7 +8504,7 @@ function Assistant({open,setOpen,seed,setSeed,items:itemsProp,setItems,projects:
       }
       if(name==='assign_items_to_epic'){
         const pr=findProject(inp.project)
-        if(!pr)return{error:`No project matched "${inp.project}"`}
+        if(!pr)return{error:`No initiative matched "${inp.project}"`}
         const r=String(inp.epic||'').toLowerCase()
         const pe=L.epics.filter((e:any)=>e.project_id===pr.id)
         const ep=pe.find((e:any)=>e.name.toLowerCase()===r)||pe.find((e:any)=>e.name.toLowerCase().includes(r))
@@ -8417,7 +8512,7 @@ function Assistant({open,setOpen,seed,setSeed,items:itemsProp,setItems,projects:
         const ids=(inp.items||[]).map((x:string)=>String(x).toLowerCase())
         const hits=L.items.filter((i:any)=>i.parent_project===pr.name&&ids.includes((i.item_id||'').toLowerCase()))
         const missing=(inp.items||[]).filter((x:string)=>!hits.some((i:any)=>(i.item_id||'').toLowerCase()===String(x).toLowerCase()))
-        if(!hits.length)return{error:'None of those item ids belong to this project',missing}
+        if(!hits.length)return{error:'None of those item ids belong to this initiative',missing}
         const{error}=await supabase.from('items').update({epic_id:ep.id}).in('id',hits.map((i:any)=>i.id))
         if(error)return{error:error.message}
         const hitIds=new Set(hits.map((i:any)=>i.id))
@@ -8529,6 +8624,7 @@ export default function PerfectGame() {
   const [projectDeps,setProjectDeps]=useState<any[]>([]) // work_dependencies: strategy_id null = main roadmap
   const [strategyItems,setStrategyItems]=useState<any[]>([])
   const [strategyRoles,setStrategyRoles]=useState<any[]>([])
+  const [releases,setReleases]=useState<any[]>([])
   const [loading,setLoading]=useState(true)
   const [activeTab,setActiveTab]=useState('desk')
   const [selectedProject,setSelectedProject]=useState<any>(null) // shared so Roadmap can open the same Project detail panel Projects uses
@@ -8552,7 +8648,7 @@ export default function PerfectGame() {
 
 useEffect(()=>{
     async function load(){
-      const[{data:itemData},{data:projectData},{data:milestoneData},{data:taskData},{data:ccrData},{data:ccrItemData},{data:roleData},{data:peopleData},{data:projRoleData},{data:itemAsgData},{data:qbData},{data:sprintData},{data:sprintAsgData},{data:sprintCfgData},{data:epicData},{data:stratData},{data:trackData},{data:goalData},{data:depData},{data:stratItemData},{data:stratRoleData}]=await Promise.all([
+      const[{data:itemData},{data:projectData},{data:milestoneData},{data:taskData},{data:ccrData},{data:ccrItemData},{data:roleData},{data:peopleData},{data:projRoleData},{data:itemAsgData},{data:qbData},{data:sprintData},{data:sprintAsgData},{data:sprintCfgData},{data:epicData},{data:stratData},{data:trackData},{data:goalData},{data:depData},{data:stratItemData},{data:stratRoleData},{data:releaseData}]=await Promise.all([
       supabase.from('items').select('*').order('sort_order',{ascending:true}),
       supabase.from('projects').select('*').order('sort_order',{ascending:true}),
       supabase.from('milestones').select('*').order('date',{ascending:true}),
@@ -8574,6 +8670,7 @@ useEffect(()=>{
       supabase.from('work_dependencies').select('*'),
       supabase.from('strategy_items').select('*'),
       supabase.from('strategy_roles').select('*'),
+      supabase.from('releases').select('*').order('month',{ascending:true}),
     ])
     if(itemData) setItems(itemData)
     if(milestoneData) setMilestones(milestoneData)
@@ -8595,6 +8692,7 @@ useEffect(()=>{
     if(depData) setProjectDeps(depData)
     if(stratItemData) setStrategyItems(stratItemData)
     if(stratRoleData) setStrategyRoles(stratRoleData)
+    if(releaseData) setReleases(releaseData)
 
     // Items that name a project that doesn't exist are shown as-is. (This used to recreate the
     // project, which brought deleted projects back and made duplicates during bulk adds.)
@@ -8617,7 +8715,7 @@ useEffect(()=>{
   const TABS=[
   {key:'desk',label:'Desk',icon:'✎'},
   {key:'strategy',label:'Strategy',icon:'◭'},
-  {key:'projects',label:'Projects',icon:'◈',badge:totalViolations>0?totalViolations:null},
+  {key:'projects',label:'Initiatives',icon:'◈',badge:totalViolations>0?totalViolations:null},
   {key:'backlog',label:'Backlog',icon:'≡'},
   {key:'roadmap',label:'Roadmap',icon:'◫'},
   {key:'sprints',label:'Sprints',icon:'⚡'},
@@ -8665,19 +8763,19 @@ useEffect(()=>{
           ))}
         </div>
         {!mobile&&<div title="Deckers Brands · Retail Technology" style={{display:'flex',gap:8,padding:'0 16px',alignItems:'center',fontSize:11,color:'#7A8FA6',whiteSpace:'nowrap' as const}}>
-          <span>{items.length} items · {projects.length} projects · {milestones.length} milestones</span>
+          <span>{items.length} items · {projects.length} initiatives · {milestones.length} milestones</span>
         </div>}
       </div>
       <div style={{flex:1,overflow:'hidden'}}>
-        {activeTab==='backlog'&&<Backlog items={sItems} setItems={setSItems} projects={sProjects} setProjects={setSProjects} space={space} ccrs={ccrs} ccrItems={ccrItems} setCcrItems={setCcrItems} epics={epics} setEpics={setEpics} sustainPct={Number(strategies[0]?.bau_pct??30)}/>}
+        {activeTab==='backlog'&&<Backlog items={sItems} setItems={setSItems} projects={sProjects} setProjects={setSProjects} space={space} ccrs={ccrs} ccrItems={ccrItems} setCcrItems={setCcrItems} epics={epics} setEpics={setEpics} sustainPct={Number(strategies[0]?.bau_pct??30)} releases={releases} setReleases={setReleases}/>}
         {activeTab==='strategy'&&<StrategyTab projects={projects} setProjects={setProjects} strategies={strategies} setStrategies={setStrategies} tracks={tracks} setTracks={setTracks} goals={trackGoals} setGoals={setTrackGoals} deps={projectDeps} setDeps={setProjectDeps}
           people={people} teams={TEAMS} computeCapacity={(ps:any[],prs:any[])=>capacityByMonth(ps,prs,people,roles,items.filter(inSpace))}
           strategyItems={strategyItems} setStrategyItems={setStrategyItems} roles={roles} projectRoles={projectRoles} setProjectRoles={setProjectRoles}
           strategyRoles={strategyRoles} setStrategyRoles={setStrategyRoles}
           onOpenProject={(p:any)=>{setSelectedProject(p);setActiveTab('projects')}} openAssistant={(t:string)=>{setAsstSeed(t);setAsstOpen(true)}}
           items={items.filter(inSpace)} epics={epics} setEpics={setEpics}/>}
-        {activeTab==='projects'&&<Projects items={sItems} setItems={setSItems} projects={sProjects} setProjects={setSProjects} milestones={sMilestones} setMilestones={setSMilestones} tasks={tasks} setTasks={setTasks} space={space} ccrs={ccrs} ccrItems={ccrItems} roles={roles} people={people} projectRoles={projectRoles} setProjectRoles={setProjectRoles} itemAssignments={itemAssignments} setItemAssignments={setItemAssignments} sprints={sprints} selectedProject={selectedProject} setSelectedProject={setSelectedProject} epics={epics} setEpics={setEpics}/>}
-{activeTab==='roadmap'&&<Roadmap deps={projectDeps.filter((d:any)=>!d.strategy_id)} setDeps={setProjectDeps} items={sItems} setItems={setSItems} projects={sProjects} setProjects={setSProjects} milestones={sMilestones} setMilestones={setSMilestones} tasks={tasks} setTasks={setTasks} sprints={sprints} itemAssignments={itemAssignments} projectRoles={projectRoles} people={people} roles={roles} onOpenProject={(p:any)=>{setSelectedProject(p);setActiveTab('projects')}}/>}
+        {activeTab==='projects'&&<Projects items={sItems} setItems={setSItems} projects={sProjects} setProjects={setSProjects} milestones={sMilestones} setMilestones={setSMilestones} tasks={tasks} setTasks={setTasks} space={space} ccrs={ccrs} ccrItems={ccrItems} roles={roles} people={people} projectRoles={projectRoles} setProjectRoles={setProjectRoles} itemAssignments={itemAssignments} setItemAssignments={setItemAssignments} sprints={sprints} selectedProject={selectedProject} setSelectedProject={setSelectedProject} epics={epics} setEpics={setEpics} releases={releases}/>}
+{activeTab==='roadmap'&&<Roadmap releases={releases} setReleases={setReleases} epics={epics} deps={projectDeps.filter((d:any)=>!d.strategy_id)} setDeps={setProjectDeps} items={sItems} setItems={setSItems} projects={sProjects} setProjects={setSProjects} milestones={sMilestones} setMilestones={setSMilestones} tasks={tasks} setTasks={setTasks} sprints={sprints} itemAssignments={itemAssignments} projectRoles={projectRoles} people={people} roles={roles} onOpenProject={(p:any)=>{setSelectedProject(p);setActiveTab('projects')}}/>}
         {activeTab==='teams'&&<Teams items={sItems} projects={sProjects} milestones={sMilestones} ccrs={ccrs} ccrItems={ccrItems}/>}
         {activeTab==='desk'&&<Desk items={items} setItems={setItems} projects={projects} setProjects={setProjects} milestones={milestones} setMilestones={setMilestones} tasks={tasks} setTasks={setTasks} ccrs={ccrs} setCcrs={setCcrs} ccrItems={ccrItems} setCcrItems={setCcrItems} space={space} openAssistant={(t:string)=>{setAsstSeed(t);setAsstOpen(true)}}/>}
         <Assistant open={asstOpen} setOpen={setAsstOpen} seed={asstSeed} setSeed={setAsstSeed} items={items} setItems={setItems} projects={projects} setProjects={setProjects} milestones={milestones} tasks={tasks} setTasks={setTasks} ccrs={ccrs} setCcrs={setCcrs} ccrItems={ccrItems} setCcrItems={setCcrItems} space={space}

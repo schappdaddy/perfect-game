@@ -25,7 +25,7 @@ const TEAM_COLORS:any={'Consumer Experience':'#D9E2EC','Operational Efficiency':
 const PROPOSED='#E07B2A'
 const GROUP='#C8973A'
 const STATE_LABEL:any={planned:'Planned',proposed:'Proposed'}
-const WORK_LABEL:any={new:'New project',sustain:'Sustain'}
+const WORK_LABEL:any={new:'New initiative',sustain:'Sustain'}
 const SUSTAIN='#4A5D72'
 // 'bau' was the earlier way to mark sustain work; it still reads as planned + sustain
 const workType=(p:any)=>p?.work_type==='sustain'||p?.planning_state==='bau'?'sustain':'new'
@@ -172,7 +172,7 @@ export default function StrategyTab({projects:mainProjects,setProjects,strategie
     if(Object.keys(own).length){
       setProjects((prev:any[])=>prev.map(p=>p.id===id?{...p,...own}:p))
       const{error}=await supabase.from('projects').update({...own,updated_at:new Date().toISOString()}).eq('id',id)
-      if(error)alert('Failed to save project: '+error.message)
+      if(error)alert('Failed to save initiative: '+error.message)
     }
     if(Object.keys(sandbox).length)await upsertRow('project',id,sandbox)
   }
@@ -206,9 +206,9 @@ export default function StrategyTab({projects:mainProjects,setProjects,strategie
     const nP=ch.rows.filter(c=>c.row.item_type==='project').length,nE=ch.rows.length-nP
     if(!ch.rows.length&&!ch.addDeps.length&&!ch.dropDeps.length){alert('The main roadmap already matches this strategy.');return}
     const nPeople=ch.rows.filter(c=>c.diff.includes('people')||c.diff.includes('team')).length
-    const lines=[nP&&`${nP} project${nP!==1?'s get':' gets'} this strategy's dates, planning state, team or people`,nPeople&&`${nPeople} of them get this strategy's team or people (their roster is replaced)`,nE&&`${nE} epic${nE!==1?'s get':' gets'} this strategy's dates`,
+    const lines=[nP&&`${nP} initiative${nP!==1?'s get':' gets'} this strategy's dates, planning state, team or people`,nPeople&&`${nPeople} of them get this strategy's team or people (their roster is replaced)`,nE&&`${nE} epic${nE!==1?'s get':' gets'} this strategy's dates`,
       ch.addDeps.length&&`${ch.addDeps.length} dependenc${ch.addDeps.length!==1?'ies are':'y is'} added`,ch.dropDeps.length&&`${ch.dropDeps.length} dependenc${ch.dropDeps.length!==1?'ies are':'y is'} removed`].filter(Boolean)
-    if(!confirm(`Promote "${strategy.name}" to the main roadmap?\n\n• ${lines.join('\n• ')}\n\nThe Roadmap, Projects, Budget and Sprints tabs use the main roadmap. Other strategies are not changed.`))return
+    if(!confirm(`Promote "${strategy.name}" to the main roadmap?\n\n• ${lines.join('\n• ')}\n\nThe Roadmap, Initiatives, Budget and Sprints tabs use the main roadmap. Other strategies are not changed.`))return
     for(const c of ch.rows){
       const fields:any={start_date:c.row.start_date||null}
       if(!(c.main.ongoing&&!c.row.end_date))fields.end_date=c.row.end_date||null
@@ -270,7 +270,7 @@ export default function StrategyTab({projects:mainProjects,setProjects,strategie
   }
   async function resetToMain(){
     if(!strategy)return
-    if(!confirm(`Reset "${strategy.name}" to the main roadmap?\n\nDates, planning states, teams, people and dependencies go back to the main roadmap's. Tracks, goals, groups and which projects sit on which track stay.`))return
+    if(!confirm(`Reset "${strategy.name}" to the main roadmap?\n\nDates, planning states, teams, people and dependencies go back to the main roadmap's. Tracks, goals, groups and which initiatives sit on which track stay.`))return
     await supabase.from('strategy_roles').delete().eq('strategy_id',strategy.id)
     setStrategyRoles((prev:any[])=>prev.filter(x=>x.strategy_id!==strategy.id))
     const keep=sRows.filter(r=>r.item_type==='project'&&r.track_id)
@@ -314,7 +314,7 @@ export default function StrategyTab({projects:mainProjects,setProjects,strategie
   }
   async function deleteStrategy(){
     if(!strategy)return
-    if(!confirm(`Delete the strategy "${strategy.name}"?\n\nIts tracks, goals, placements and dependencies are deleted. Projects and the main roadmap are not changed.`))return
+    if(!confirm(`Delete the strategy "${strategy.name}"?\n\nIts tracks, goals, placements and dependencies are deleted. Initiatives and the main roadmap are not changed.`))return
     const trackIds=tracks.filter((t:any)=>t.strategy_id===strategy.id).map((t:any)=>t.id)
     setStrategies((prev:any[])=>prev.filter(s=>s.id!==strategy.id))
     setTracks((prev:any[])=>prev.filter(t=>t.strategy_id!==strategy.id))
@@ -348,7 +348,7 @@ export default function StrategyTab({projects:mainProjects,setProjects,strategie
   }
   async function deleteTrack(track:any){
     const n=projects.filter((p:any)=>p.track_id===track.id).length
-    if(!confirm(`Delete the track "${track.name}"?${n?`\n\nIts ${n} project${n!==1?'s':''} stay, they just leave this track.`:''}`))return
+    if(!confirm(`Delete the track "${track.name}"?${n?`\n\nIts ${n} initiative${n!==1?'s':''} stay, they just leave this track.`:''}`))return
     setTracks((prev:any[])=>prev.filter(t=>t.id!==track.id))
     setGoals((prev:any[])=>prev.filter(g=>g.track_id!==track.id))
     setStrategyItems((prev:any[])=>prev.map(r=>r.track_id===track.id?{...r,track_id:null}:r))
@@ -377,7 +377,7 @@ export default function StrategyTab({projects:mainProjects,setProjects,strategie
   // Names and dates for anything a dependency can point at
   function keyName(key:string){
     const[t,id]=key.split(':')
-    if(t==='project')return projById(id)?.name||'(deleted project)'
+    if(t==='project')return projById(id)?.name||'(deleted initiative)'
     if(t==='epic')return '◆ '+((epics as any[]).find(e=>e.id===id)?.name||'(deleted epic)')
     const it=(items as any[]).find(i=>i.id===id)
     return it?`${it.item_id} ${it.name}`:'(deleted item)'
@@ -396,10 +396,10 @@ export default function StrategyTab({projects:mainProjects,setProjects,strategie
   async function createProject(name:string,team:string,trackId:any,wt:string='new'){
     const n=name.trim()
     if(!n)return
-    if(projects.some((p:any)=>p.name.toLowerCase()===n.toLowerCase())){alert(`A project called "${n}" already exists. Add it to a track from its row instead.`);return}
+    if(projects.some((p:any)=>p.name.toLowerCase()===n.toLowerCase())){alert(`An initiative called "${n}" already exists. Add it to a track from its row instead.`);return}
     const{data,error}=await supabase.from('projects').insert({name:n,team:team||null,status:'Planning',priority:'P3',rag:'Green',color:PROPOSED,description:'',
       sort_order:projects.length,space:'work',planning_state:'proposed',work_type:wt}).select().single()
-    if(error){alert('Failed to create project: '+error.message);return}
+    if(error){alert('Failed to create initiative: '+error.message);return}
     if(data){
       setProjects((prev:any[])=>[...prev,data]);setSelId(data.id)
       if(strategy)await supabase.from('strategy_items').insert({strategy_id:strategy.id,item_type:'project',item_id:data.id,track_id:trackId||null,planning_state:'proposed'}).select().single()
@@ -604,10 +604,10 @@ export default function StrategyTab({projects:mainProjects,setProjects,strategie
       const list=groupTogether(sortProjects(all.filter(p=>tn==='__none'?(!p.team||!teams.includes(p.team)):p.team===tn)))
       const key='team:'+tn,closed=!!view.collapsed[key]
       rows.push({kind:'track',track:{id:key,name:tn==='__none'?'No team':tn,color:tn==='Consumer Experience'?'#C9D6E3':tn==='Operational Efficiency'?'#6FA6CB':'#7A8FA6',
-        description:`${list.length} project${list.length!==1?'s':''}`},index:ti,count:list.length,closed,teamRow:true,h:24})
+        description:`${list.length} initiative${list.length!==1?'s':''}`},index:ti,count:list.length,closed,teamRow:true,h:24})
       if(closed)return
       pushList(list)
-      if(!list.length)rows.push({kind:'hint',text:'No projects for this team yet.',h:ROW_H})
+      if(!list.length)rows.push({kind:'hint',text:'No initiatives for this team yet.',h:ROW_H})
       loads.filter(l=>l.team===tn).forEach(l=>rows.push({kind:'load',load:l,h:ROW_H}))
     })
     if(loads.some(l=>l.team===SHARED_TEAM)){
@@ -621,7 +621,7 @@ export default function StrategyTab({projects:mainProjects,setProjects,strategie
     if(closed)return
     rows.push({kind:'goals',track:t,h:28})
     pushList(list)
-    if(!list.length)rows.push({kind:'hint',text:'No projects yet. Pick a project and set its track.',h:ROW_H})
+    if(!list.length)rows.push({kind:'hint',text:'No initiatives yet. Pick an initiative and set its track.',h:ROW_H})
   })
   if(!teamView&&!sTracks.length)rows.push({kind:'hint',text:'No tracks yet. Add your first one in Strategy settings.',h:ROW_H})
   if(!teamView){
@@ -747,7 +747,7 @@ export default function StrategyTab({projects:mainProjects,setProjects,strategie
           <Chip color="#D9E2EC" label={`${counts.planned} planned`}/>
           <Chip color={PROPOSED} outline label={`${counts.proposed} proposed`}/>
           <Chip color={SUSTAIN} label={`${counts.sustain} sustain`}/>
-          {splitNewPct!=null&&<span title={`Staffed load from this quarter on, split by work type. Target: ${limits.new}% new projects, ${limits.sustain}% sustain.`}
+          {splitNewPct!=null&&<span title={`Staffed load from this quarter on, split by work type. Target: ${limits.new}% new initiatives, ${limits.sustain}% sustain.`}
             style={{color:Math.abs(splitNewPct-limits.new)>10?'#D4820A':'#C8C8D4'}}>· split {splitNewPct}/{100-splitNewPct} (target {limits.new}/{limits.sustain})</span>}
           {issues.length>0&&<Chip color="#E74C3C" label={`${issues.length} to check`}/>}
         </div>
@@ -771,7 +771,7 @@ export default function StrategyTab({projects:mainProjects,setProjects,strategie
             <option value="quarter">Snap to quarters</option>
             <option value="month">Snap to months</option>
           </select>
-          <label title="Show each project's epics under it" style={{display:'flex',alignItems:'center',gap:5,fontSize:11,color:'#7A8FA6',cursor:'pointer',whiteSpace:'nowrap' as const}}>
+          <label title="Show each initiative's epics under it" style={{display:'flex',alignItems:'center',gap:5,fontSize:11,color:'#7A8FA6',cursor:'pointer',whiteSpace:'nowrap' as const}}>
             <input type="checkbox" checked={view.showEpics} onChange={e=>setPref('showEpics',e.target.checked)} style={{accentColor:EPIC}}/>Epics
           </label>
         </div>}
@@ -787,7 +787,7 @@ export default function StrategyTab({projects:mainProjects,setProjects,strategie
             <option value="this">This strategy</option>
             <option value="all">All strategies ({strategies.length})</option>
           </select>
-          {openAssistant&&<button onClick={()=>openAssistant(`Look at the "${strategy.name}" strategy and draft a Plan A: place the proposed and undated projects by quarter on their tracks, respecting dependencies, the code freeze and team capacity. Keep anything you place as proposed.`)}
+          {openAssistant&&<button onClick={()=>openAssistant(`Look at the "${strategy.name}" strategy and draft a Plan A: place the proposed and undated initiatives by quarter on their tracks, respecting dependencies, the code freeze and team capacity. Keep anything you place as proposed.`)}
             style={{background:'none',border:'1px solid #C8973A',borderRadius:6,color:'#C8973A',fontSize:11,fontWeight:700,padding:'5px 10px',cursor:'pointer'}}>💬 Draft Plan A with the assistant</button>}
           {(()=>{const ch=changesVsMain();const n=ch.rows.length+ch.addDeps.length+ch.dropDeps.length
             return <button onClick={promote} title={n?`${n} difference${n!==1?'s':''} from the main roadmap. Click to copy this strategy onto it.`:'The main roadmap matches this strategy'}
@@ -846,7 +846,7 @@ export default function StrategyTab({projects:mainProjects,setProjects,strategie
                       {!r.teamRow&&<button onClick={()=>moveTrack(r.track.id,-1)} disabled={r.index===0} title="Move track up" style={{...HDR_BTN,opacity:r.index===0?0.3:1}}>▲</button>}
                       {!r.teamRow&&<button onClick={()=>moveTrack(r.track.id,1)} disabled={r.index===sTracks.length-1} title="Move track down" style={{...HDR_BTN,opacity:r.index===sTracks.length-1?0.3:1}}>▼</button>}
                       <span onClick={()=>toggleCollapsed(r.track.id)} title={`${r.track.name} track`} style={{cursor:'pointer',marginLeft:4}}>{r.track.name.toUpperCase()}</span>
-                      {r.closed&&<span style={{fontSize:10,fontWeight:700,opacity:0.7}}>· {r.count} project{r.count!==1?'s':''}</span>}
+                      {r.closed&&<span style={{fontSize:10,fontWeight:700,opacity:0.7}}>· {r.count} initiative{r.count!==1?'s':''}</span>}
                       {r.track.description&&<span style={{fontSize:11,fontWeight:600,letterSpacing:0,marginLeft:14,opacity:0.85}}>{r.track.description}</span>}
                     </div>
                     <div style={{width:TW,background:r.track.color}}/>
@@ -890,7 +890,7 @@ export default function StrategyTab({projects:mainProjects,setProjects,strategie
                 if(r.kind==='load')return(
                   <div key={ri} style={{display:'flex',height:r.h,position:'relative',zIndex:1}}>
                     <div style={{...cellLabel,padding:'0 12px',display:'flex',alignItems:'center',gap:6,fontSize:11,color:'#C8C8D4'}}>
-                      <span style={{...CLIP,flex:1}} title={r.load.team}>{teamShort(r.load.team)} · {r.load.wt==='new'?'New projects':'Sustain'}</span>
+                      <span style={{...CLIP,flex:1}} title={r.load.team}>{teamShort(r.load.team)} · {r.load.wt==='new'?'New initiatives':'Sustain'}</span>
                       <span style={{fontSize:9,color:'#7A8FA6'}}>of {limits[r.load.wt]}%</span>
                     </div>
                     {r.load.cells.map((c:any,i:number)=>{
@@ -1012,7 +1012,7 @@ export default function StrategyTab({projects:mainProjects,setProjects,strategie
               updProject={updProject} addDep={addDep} removeDep={removeDep} keyName={keyName} onClose={()=>setSelId(null)} onOpenProject={onOpenProject}
               staffing={<StaffingSection key={sel.id} project={sel} team={sel.team} teams={teams} rows={rosterOf(sel.id)} custom={!!rowOf('project',sel.id)?.roster_custom}
                 people={people} roles={roles} fys={fys} cost={(budgetEntries as any[]).find((x:any)=>x.p.id===sel.id)?.cost}
-                overlaps={(personId:string)=>overlapsFor(personId,sel.id,allocation.personMonth,(id:string)=>projById(id)?.name||'another project')}
+                overlaps={(personId:string)=>overlapsFor(personId,sel.id,allocation.personMonth,(id:string)=>projById(id)?.name||'another initiative')}
                 onTeam={(t:any)=>updProject(sel.id,{team:t})} onSetSlot={(slot:string,pid:any,cur:any)=>setSlot(sel.id,slot,pid,cur)}
                 onAdd={(f:any)=>addRosterRow(sel.id,f)} onRemove={removeRosterRow}/>}/>
           ):(<>
@@ -1128,11 +1128,11 @@ function ProjectPanel({p,state,tracks,groups=[],projects,deps,shown,issues,updPr
           </div>
         ))}
         {candidates.length>0&&<select value="" onChange={e=>e.target.value&&addDep('project:'+e.target.value,me)} style={{...INPUT,color:'#7A8FA6',borderStyle:'dashed'}}>
-          <option value="">+ Add a project it depends on…</option>
+          <option value="">+ Add an initiative it depends on…</option>
           {candidates.map((x:any)=><option key={x.id} value={x.id}>{x.name}</option>)}
         </select>}
         {blocks.length>0&&<>
-          <div style={{...H,marginTop:8}}>WAITING ON THIS PROJECT</div>
+          <div style={{...H,marginTop:8}}>WAITING ON THIS INITIATIVE</div>
           {blocks.map((d:any)=>(
             <div key={d.id} style={{display:'flex',alignItems:'center',gap:6,fontSize:12,color:'#F4F6F8'}}>
               <span style={{color:PROPOSED}}>→</span><span style={{flex:1}}>{keyName(`${d.blocked_type}:${d.blocked_id}`)}</span>
@@ -1142,7 +1142,7 @@ function ProjectPanel({p,state,tracks,groups=[],projects,deps,shown,issues,updPr
         </>}
       </div>
       {onOpenProject&&<div style={SECTION}>
-        <button onClick={()=>onOpenProject(p)} style={{background:'#1E3048',border:'1px solid #243447',borderRadius:5,color:'#F4F6F8',fontSize:12,padding:'7px 0',cursor:'pointer'}}>Open project, epics and items →</button>
+        <button onClick={()=>onOpenProject(p)} style={{background:'#1E3048',border:'1px solid #243447',borderRadius:5,color:'#F4F6F8',fontSize:12,padding:'7px 0',cursor:'pointer'}}>Open initiative, epics and items →</button>
       </div>}
     </div>
   )
@@ -1219,7 +1219,7 @@ function SettingsPanel({strategy,tracks,projects,teams,issues,setSelId,updStrate
           to
           <select value={strategy.end_fy} onChange={e=>updStrategy({end_fy:Math.max(Number(e.target.value),strategy.start_fy)})} style={INPUT}>{fyOpts.filter(f=>f>=strategy.start_fy).map(f=><option key={f} value={f}>FY{String(f).slice(-2)}</option>)}</select>
         </div>
-        <label title="Share of capacity for tech debt, stabilization and enhancements. New projects get the rest." style={{display:'flex',alignItems:'center',gap:8,fontSize:11,color:'#7A8FA6'}}>Sustain share
+        <label title="Share of capacity for tech debt, stabilization and enhancements. New initiatives get the rest." style={{display:'flex',alignItems:'center',gap:8,fontSize:11,color:'#7A8FA6'}}>Sustain share
           <input type="number" min={0} max={100} value={strategy.bau_pct} onChange={e=>updStrategy({bau_pct:Math.max(0,Math.min(100,Number(e.target.value)||0))})} style={{...INPUT,width:70}}/>%
         </label>
         <div style={{fontSize:11,color:'#7A8FA6'}}>Code-freeze months</div>
@@ -1252,9 +1252,9 @@ function SettingsPanel({strategy,tracks,projects,teams,issues,setSelId,updStrate
         <div style={{fontSize:10,color:'#7A8FA6'}}>Click a goal cell on the roadmap to set that year&apos;s goal.</div>
       </div>
       {tracks.length>0&&<div style={SECTION}>
-        <div style={H}>PUT AN EXISTING PROJECT ON A TRACK</div>
+        <div style={H}>PUT AN EXISTING INITIATIVE ON A TRACK</div>
         <select value={addPid} onChange={e=>setAddPid(e.target.value)} style={INPUT}>
-          <option value="">Choose a project…</option>
+          <option value="">Choose an initiative…</option>
           {addable.map((p:any)=><option key={p.id} value={p.id}>{p.name}</option>)}
         </select>
         <div style={{display:'flex',gap:6}}>
@@ -1267,8 +1267,8 @@ function SettingsPanel({strategy,tracks,projects,teams,issues,setSelId,updStrate
         </div>
       </div>}
       <div style={SECTION}>
-        <div style={H}>NEW PROPOSED PROJECT</div>
-        <input placeholder="Project name, e.g. Clienteling launch" value={np.name} onChange={e=>setNp({...np,name:e.target.value})} style={INPUT}/>
+        <div style={H}>NEW PROPOSED INITIATIVE</div>
+        <input placeholder="Initiative name, e.g. Clienteling launch" value={np.name} onChange={e=>setNp({...np,name:e.target.value})} style={INPUT}/>
         <div style={{display:'flex',gap:6}}>
           <select value={np.team} onChange={e=>setNp({...np,team:e.target.value})} style={{...INPUT,flex:1}}>{teams.map((t:string)=><option key={t} value={t}>{t}</option>)}</select>
           <select value={np.track} onChange={e=>setNp({...np,track:e.target.value})} style={{...INPUT,flex:1}}>
@@ -1277,7 +1277,7 @@ function SettingsPanel({strategy,tracks,projects,teams,issues,setSelId,updStrate
           </select>
         </div>
         <select value={np.wt} onChange={e=>setNp({...np,wt:e.target.value})} style={INPUT}>
-          <option value="new">New project</option>
+          <option value="new">New initiative</option>
           <option value="sustain">Sustain (tech debt, stabilization & enhancements)</option>
         </select>
         <button disabled={!np.name.trim()} onClick={async()=>{await createProject(np.name,np.team,np.track,np.wt);setNp({...np,name:''})}}
@@ -1315,7 +1315,7 @@ function NewStrategy({onCreate,onCancel,first}:any){
       <button onClick={()=>onCreate(TEMPLATE)} style={{background:'none',border:`1px solid ${PROPOSED}`,borderRadius:5,color:PROPOSED,fontWeight:700,fontSize:12,padding:'8px 0',cursor:'pointer'}}>
         Start from your FY27–FY30 roadmap
       </button>
-      <div style={{fontSize:10,color:'#7A8FA6',lineHeight:1.5}}>Creates &ldquo;{TEMPLATE.name}&rdquo; with Foundation and Revenue tracks and their yearly goals. You then put projects on the tracks.</div>
+      <div style={{fontSize:10,color:'#7A8FA6',lineHeight:1.5}}>Creates &ldquo;{TEMPLATE.name}&rdquo; with Foundation and Revenue tracks and their yearly goals. You then put initiatives on the tracks.</div>
     </div>
   )
   if(!first)return body
@@ -1323,7 +1323,7 @@ function NewStrategy({onCreate,onCancel,first}:any){
     <div style={{height:'100%',display:'flex',alignItems:'center',justifyContent:'center',padding:16}}>
       <div style={{width:'100%',maxWidth:420,background:'#162436',border:'1px solid #243447',borderRadius:10,padding:24,display:'flex',flexDirection:'column',gap:14}}>
         <div style={{fontSize:18,fontWeight:800,color:'#F4F6F8'}}>Build a strategy roadmap</div>
-        <div style={{fontSize:12,color:'#7A8FA6',lineHeight:1.6}}>A strategy spans fiscal years and has tracks, like Foundation and Revenue, each with a goal per year. Your projects become the bars, and dependencies become the arrows.</div>
+        <div style={{fontSize:12,color:'#7A8FA6',lineHeight:1.6}}>A strategy spans fiscal years and has tracks, like Foundation and Revenue, each with a goal per year. Your initiatives become the bars, and dependencies become the arrows.</div>
         {body}
       </div>
     </div>

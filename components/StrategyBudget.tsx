@@ -170,7 +170,7 @@ export function StrategyBudgetPanel({entries,fys,scope,setScope,onOpen}:any){
         <div style={{fontSize:10,fontWeight:700,color:'#7A8FA6',letterSpacing:1,flex:1}}>PROPOSED BUDGET</div>
         <select value={scope} onChange={e=>setScope(e.target.value)} style={{background:'#1E3048',color:'#F4F6F8',border:'1px solid #243447',borderRadius:5,fontSize:10.5,padding:'3px 6px'}}>
           <option value="all">Everything on this roadmap</option>
-          <option value="tracks">Projects on tracks only</option>
+          <option value="tracks">Initiatives on tracks only</option>
         </select>
       </div>
       <div style={{overflowX:'auto'}}>
@@ -193,7 +193,7 @@ export function StrategyBudgetPanel({entries,fys,scope,setScope,onOpen}:any){
         </table>
       </div>
       <div style={{display:'grid',gridTemplateColumns:'1fr 1fr',gap:8,fontSize:11}}>
-        {[['New projects',costed.filter((x:any)=>x.workType!=='sustain')],['Sustain',costed.filter((x:any)=>x.workType==='sustain')]].map(([l,list]:any)=>(
+        {[['New initiatives',costed.filter((x:any)=>x.workType!=='sustain')],['Sustain',costed.filter((x:any)=>x.workType==='sustain')]].map(([l,list]:any)=>(
           <div key={l} style={{background:'#162436',border:'1px solid #243447',borderRadius:6,padding:'7px 9px'}}>
             <div style={{color:'#7A8FA6',fontSize:10}}>{l}</div>
             <div style={{fontWeight:700,color:'#F4F6F8',fontSize:13}}>{fmtUSD(sum(list))}</div>
@@ -205,7 +205,7 @@ export function StrategyBudgetPanel({entries,fys,scope,setScope,onOpen}:any){
       </div>
       {groups.map(g=>open[g.k]&&g.list.length>0&&(
         <div key={g.k}>
-          <div style={{fontSize:10,fontWeight:700,color:'#7A8FA6',letterSpacing:1,marginBottom:4}}>{g.label.toUpperCase()} PROJECTS</div>
+          <div style={{fontSize:10,fontWeight:700,color:'#7A8FA6',letterSpacing:1,marginBottom:4}}>{g.label.toUpperCase()} INITIATIVES</div>
           {g.list.map((x:any)=>(
             <div key={x.p.id} onClick={()=>onOpen(x.p.id)} style={{display:'flex',gap:6,fontSize:11,padding:'3px 0',cursor:'pointer',borderBottom:'1px solid #1C2C3F'}}>
               <span style={{flex:1,color:'#C8C8D4',overflow:'hidden',whiteSpace:'nowrap',textOverflow:'ellipsis'}}>{x.p.name}</span>
@@ -236,7 +236,7 @@ export function StrategyBudgetPanel({entries,fys,scope,setScope,onOpen}:any){
           ))}
         </div>
       )}
-      <div style={{fontSize:10,color:'#7A8FA6',lineHeight:1.5}}>Uses this strategy&apos;s dates, teams and people. A person&apos;s time is split evenly across their overlapping projects. Bars that run to the edge (ongoing work) are costed to the end of the strategy.</div>
+      <div style={{fontSize:10,color:'#7A8FA6',lineHeight:1.5}}>Uses this strategy&apos;s dates, teams and people. A person&apos;s time is split evenly across their overlapping initiatives. Bars that run to the edge (ongoing work) are costed to the end of the strategy.</div>
     </div>
   )
 }
@@ -272,7 +272,7 @@ export function StaffingSection({project,team,teams,rows,custom,people,roles,cos
         <option value="">No team</option>
         {teams.map((t:string)=><option key={t} value={t}>{t}</option>)}
       </select>
-      {!custom&&rows.length>0&&<div style={{fontSize:10,color:'#7A8FA6'}}>Using the project&apos;s own roster. Any change here gives this strategy its own copy.</div>}
+      {!custom&&rows.length>0&&<div style={{fontSize:10,color:'#7A8FA6'}}>Using the initiative&apos;s own roster. Any change here gives this strategy its own copy.</div>}
       {SLOTS.map(sl=>{
         const r=slots.get(sl.key)
         return(
@@ -307,7 +307,7 @@ export function StaffingSection({project,team,teams,rows,custom,people,roles,cos
           disabled={!extra} style={{background:'#C8973A',border:'none',borderRadius:5,color:'#0D1B2A',fontWeight:700,fontSize:11,padding:'5px 10px',cursor:'pointer',opacity:extra?1:0.5}}>Add</button>
       </div>
       <div style={{fontSize:10,color:'#7A8FA6',lineHeight:1.5}}>
-        Lists {team?`${team} and ${SHARED_TEAM}`:'everyone'} (excluding anyone past their termination date). Each person&apos;s time is split evenly across projects that overlap; otherwise they&apos;re 100% on this one.
+        Lists {team?`${team} and ${SHARED_TEAM}`:'everyone'} (excluding anyone past their termination date). Each person&apos;s time is split evenly across initiatives that overlap; otherwise they&apos;re 100% on this one.
       </div>
       {cost&&cost.total>0&&(
         <div style={{display:'flex',flexWrap:'wrap' as const,gap:8,fontSize:10.5,color:'#7A8FA6'}}>
