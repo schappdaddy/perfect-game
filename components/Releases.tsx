@@ -159,7 +159,7 @@ export function QuarterPlanner({items,setItems,projects,setProjects,releases,set
     const it=(items as any[]).find(i=>i.id===dragId)
     setDragId(null);setOver(null)
     if(!it)return
-    let list=pool.filter(i=>i.id!==it.id)
+    const list=pool.filter(i=>i.id!==it.id)
     const at=beforeId?list.findIndex(i=>i.id===beforeId):list.length
     list.splice(at<0?list.length:at,0,it)
     if(bucket&&it.parent_project===bucket.name){
