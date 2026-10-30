@@ -1,7 +1,8 @@
 'use client'
 import { useState } from 'react'
 import { supabase } from '../lib/supabase'
-import { ReleaseSelect, releaseText, fmtMonthKey } from './Releases'
+import { ReleaseSelect, releaseText, fmtMonthKey, releaseOptions } from './Releases'
+import { InlineSelect, InlineText, InlineDate } from './InlineEdit'
 
 // Epics in the Backlog: an epic row that sits in the same table as stories (styled apart),
 // the epic side panel, and converting a story into an epic or an epic back into a story.
@@ -29,7 +30,28 @@ export function epicStories(epic:any,items:any[],projects:any[]){
 // One table row for an epic. Cells line up with the Backlog columns:
 // drag · ID · Item Name · Project · Epic · Work · Priority · Rank · Swimlane · Status · Team · Effort ·
 // Request Type · (Region … Owner: 9) · Start · End · ⚠ · 🚩 · custom columns
-export function EpicRow({epic,projects,items,isSel,onSelect,ccCount=0,releases=[]}:any){
+// Saving an epic, shared by the row's inline editors and the side panel
+export async function updateEpic(epicId:any,fields:any,setEpics:any){
+  setEpics((prev:any[])=>prev.map((e:any)=>e.id===epicId?{...e,...fields}:e))
+  const{error}=await supabase.from('epics').update(fields).eq('id',epicId)
+  if(error)alert('Failed to save epic: '+error.message)
+}
+// Moving an epic to another initiative: stories outside it can't stay in the epic
+export async function setEpicProject(epic:any,projectId:string|null,{projects,items,setItems,setEpics}:any){
+  const next=projects.find((p:any)=>p.id===projectId)
+  await updateEpic(epic.id,{project_id:projectId||null},setEpics)
+  const leaving=next?items.filter((i:any)=>i.epic_id===epic.id&&i.parent_project!==next.name):[]
+  if(leaving.length){
+    const ids=leaving.map((i:any)=>i.id)
+    setItems((prev:any[])=>prev.map((i:any)=>ids.includes(i.id)?{...i,epic_id:null}:i))
+    const{error}=await supabase.from('items').update({epic_id:null}).in('id',ids)
+    if(error)alert('Failed to update stories: '+error.message)
+  }
+}
+
+export function EpicRow({epic,projects,items,isSel,onSelect,ccCount=0,releases=[],setItems,setEpics,statusOpts=[]}:any){
+  const upd=(f:any)=>updateEpic(epic.id,f,setEpics)
+  const blank=(list:string[])=>[{value:'',label:'—'},...list.map(o=>({value:o,label:o}))]
   const pr=epicProject(epic,projects)
   const its=epicStories(epic,items,projects)
   const done=its.filter((i:any)=>ITEM_TERMINAL.includes(i.status)).length
@@ -41,28 +63,31 @@ export function EpicRow({epic,projects,items,isSel,onSelect,ccCount=0,releases=[
       <td style={{...TD,textAlign:'center' as const,color:EPIC}}>◆</td>
       <td style={{...TD,fontSize:9,fontWeight:800,color:EPIC,letterSpacing:1}}>EPIC</td>
       <td style={{...TD,minWidth:240}}>
-        <div style={{fontSize:12.5,fontWeight:800,color:'#F4F6F8'}}>{epic.name}</div>
+        <div style={{fontSize:12.5,fontWeight:800,color:'#F4F6F8'}}><InlineText value={epic.name} width={230} onSave={v=>v&&upd({name:v})}>{epic.name}</InlineText></div>
         <div style={{display:'flex',alignItems:'center',gap:6,marginTop:4}}>
           <div style={{width:90,height:4,borderRadius:2,background:'#243447',overflow:'hidden'}}><div style={{width:pct+'%',height:'100%',background:pct===100?'#27AE60':EPIC}}/></div>
           <span style={{fontSize:10,color:'#7A8FA6'}}>{done}/{its.length} stories done</span>
         </div>
       </td>
-      <td style={{...TD,fontSize:11,color:pr?'#F4F6F8':'#7A8FA6',minWidth:110}}>{pr?.name||'—'}</td>
+      <td style={{...TD,fontSize:11,color:pr?'#F4F6F8':'#7A8FA6',minWidth:110}}>
+        <InlineSelect value={epic.project_id||''} options={[{value:'',label:'No initiative'},...[...projects].sort((a:any,b:any)=>a.name.localeCompare(b.name)).map((p:any)=>({value:p.id,label:p.name}))]}
+          onChange={v=>setEpicProject(epic,v,{projects,items,setItems,setEpics})}>{pr?.name||'—'}</InlineSelect></td>
       <td style={dim}>—</td>
-      <td style={TD}>{wt==='sustain'
+      <td style={TD}><InlineSelect value={epic.work_type||''} title="Work type: automatic follows the initiative"
+        options={[{value:'',label:`Automatic (${epicWorkType({...epic,work_type:null},projects)==='sustain'?'Sustain':'New'})`},{value:'new',label:'New initiative'},{value:'sustain',label:'Sustain'}]} onChange={v=>upd({work_type:v})}>{wt==='sustain'
         ?<span style={{fontSize:10,fontWeight:700,color:'#C8D4E0',background:'#4A5D72',borderRadius:4,padding:'2px 7px',whiteSpace:'nowrap' as const}}>⟳ Sustain</span>
-        :<span style={{fontSize:10,fontWeight:700,color:'#C8973A',border:'1px solid rgba(200,151,58,0.5)',borderRadius:4,padding:'1px 7px',whiteSpace:'nowrap' as const}}>✦ New</span>}</td>
-      <td style={TD}>{epic.release_month?<span title={`${fmtMonthKey(epic.release_month)} release · ${releaseText(releases,epic.release_month)}`} style={{fontSize:10,fontWeight:700,color:'#5DADE2',border:'1px solid rgba(93,173,226,0.4)',borderRadius:4,padding:'1px 6px',whiteSpace:'nowrap' as const}}>📦 {fmtMonthKey(epic.release_month)}</span>:<span style={{fontSize:11,color:'#3A4A5E'}}>—</span>}</td>
-      <td style={TD}><span style={{background:PRIORITY_BG[epic.priority]||'#1E3048',color:PRIORITY_BG[epic.priority]?'#fff':'#7A8FA6',borderRadius:4,padding:'2px 8px',fontSize:10,fontWeight:700}}>{epic.priority||'P3'}</span></td>
+        :<span style={{fontSize:10,fontWeight:700,color:'#C8973A',border:'1px solid rgba(200,151,58,0.5)',borderRadius:4,padding:'1px 7px',whiteSpace:'nowrap' as const}}>✦ New</span>}</InlineSelect></td>
+      <td style={TD}><InlineSelect value={epic.release_month||''} options={releaseOptions(releases,epic.release_month)} onChange={v=>upd({release_month:v})}>{epic.release_month?<span title={`${fmtMonthKey(epic.release_month)} release · ${releaseText(releases,epic.release_month)}`} style={{fontSize:10,fontWeight:700,color:'#5DADE2',border:'1px solid rgba(93,173,226,0.4)',borderRadius:4,padding:'1px 6px',whiteSpace:'nowrap' as const}}>📦 {fmtMonthKey(epic.release_month)}</span>:<span style={{fontSize:11,color:'#3A4A5E'}}>—</span>}</InlineSelect></td>
+      <td style={TD}><InlineSelect value={epic.priority||'P3'} options={['P1','P2','P3','P4']} onChange={v=>v&&upd({priority:v})}><span style={{background:PRIORITY_BG[epic.priority]||'#1E3048',color:PRIORITY_BG[epic.priority]?'#fff':'#7A8FA6',borderRadius:4,padding:'2px 8px',fontSize:10,fontWeight:700}}>{epic.priority||'P3'}</span></InlineSelect></td>
       <td style={dim}/>
       <td style={dim}/>
-      <td style={TD}><span style={{color:STATUS_CLR[epic.status]||'#7A8FA6',fontSize:11,fontWeight:600}}>{epic.status||'New'}</span></td>
-      <td style={{...TD,fontSize:10,color:'#7A8FA6'}}>{epic.team==='Consumer Experience'?'CE':epic.team==='Operational Efficiency'?'OE':''}</td>
-      <td style={{...TD,textAlign:'center' as const,fontSize:11}}>{epic.effort||''}</td>
+      <td style={TD}><InlineSelect value={epic.status||'New'} options={statusOpts.length?statusOpts:['New','Ready','In Progress','Done']} onChange={v=>v&&upd({status:v})}><span style={{color:STATUS_CLR[epic.status]||'#7A8FA6',fontSize:11,fontWeight:600}}>{epic.status||'New'}</span></InlineSelect></td>
+      <td style={{...TD,fontSize:10,color:'#7A8FA6'}}><InlineSelect value={epic.team||''} options={blank(['Consumer Experience','Operational Efficiency'])} onChange={v=>upd({team:v})}>{epic.team==='Consumer Experience'?'CE':epic.team==='Operational Efficiency'?'OE':'—'}</InlineSelect></td>
+      <td style={{...TD,textAlign:'center' as const,fontSize:11}}><InlineSelect value={epic.effort||''} options={blank(['S','M','L','XL'])} onChange={v=>upd({effort:v})}>{epic.effort||'—'}</InlineSelect></td>
       <td style={{...TD,fontSize:11,color:EPIC,fontWeight:700}}>Epic</td>
       <td colSpan={9} style={TD}/>
-      <td style={{...TD,fontSize:11,color:'#7A8FA6'}}>{epic.start_date||'—'}</td>
-      <td style={{...TD,fontSize:11,color:'#7A8FA6'}}>{epic.end_date||'—'}</td>
+      <td style={{...TD,fontSize:11,color:'#7A8FA6'}}><InlineDate value={epic.start_date} onSave={v=>upd({start_date:v})}/></td>
+      <td style={{...TD,fontSize:11,color:'#7A8FA6'}}><InlineDate value={epic.end_date} onSave={v=>upd({end_date:v})}/></td>
       <td style={TD}/><td style={TD}/>
       {ccCount>0&&<td colSpan={ccCount} style={TD}/>}
     </tr>
@@ -120,23 +145,8 @@ export function EpicPanel({epic,projects,items,setItems,setEpics,statusOpts,prio
   const [name,setName]=useState(epic.name)
   const [desc,setDesc]=useState(epic.description||'')
 
-  async function upd(fields:any){
-    setEpics((prev:any[])=>prev.map((e:any)=>e.id===epic.id?{...e,...fields}:e))
-    const{error}=await supabase.from('epics').update(fields).eq('id',epic.id)
-    if(error)alert('Failed to save epic: '+error.message)
-  }
-  async function setProject(projectId:string){
-    const next=projects.find((p:any)=>p.id===projectId)
-    await upd({project_id:projectId||null})
-    // Stories outside the epic's new project can't stay in it
-    const leaving=next?items.filter((i:any)=>i.epic_id===epic.id&&i.parent_project!==next.name):[]
-    if(leaving.length){
-      const ids=leaving.map((i:any)=>i.id)
-      setItems((prev:any[])=>prev.map((i:any)=>ids.includes(i.id)?{...i,epic_id:null}:i))
-      const{error}=await supabase.from('items').update({epic_id:null}).in('id',ids)
-      if(error)alert('Failed to update stories: '+error.message)
-    }
-  }
+  const upd=(fields:any)=>updateEpic(epic.id,fields,setEpics)
+  const setProject=(projectId:string)=>setEpicProject(epic,projectId,{projects,items,setItems,setEpics})
   async function setStoryEpic(itemId:any,epicId:any){
     setItems((prev:any[])=>prev.map((i:any)=>i.id===itemId?{...i,epic_id:epicId}:i))
     const{error}=await supabase.from('items').update({epic_id:epicId}).eq('id',itemId)
