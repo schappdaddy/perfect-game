@@ -495,3 +495,110 @@ export function QuarterPlanner({items,setItems,projects,setProjects,epics=[],set
     </div>
   )
 }
+
+// ── Release calendar (Roadmap) ───────────────────────────────────────────────
+// A fiscal year as quarter rows of monthly releases, each listing what ships in it, grouped
+// by initiative: go-lives, epics and stories (tech debt initiatives shown as such).
+export function ReleaseCalendar({releases,projects,epics=[],items,team='All',onOpenProject,onSetDates}:any){
+  const cur=fyQuarterOf(monthKeyOf(new Date()))
+  const now=monthKeyOf(new Date())
+  const [fy,setFyS]=useState<number>(()=>{try{return Number(localStorage.getItem('pg_rc_fy'))||cur.fy}catch{return cur.fy}})
+  const [hideNoRel,setHideS]=useState<boolean>(()=>{try{return localStorage.getItem('pg_rc_hide')==='1'}catch{return false}})
+  const setFy=(v:number)=>{setFyS(v);try{localStorage.setItem('pg_rc_fy',String(v))}catch{}}
+  const setHide=(v:boolean)=>{setHideS(v);try{localStorage.setItem('pg_rc_hide',v?'1':'0')}catch{}}
+  const inTeam=(x:any)=>team==='All'||x.team===team
+  const work=(x:any)=>(x.space||'work')==='work'
+  const projById=(id:any)=>(projects as any[]).find(p=>p.id===id)
+  const projByName=(n:any)=>(projects as any[]).find(p=>p.name===n)
+  const epicById=(id:any)=>(epics as any[]).find(e=>e.id===id)
+
+  function monthPlan(k:string){
+    const groups=new Map<string,{p:any,goLive:boolean,epics:any[],stories:any[]}>()
+    const g=(p:any)=>{const key=p?.id||'__none';if(!groups.has(key))groups.set(key,{p,goLive:false,epics:[],stories:[]});return groups.get(key)!}
+    for(const p of projects as any[])if(p.release_month===k&&work(p)&&inTeam(p))g(p).goLive=true
+    for(const e of epics as any[])if(e.release_month===k&&work(e)&&inTeam({team:e.team||projById(e.project_id)?.team}))g(projById(e.project_id)).epics.push(e)
+    for(const i of items as any[]){
+      if(i.release_month!==k||!work(i)||!inTeam(i))continue
+      const ep=i.epic_id&&epicById(i.epic_id)
+      if(ep&&ep.release_month===k)continue // goes out with its epic
+      g(projByName(i.parent_project)).stories.push(i)
+    }
+    // Go-lives first, then initiatives, then tech debt, then work with no initiative
+    return[...groups.values()].sort((a,b)=>(Number(b.goLive)-Number(a.goLive))||(Number(!!a.p?.sustain_quarter)-Number(!!b.p?.sustain_quarter))||(Number(!a.p)-Number(!b.p))||(a.p?.name||'').localeCompare(b.p?.name||''))
+  }
+  const storiesOf=(e:any)=>(items as any[]).filter(i=>i.epic_id===e.id)
+  const btn={background:'#1E3048',color:'#F4F6F8',border:'1px solid #243447',borderRadius:6,fontSize:12,padding:'5px 10px',cursor:'pointer'}
+
+  return(
+    <div style={{flex:1,overflow:'auto',padding:'14px 18px 30px',background:'#0D1B2A'}}>
+      <div style={{display:'flex',alignItems:'center',gap:8,marginBottom:12,flexWrap:'wrap' as const}}>
+        <button onClick={()=>setFy(fy-1)} style={btn}>‹</button>
+        <div style={{fontSize:15,fontWeight:800,color:'#F4F6F8',minWidth:60,textAlign:'center' as const}}>FY{String(fy).slice(-2)}</div>
+        <button onClick={()=>setFy(fy+1)} style={btn}>›</button>
+        {fy!==cur.fy&&<button onClick={()=>setFy(cur.fy)} style={{...btn,color:'#7A8FA6'}}>This year</button>}
+        <span style={{fontSize:11,color:'#7A8FA6'}}>Apr {fy-1} – Mar {fy}{team!=='All'?` · ${team}`:''}</span>
+        <label style={{marginLeft:'auto',display:'flex',alignItems:'center',gap:5,fontSize:11,color:'#7A8FA6',cursor:'pointer'}}>
+          <input type="checkbox" checked={hideNoRel} onChange={e=>setHide(e.target.checked)} style={{accentColor:'#C8973A'}}/>Hide months with no release
+        </label>
+        {onSetDates&&<button onClick={onSetDates} style={btn}>📦 Set dates</button>}
+      </div>
+      <div style={{display:'flex',gap:14,fontSize:10.5,color:'#7A8FA6',marginBottom:12,flexWrap:'wrap' as const}}>
+        <span><b style={{color:'#C8973A'}}>◈ GO-LIVE</b> initiative goes live</span>
+        <span><b style={{color:'#E07B2A'}}>◆</b> epic</span>
+        <span><b style={{color:'#8FA6BC'}}>⟳ Tech debt</b> quarterly tech debt initiative</span>
+        <span>Stories going out with their epic are counted under it.</span>
+      </div>
+      {[1,2,3,4].map(q=>{
+        const months=quarterMonths(fy,q).filter(k=>!(hideNoRel&&releaseOf(releases,k)?.no_release))
+        if(!months.length)return null
+        return(
+          <div key={q} style={{display:'flex',gap:10,marginBottom:12}}>
+            <div style={{width:34,flexShrink:0,display:'flex',alignItems:'center',justifyContent:'center',background:'#162436',border:'1px solid #243447',borderRadius:8,writingMode:'vertical-rl' as const,transform:'rotate(180deg)',fontSize:11,fontWeight:800,color:'#7A8FA6',letterSpacing:1}}>Q{q} FY{String(fy).slice(-2)}</div>
+            <div style={{flex:1,display:'grid',gridTemplateColumns:`repeat(${months.length},minmax(240px,1fr))`,gap:10}}>
+              {months.map(k=>{
+                const r=releaseOf(releases,k),blocked=!!r?.no_release,plan=blocked?[]:monthPlan(k)
+                const nIni=plan.filter(x=>x.goLive).length,nEp=plan.reduce((s,x)=>s+x.epics.length,0),nSt=plan.reduce((s,x)=>s+x.stories.length,0)
+                return(
+                  <div key={k} style={{background:blocked?'repeating-linear-gradient(135deg,#0F1C2B,#0F1C2B 8px,#132234 8px,#132234 16px)':'#0F1C2B',border:`1px solid ${k===now?'#C8973A':'#243447'}`,borderRadius:8,display:'flex',flexDirection:'column',minHeight:150}}>
+                    <div style={{padding:'9px 12px',borderBottom:'1px solid #243447',display:'flex',alignItems:'baseline',gap:8}}>
+                      <span style={{fontSize:14,fontWeight:800,color:blocked?'#7A8FA6':'#F4F6F8'}}>{fmtMonthKey(k)}</span>
+                      {k===now&&<span style={{fontSize:9,fontWeight:800,color:'#C8973A'}}>NOW</span>}
+                      <span style={{marginLeft:'auto',fontSize:11,fontWeight:700,color:blocked?'#D4820A':r?.release_date?'#5DADE2':'#7A8FA6',background:r?.release_date&&!blocked?'rgba(93,173,226,0.12)':'transparent',borderRadius:10,padding:'1px 8px'}}>
+                        {blocked?'No release':r?.release_date?`📦 ${releaseText(releases,k)}`:'Date not set'}
+                      </span>
+                    </div>
+                    {blocked?<div style={{padding:12,fontSize:11,color:'#7A8FA6'}}>{r?.notes||'Nothing ships this month.'}</div>:(
+                      <div style={{padding:'8px 12px',display:'flex',flexDirection:'column',gap:8,flex:1}}>
+                        {plan.length>0&&<div style={{fontSize:10,color:'#7A8FA6'}}>{nIni?`${nIni} go-live${nIni!==1?'s':''} · `:''}{nEp} epic{nEp!==1?'s':''} · {nSt} stor{nSt===1?'y':'ies'}</div>}
+                        {plan.map(x=>{
+                          const td=!!x.p?.sustain_quarter
+                          return(
+                            <div key={x.p?.id||'__none'} style={{borderLeft:`3px solid ${x.goLive?'#C8973A':td?'#4A5D72':x.p?'#3A4A5E':'#243447'}`,paddingLeft:8,display:'flex',flexDirection:'column',gap:2}}>
+                              <div style={{display:'flex',alignItems:'center',gap:6}}>
+                                {x.goLive&&<span style={{fontSize:9,fontWeight:800,color:'#0D1B2A',background:'#C8973A',borderRadius:3,padding:'0 5px'}}>◈ GO-LIVE</span>}
+                                {td&&<span style={{fontSize:9,fontWeight:800,color:'#C8D4E0',background:'#4A5D72',borderRadius:3,padding:'0 5px'}}>⟳ TECH DEBT</span>}
+                                <span onClick={()=>x.p&&onOpenProject?.(x.p)} title={x.p?'Open this initiative':undefined}
+                                  style={{fontSize:12,fontWeight:700,color:x.p?'#F4F6F8':'#7A8FA6',cursor:x.p&&onOpenProject?'pointer':'default'}}>{x.p?.name||'No initiative'}</span>
+                              </div>
+                              {x.epics.map((e:any)=>{const n=storiesOf(e).length;return(
+                                <div key={e.id} style={{fontSize:11,color:'#C8C8D4'}}><span style={{color:'#E07B2A'}}>◆</span> {e.name}{n?<span style={{color:'#7A8FA6'}}> · {n} stor{n===1?'y':'ies'}</span>:''}</div>
+                              )})}
+                              {x.stories.map((i:any)=>(
+                                <div key={i.id} style={{fontSize:11,color:'#A9B8C9'}}><span style={{color:'#7A8FA6',fontFamily:'monospace',fontSize:10}}>{i.item_id}</span> {i.name}</div>
+                              ))}
+                            </div>
+                          )
+                        })}
+                        {!plan.length&&<div style={{fontSize:11,color:'#3A4A5E',fontStyle:'italic'}}>Nothing tagged to this release yet.</div>}
+                      </div>
+                    )}
+                  </div>
+                )
+              })}
+            </div>
+          </div>
+        )
+      })}
+    </div>
+  )
+}
