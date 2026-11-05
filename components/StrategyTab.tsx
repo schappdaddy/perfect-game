@@ -776,10 +776,10 @@ export default function StrategyTab({projects:mainProjects,setProjects,strategie
           </label>
         </div>}
         <div style={{marginLeft:'auto',display:'flex',gap:6}}>
-          <select value="" disabled={exporting} title="Download as PowerPoint, one slide per strategy" onChange={async e=>{
+          <select value="" disabled={exporting} title="Download as PowerPoint: for each strategy, the roadmap by track and by team, and the budget report" onChange={async e=>{
             const which=e.target.value;if(!which)return
             setExporting(true)
-            try{await exportStrategiesPptx({strategies:which==='all'?strategies:[strategy],projects:mainProjects,strategyItems,tracks,goals,deps:allDeps})}
+            try{await exportStrategiesPptx({strategies:which==='all'?strategies:[strategy],projects:mainProjects,strategyItems,tracks,goals,deps:allDeps,strategyRoles,projectRoles,people,roles,teams})}
             catch(err:any){alert('Failed to build the PowerPoint: '+(err?.message||err))}
             finally{setExporting(false)}
           }} style={{background:'none',border:'1px solid #243447',borderRadius:6,color:'#F4F6F8',fontSize:11,fontWeight:700,padding:'5px 8px',cursor:'pointer'}}>
