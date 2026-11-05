@@ -31,8 +31,6 @@ export async function exportStrategiesPptx({strategies,projects,strategyItems,tr
 }
 
 function drawSlide(pptx:any,strategy:any,{projects,strategyItems,tracks,goals,deps,teams=[]}:any,mode:'tracks'|'teams'){
-  const slide=pptx.addSlide()
-  slide.background={color:CREAM}
   const sRows=(strategyItems as any[]).filter(r=>r.strategy_id===strategy.id&&r.item_type==='project')
   const live=(projects as any[]).filter(p=>(p.space||'work')==='work').map(p=>{
     const r=sRows.find(x=>x.item_id===p.id)
@@ -104,140 +102,167 @@ function drawSlide(pptx:any,strategy:any,{projects,strategyItems,tracks,goals,de
     }
   }
 
-  const BODY_TOP=1.85,BODY_BOTTOM=6.5
-  const rowH=Math.max(0.11,Math.min(0.24,(BODY_BOTTOM-BODY_TOP)/Math.max(rows.length,1)))
-  const fs=Math.max(5.5,Math.min(9,rowH*40))
-  const bodyBottom=BODY_TOP+rows.length*rowH
-
-  // Title
-  slide.addShape(pptx.ShapeType.rect,{x:0.25,y:0,w:0.28,h:7.5,fill:{color:'2F3742'},line:{color:'2F3742'}})
-  slide.addText(strategy.name,{x:LX,y:0.25,w:12.2,h:0.65,fontSize:30,bold:true,color:INK,fontFace:'Calibri'})
-  slide.addText(mode==='tracks'?'Roadmap by track':'Roadmap by team',{x:LX,y:0.85,w:12.2,h:0.28,fontSize:13,bold:true,color:ORANGE,margin:0})
-
-  // Header: fiscal years and quarters
-  for(let fy=strategy.start_fy;fy<=strategy.end_fy;fy++){
-    const a=Math.max(startAbs,(fy-1)*12+3),b=fy*12+3
-    if(b<=startAbs)continue
-    slide.addText(`FY${String(fy).slice(-2)}`,{x:xAt(a)+0.01,y:1.2,w:xAt(b)-xAt(a)-0.02,h:0.32,fill:{color:NAVY},color:'FFFFFF',bold:true,fontSize:12,align:'center',valign:'middle',margin:0})
+  // Paging: rows are sized for reading in a meeting, so a long roadmap continues on another
+  // slide (repeating the section it's in) rather than shrinking the type
+  // At most 20 rows a slide, spread evenly over the slides needed
+  const MAX_ROWS=20
+  const LIMIT=Math.ceil(rows.length/Math.max(1,Math.ceil(rows.length/MAX_ROWS)))+1
+  const pages:Row[][]=[]
+  {
+    let cur:Row[]=[],lastSection:Row|null=null
+    for(const r of rows){
+      if(r.kind==='section')lastSection=r
+      // Don't leave a section heading (or a group heading) alone at the bottom of a slide
+      const need=r.kind==='section'||r.kind==='group'?2:1
+      if(cur.length+need>LIMIT&&cur.length){
+        pages.push(cur);cur=[]
+        if(r.kind!=='section'&&lastSection)cur.push({...lastSection,text:`${lastSection.text} (continued)`})
+      }
+      cur.push(r)
+    }
+    if(cur.length||!pages.length)pages.push(cur)
   }
-  for(let q=startAbs;q<=endAbs;q+=3){
-    const m=q%12+1,fq=m>=4?Math.floor((m-4)/3)+1:4
-    slide.addText(`Q${fq}`,{x:xAt(q),y:1.55,w:xAt(q+3)-xAt(q),h:0.22,fontSize:9,color:MUTED,align:'center',valign:'middle',margin:0})
-  }
-  // Code freeze columns and FY dividers, behind everything else in the body
   const freeze:number[]=strategy.freeze_months||[]
-  for(let a=startAbs;a<=endAbs;){
-    if(!freeze.includes(a%12+1)){a++;continue}
-    let b=a;while(b+1<=endAbs&&freeze.includes((b+1)%12+1))b++
-    slide.addShape(pptx.ShapeType.rect,{x:xAt(a),y:BODY_TOP,w:xAt(b+1)-xAt(a),h:bodyBottom-BODY_TOP,fill:{color:FREEZE},line:{color:FREEZE,width:0}})
-    a=b+1
-  }
-  for(let fy=strategy.start_fy;fy<=strategy.end_fy;fy++){
-    const a=(fy-1)*12+3
-    if(a>startAbs&&a<=endAbs)slide.addShape(pptx.ShapeType.line,{x:xAt(a),y:BODY_TOP,w:0,h:bodyBottom-BODY_TOP,line:{color:'B8BEC6',width:0.5}})
-  }
-
-  // Body
-  const yOf=new Map<string,number>(),barOf=new Map<string,{x0:number,x1:number,s:string,e:string|null}>()
-  rows.forEach((r,i)=>{
-    const y=BODY_TOP+i*rowH
-    if(r.kind==='section'){
-      const light=r.style==='light'
-      slide.addText(r.text,{x:LX,y:y+rowH*0.08,w:TX+TW-LX,h:rowH*0.84,fill:{color:light?'EEF1F5':r.color},color:light?'4A5568':'FFFFFF',bold:true,fontSize:fs,valign:'middle',margin:[0,4,0,4]})
-      return
-    }
-    if(r.kind==='goals'){
-      slide.addText(`${r.track.name} goal at each FY start`,{x:LX,y,w:LW,h:rowH,color:ORANGE,bold:true,fontSize:fs,valign:'middle',margin:[0,4,0,4]})
-      for(let fy=strategy.start_fy;fy<=strategy.end_fy;fy++){
-        const a=Math.max(startAbs,(fy-1)*12+3),b=fy*12+3
-        if(b<=startAbs)continue
-        const g=(goals as any[]).find(x=>x.track_id===r.track.id&&x.fy===fy)
-        slide.addText(g?.goal||'',{x:xAt(a)+0.02,y:y+rowH*0.06,w:xAt(b)-xAt(a)-0.04,h:rowH*0.88,fill:{color:GOAL_FILL},color:INK,bold:true,fontSize:fs,align:'center',valign:'middle',margin:0})
-      }
-      return
-    }
-    if(r.kind==='group'){
-      // The group's name, and a bracket over its members' span
-      slide.addText(`${r.text!.toUpperCase()} · runs together`,{x:LX+0.06,y,w:LW-0.06,h:rowH,color:GROUP,bold:true,fontSize:fs,valign:'bottom',margin:[0,4,1,4]})
-      const xs=r.members!.filter(m=>m.start_date).map(m=>({a:xStart(m.start_date),b:m.ongoing||!m.end_date?xAt(endAbs+1):xEnd(m.end_date)}))
-      if(xs.length){
-        const a=Math.min(...xs.map(x=>x.a)),b=Math.max(...xs.map(x=>x.b)),yb=y+rowH*0.62,tick=rowH*0.38
-        const ln={line:{color:GROUP,width:1.5}}
-        slide.addShape(pptx.ShapeType.line,{x:a,y:yb,w:b-a,h:0,...ln})
-        slide.addShape(pptx.ShapeType.line,{x:a,y:yb,w:0,h:tick,...ln})
-        slide.addShape(pptx.ShapeType.line,{x:b,y:yb,w:0,h:tick,...ln})
-      }
-      slide.addShape(pptx.ShapeType.line,{x:LX+0.02,y:y+rowH*0.3,w:0,h:rowH*0.7,line:{color:GROUP,width:2}})
-      return
-    }
-    const p=r.p
-    if(r.inGroup)slide.addShape(pptx.ShapeType.line,{x:LX+0.02,y,w:0,h:rowH,line:{color:GROUP,width:2}})
-    slide.addText(label(p),{x:LX+(r.inGroup?0.1:0),y,w:LW-(r.inGroup?0.1:0),h:rowH,color:INK,fontSize:fs,valign:'middle',margin:[0,4,0,4],fit:'shrink'})
-    const x0=xStart(p.start_date),x1=p.ongoing||!p.end_date?xAt(endAbs+1):xEnd(p.end_date)
-    if(x1<=x0)return
-    const proposed=p.planning_state==='proposed'
-    const fill=proposed?PROPOSED_FILL:TEAM_FILL[p.team]||'9AA5B1'
-    slide.addShape(pptx.ShapeType.rect,{x:x0,y:y+rowH*0.22,w:x1-x0,h:rowH*0.56,fill:{color:fill},line:{color:proposed?ORANGE:fill,width:proposed?1:0}})
-    yOf.set(p.id,y+rowH/2);barOf.set(p.id,{x0,x1,s:p.start_date,e:p.ongoing?null:p.end_date||null})
-  })
-
-  // Dependency arrows, as elbow connectors: out of the end of the blocker, along to the
-  // row of what waits on it, then into its start. When that work starts before the blocker
-  // finishes, its bar is outlined in red instead, as the Strategy tab warns.
-  const seg=(xa:number,ya:number,xb:number,yb:number,color:string,arrow:boolean)=>{
-    const dx=xb-xa,dy=yb-ya
-    slide.addShape(pptx.ShapeType.line,{x:Math.min(xa,xb),y:Math.min(ya,yb),w:Math.abs(dx),h:Math.abs(dy),flipH:dx<0,flipV:dy<0,
-      line:{color,width:1.25,...(arrow?{endArrowType:'triangle'}:{})}})
-  }
-  const barH=rowH*0.56,STUB=0.08
-  const late:any[]=[]
-  const sDeps=(deps as any[]).filter(d=>d.strategy_id===strategy.id&&d.blocker_type==='project'&&d.blocked_type==='project')
-  const drawn:any[]=[]
-  for(const d of sDeps){
-    const a=barOf.get(d.blocker_id),b=barOf.get(d.blocked_id)
-    if(!a||!b)continue
-    const x1=a.x1,y1=yOf.get(d.blocker_id)!,x2=b.x0,y2=yOf.get(d.blocked_id)!
-    const down=y2>y1,edge=y2+(down?-1:1)*barH/2 // the target bar's top (or bottom) edge
-    const onTime=!!a.e&&b.s>a.e
-    if(onTime&&x2-x1<0.1){
-      // Starts as the blocker ends: straight down (or up) onto the start of its bar
-      seg(x2,y1,x2,edge,ORANGE,true)
-    }else if(onTime){
-      // Starts later: across a little, along the gap to the target's row, then into its start
-      const xm=x1+STUB
-      seg(x1,y1,xm,y1,ORANGE,false);seg(xm,y1,xm,y2,ORANGE,false);seg(xm,y2,x2,y2,ORANGE,true)
-    }else{
-      // Starts before the blocker finishes: no arrow (it would cross other bars); the bar is
-      // outlined in red and the notes say what it's waiting on
-      if(!late.some(x=>x.blocked_id===d.blocked_id))
-        slide.addShape(pptx.ShapeType.rect,{x:b.x0-0.03,y:y2-barH/2-0.03,w:b.x1-b.x0+0.06,h:barH+0.06,fill:{type:'none'},line:{color:BAD,width:1.5}})
-      late.push(d);continue
-    }
-    drawn.push(d)
-  }
-
-  // Legend
-  const LY=Math.min(6.62,bodyBottom+0.12)
-  const legend:[string,any][]=[['Consumer Experience (dated)',{fill:{color:NAVY},line:{color:NAVY}}],['Operational Efficiency (dated)',{fill:{color:STEEL},line:{color:STEEL}}],
-    ['Proposed, not yet planned',{fill:{color:PROPOSED_FILL},line:{color:ORANGE,width:1}}],
-    [`Code freeze${freeze.length?' '+[...freeze].sort((a,b)=>((a+8)%12)-((b+8)%12)).map(m=>MONTHS[m-1]).join(', '):''}`,{fill:{color:FREEZE},line:{color:FREEZE}}]]
-  if(rows.some(r=>r.kind==='group'))legend.push(['Group: runs together',{fill:{type:'none'},line:{color:GROUP,width:1.5}}])
-  if(late.length)legend.push(['Starts before what it waits on',{fill:{type:'none'},line:{color:BAD,width:1.5}}])
-  const step=12.2/legend.length,lfs=legend.length>4?9.5:11
-  legend.forEach(([t,st],i)=>{
-    const x=LX+i*step
-    slide.addShape(pptx.ShapeType.rect,{x,y:LY+0.04,w:0.3,h:0.18,...st})
-    slide.addText(t,{x:x+0.38,y:LY,w:step-0.45,h:0.26,fontSize:lfs,color:'4A5568',valign:'middle',margin:0})
-  })
-
-  // Notes: the strategy's description and what the arrows mean
+  const hasGroups=rows.some(r=>r.kind==='group')
   const name=(id:any)=>(projects as any[]).find(p=>p.id===id)?.name||'?'
-  const byBlocked=new Map<string,string[]>()
-  for(const d of drawn){const k=d.blocked_id;byBlocked.set(k,[...(byBlocked.get(k)||[]),name(d.blocker_id)])}
-  const arrows=[...byBlocked.entries()].map(([k,from])=>`${listJoin(from)} → ${name(k)}`)
-  const lateText=late.map(d=>`${name(d.blocked_id)} starts before ${name(d.blocker_id)} finishes`)
-  const note=[strategy.description,arrows.length?`Arrows: ${arrows.join('; ')}.`:'',lateText.length?`Red outline: ${lateText.join('; ')}.`:'','FY runs Apr to Mar.'].filter(Boolean).join(' ')
-  slide.addText(note,{x:LX,y:LY+0.3,w:12.2,h:Math.max(0.3,7.4-(LY+0.3)),fontSize:9,color:MUTED,valign:'top',margin:0,fit:'shrink'})
+  const sDeps=(deps as any[]).filter(d=>d.strategy_id===strategy.id&&d.blocker_type==='project'&&d.blocked_type==='project')
+  // Whether any dependency starts before what it waits on finishes (for the legend)
+  const liveById=new Map(live.map(p=>[p.id,p]))
+  const anyLate=sDeps.some(d=>{const a=liveById.get(d.blocker_id),b=liveById.get(d.blocked_id);return a&&b&&b.start_date&&!(a.end_date&&!a.ongoing&&b.start_date>a.end_date)})
+  // Arrows and conflicts over the whole roadmap, for the notes
+  const drawnAll:any[]=[],lateAll:any[]=[]
+  pages.forEach((pageRows,pi)=>drawPage(pageRows,pi))
+
+  function drawPage(pageRows:Row[],pi:number){
+    const slide=pptx.addSlide()
+    slide.background={color:CREAM}
+    const BODY_TOP=1.75,BODY_BOTTOM=6.8
+    const rowH=Math.max(0.2,Math.min(0.32,(BODY_BOTTOM-BODY_TOP)/Math.max(pageRows.length,1)))
+    const fs=Math.max(9,Math.min(13,rowH*45)) // points
+    const bodyBottom=BODY_TOP+pageRows.length*rowH
+
+    // Title, and the legend in the space to its right
+    slide.addShape(pptx.ShapeType.rect,{x:0.25,y:0,w:0.28,h:7.5,fill:{color:'2F3742'},line:{color:'2F3742'}})
+    slide.addText(strategy.name,{x:LX,y:0.18,w:6.2,h:0.6,fontSize:28,bold:true,color:INK,fontFace:'Calibri',fit:'shrink',margin:0})
+    slide.addText(`${mode==='tracks'?'Roadmap by track':'Roadmap by team'}${pages.length>1?` · ${pi+1} of ${pages.length}`:''}`,{x:LX,y:0.78,w:6.2,h:0.3,fontSize:15,bold:true,color:ORANGE,margin:0})
+    const legend:[string,any][]=[['Consumer Experience',{fill:{color:NAVY},line:{color:NAVY}}],['Operational Efficiency',{fill:{color:STEEL},line:{color:STEEL}}],
+      ['Proposed, not yet planned',{fill:{color:PROPOSED_FILL},line:{color:ORANGE,width:1}}],
+      [`Code freeze${freeze.length?' ('+[...freeze].sort((a,b)=>((a+8)%12)-((b+8)%12)).map(m=>MONTHS[m-1]).join(', ')+')':''}`,{fill:{color:FREEZE},line:{color:'C9CDD3',width:0.5}}]]
+    if(hasGroups)legend.push(['Group: runs together',{fill:{type:'none'},line:{color:GROUP,width:1.5}}])
+    if(anyLate)legend.push(['Starts before what it waits on',{fill:{type:'none'},line:{color:BAD,width:1.5}}])
+    const LGX=7.15,LGW=5.8,perRow=2,lh=0.28
+    legend.forEach(([t,st],i)=>{
+      const x=LGX+(i%perRow)*(LGW/perRow),y=0.12+Math.floor(i/perRow)*lh
+      slide.addShape(pptx.ShapeType.rect,{x,y:y+0.06,w:0.34,h:0.18,...st})
+      slide.addText(t,{x:x+0.42,y,w:LGW/perRow-0.45,h:lh,fontSize:12,color:'2D3748',valign:'middle',margin:0})
+    })
+
+    // Header: fiscal years and quarters
+    const HY=BODY_TOP-0.64
+    for(let fy=strategy.start_fy;fy<=strategy.end_fy;fy++){
+      const a=Math.max(startAbs,(fy-1)*12+3),b=fy*12+3
+      if(b<=startAbs)continue
+      slide.addText(`FY${String(fy).slice(-2)}`,{x:xAt(a)+0.01,y:HY,w:xAt(b)-xAt(a)-0.02,h:0.34,fill:{color:NAVY},color:'FFFFFF',bold:true,fontSize:14,align:'center',valign:'middle',margin:0})
+    }
+    for(let q=startAbs;q<=endAbs;q+=3){
+      const m=q%12+1,fq=m>=4?Math.floor((m-4)/3)+1:4
+      slide.addText(`Q${fq}`,{x:xAt(q),y:HY+0.35,w:xAt(q+3)-xAt(q),h:0.24,fontSize:11,color:'4A5568',align:'center',valign:'middle',margin:0})
+    }
+    // Code freeze columns and FY dividers, behind everything else in the body
+    for(let a=startAbs;a<=endAbs;){
+      if(!freeze.includes(a%12+1)){a++;continue}
+      let b=a;while(b+1<=endAbs&&freeze.includes((b+1)%12+1))b++
+      slide.addShape(pptx.ShapeType.rect,{x:xAt(a),y:BODY_TOP,w:xAt(b+1)-xAt(a),h:bodyBottom-BODY_TOP,fill:{color:FREEZE},line:{color:FREEZE,width:0}})
+      a=b+1
+    }
+    for(let fy=strategy.start_fy;fy<=strategy.end_fy;fy++){
+      const a=(fy-1)*12+3
+      if(a>startAbs&&a<=endAbs)slide.addShape(pptx.ShapeType.line,{x:xAt(a),y:BODY_TOP,w:0,h:bodyBottom-BODY_TOP,line:{color:'B8BEC6',width:0.75}})
+    }
+
+    // Body
+    const yOf=new Map<string,number>(),barOf=new Map<string,{x0:number,x1:number,s:string,e:string|null}>()
+    pageRows.forEach((r,i)=>{
+      const y=BODY_TOP+i*rowH
+      if(r.kind==='section'){
+        const light=r.style==='light'
+        slide.addText(r.text,{x:LX,y:y+rowH*0.06,w:TX+TW-LX,h:rowH*0.88,fill:{color:light?'E2E7EE':r.color},color:light?'2D3748':'FFFFFF',bold:true,fontSize:fs,valign:'middle',margin:[0,6,0,6]})
+        return
+      }
+      if(r.kind==='goals'){
+        slide.addText(`${r.track.name} goal at each FY start`,{x:LX,y,w:LW,h:rowH,color:ORANGE,bold:true,fontSize:fs,valign:'middle',margin:[0,4,0,4],fit:'shrink'})
+        for(let fy=strategy.start_fy;fy<=strategy.end_fy;fy++){
+          const a=Math.max(startAbs,(fy-1)*12+3),b=fy*12+3
+          if(b<=startAbs)continue
+          const g=(goals as any[]).find(x=>x.track_id===r.track.id&&x.fy===fy)
+          slide.addText(g?.goal||'',{x:xAt(a)+0.02,y:y+rowH*0.06,w:xAt(b)-xAt(a)-0.04,h:rowH*0.88,fill:{color:GOAL_FILL},color:INK,bold:true,fontSize:fs,align:'center',valign:'middle',margin:0,fit:'shrink'})
+        }
+        return
+      }
+      if(r.kind==='group'){
+        // The group's name, and a bracket over its members' span
+        slide.addText(`${r.text!.toUpperCase()} · runs together`,{x:LX+0.08,y,w:LW-0.08,h:rowH,color:GROUP,bold:true,fontSize:fs,valign:'bottom',margin:[0,4,1,4]})
+        const xs=r.members!.filter(m=>m.start_date).map(m=>({a:xStart(m.start_date),b:m.ongoing||!m.end_date?xAt(endAbs+1):xEnd(m.end_date)}))
+        if(xs.length){
+          const a=Math.min(...xs.map(x=>x.a)),b=Math.max(...xs.map(x=>x.b)),yb=y+rowH*0.62,tick=rowH*0.38
+          const ln={line:{color:GROUP,width:1.75}}
+          slide.addShape(pptx.ShapeType.line,{x:a,y:yb,w:b-a,h:0,...ln})
+          slide.addShape(pptx.ShapeType.line,{x:a,y:yb,w:0,h:tick,...ln})
+          slide.addShape(pptx.ShapeType.line,{x:b,y:yb,w:0,h:tick,...ln})
+        }
+        slide.addShape(pptx.ShapeType.line,{x:LX+0.02,y:y+rowH*0.3,w:0,h:rowH*0.7,line:{color:GROUP,width:2.5}})
+        return
+      }
+      const p=r.p
+      if(r.inGroup)slide.addShape(pptx.ShapeType.line,{x:LX+0.02,y,w:0,h:rowH,line:{color:GROUP,width:2.5}})
+      slide.addText(label(p),{x:LX+(r.inGroup?0.12:0),y,w:LW-(r.inGroup?0.12:0),h:rowH,color:INK,fontSize:fs,valign:'middle',margin:[0,4,0,4],fit:'shrink'})
+      const x0=xStart(p.start_date),x1=p.ongoing||!p.end_date?xAt(endAbs+1):xEnd(p.end_date)
+      if(x1<=x0)return
+      const proposed=p.planning_state==='proposed'
+      const fill=proposed?PROPOSED_FILL:TEAM_FILL[p.team]||'9AA5B1'
+      slide.addShape(pptx.ShapeType.rect,{x:x0,y:y+rowH*0.2,w:x1-x0,h:rowH*0.6,fill:{color:fill},line:{color:proposed?ORANGE:fill,width:proposed?1.25:0}})
+      yOf.set(p.id,y+rowH/2);barOf.set(p.id,{x0,x1,s:p.start_date,e:p.ongoing?null:p.end_date||null})
+    })
+
+    // Dependency arrows between bars on this slide, as elbow connectors: out of the end of the
+    // blocker, along to the row of what waits on it, then into its start. When that work
+    // starts before the blocker finishes, its bar is outlined in red instead.
+    const seg=(xa:number,ya:number,xb:number,yb:number,color:string,arrow:boolean)=>{
+      const dx=xb-xa,dy=yb-ya
+      slide.addShape(pptx.ShapeType.line,{x:Math.min(xa,xb),y:Math.min(ya,yb),w:Math.abs(dx),h:Math.abs(dy),flipH:dx<0,flipV:dy<0,
+        line:{color,width:1.5,...(arrow?{endArrowType:'triangle'}:{})}})
+    }
+    const barH=rowH*0.6,STUB=0.08
+    const late:any[]=[]
+    for(const d of sDeps){
+      const a=barOf.get(d.blocker_id),b=barOf.get(d.blocked_id)
+      if(!a||!b)continue
+      const x1=a.x1,y1=yOf.get(d.blocker_id)!,x2=b.x0,y2=yOf.get(d.blocked_id)!
+      const down=y2>y1,edge=y2+(down?-1:1)*barH/2
+      const onTime=!!a.e&&b.s>a.e
+      if(onTime&&x2-x1<0.1)seg(x2,y1,x2,edge,ORANGE,true)
+      else if(onTime){const xm=x1+STUB;seg(x1,y1,xm,y1,ORANGE,false);seg(xm,y1,xm,y2,ORANGE,false);seg(xm,y2,x2,y2,ORANGE,true)}
+      else{
+        if(!late.some(x=>x.blocked_id===d.blocked_id))
+          slide.addShape(pptx.ShapeType.rect,{x:b.x0-0.03,y:y2-barH/2-0.03,w:b.x1-b.x0+0.06,h:barH+0.06,fill:{type:'none'},line:{color:BAD,width:1.75}})
+        late.push(d);if(!lateAll.includes(d))lateAll.push(d);continue
+      }
+      if(!drawnAll.includes(d))drawnAll.push(d)
+    }
+
+    // Notes: the strategy's description and what the arrows mean
+    const byBlocked=new Map<string,string[]>()
+    for(const d of drawnAll){const k=d.blocked_id;byBlocked.set(k,[...(byBlocked.get(k)||[]),name(d.blocker_id)])}
+    const arrows=[...byBlocked.entries()].map(([k,from])=>`${listJoin(from)} → ${name(k)}`)
+    const lateText=late.map(d=>`${name(d.blocked_id)} starts before ${name(d.blocker_id)} finishes`)
+    // Dependencies whose two bars ended up on different slides can't be drawn; list them
+    const onRoadmap=new Set(rows.filter(r=>r.kind==='project').map(r=>r.p.id))
+    const across=pi===pages.length-1?sDeps.filter(d=>onRoadmap.has(d.blocker_id)&&onRoadmap.has(d.blocked_id)&&!drawnAll.includes(d)&&!lateAll.includes(d)):[]
+    const noteText=[pi===0?strategy.description:'',arrows.length&&pi===pages.length-1?`Arrows: ${arrows.join('; ')}.`:'',
+      across.length?`Across slides: ${across.map(d=>`${name(d.blocker_id)} → ${name(d.blocked_id)}`).join('; ')}.`:'',lateText.length?`Red outline: ${lateText.join('; ')}.`:'','FY runs Apr to Mar.'].filter(Boolean).join(' ')
+    const NY=Math.min(6.85,bodyBottom+0.12)
+    slide.addText(noteText,{x:LX,y:NY,w:12.2,h:Math.max(0.3,7.4-NY),fontSize:10,color:'4A5568',valign:'top',margin:0,fit:'shrink'})
+  }
 }
 
 // ── Budget report slides ─────────────────────────────────────────────────────
