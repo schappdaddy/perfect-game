@@ -186,7 +186,8 @@ export default function StrategyTab({projects:mainProjects,setProjects,strategie
       const diff:string[]=[]
       if((r.start_date||null)!==(main.start_date||null)||(r.end_date||null)!==mEnd)diff.push('dates')
       if(r.item_type==='project'&&r.planning_state&&r.planning_state!==mainState(main))diff.push(r.planning_state==='planned'?'planned':'proposed')
-      if(r.item_type==='project'&&r.team&&r.team!==main.team)diff.push('team')
+      // A strategy's team: null follows the main roadmap, '' means no team in this strategy
+      if(r.item_type==='project'&&(r.team?r.team!==main.team:r.team===''&&!!main.team))diff.push('team')
       if(r.item_type==='project'&&r.roster_custom){
         const sig=(x:any)=>`${x.person_id||''}|${x.role_id||''}|${Number(x.headcount)}|${Number(x.allocation_pct)}`
         const mine=(strategyRoles as any[]).filter(x=>x.strategy_id===strategy?.id&&x.project_id===r.item_id).map(sig).sort().join(',')
@@ -213,7 +214,7 @@ export default function StrategyTab({projects:mainProjects,setProjects,strategie
       const fields:any={start_date:c.row.start_date||null}
       if(!(c.main.ongoing&&!c.row.end_date))fields.end_date=c.row.end_date||null
       if(c.row.item_type==='project'&&c.row.planning_state)fields.planning_state=c.row.planning_state
-      if(c.row.item_type==='project'&&c.row.team)fields.team=c.row.team
+      if(c.row.item_type==='project'&&c.row.team!=null)fields.team=c.row.team||null
       if(c.diff.includes('people')){
         const pid=c.row.item_id
         const{error:de}=await supabase.from('project_roles').delete().eq('project_id',pid)

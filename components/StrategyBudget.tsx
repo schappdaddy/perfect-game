@@ -268,7 +268,7 @@ export function StaffingSection({project,team,teams,rows,custom,people,roles,cos
   return(
     <div style={S}>
       <div style={H}>TEAM &amp; PEOPLE <span style={{fontWeight:400,letterSpacing:0}}>· this strategy</span></div>
-      <select value={team||''} onChange={e=>onTeam(e.target.value||null)} style={IN}>
+      <select value={team||''} onChange={e=>onTeam(e.target.value)} style={IN}>
         <option value="">No team</option>
         {teams.map((t:string)=><option key={t} value={t}>{t}</option>)}
       </select>
