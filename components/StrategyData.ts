@@ -71,8 +71,8 @@ export function reportData({entries,personMonth,people,roles,teams,fys,quarters}
   }
   const vendorRows=[...vendors.entries()].map(([v,byFy])=>({v,byFy,total:Object.values(byFy).reduce((a,b)=>a+b,0)})).sort((a,b)=>b.total-a.total)
   // Initiatives by team
-  const teamNames=[...teams,...(entries.some((x:any)=>!x.p.team||!teams.includes(x.p.team))?['No team']:[])]
-  const byTeam=teamNames.map((t:string)=>({team:t,list:entries.filter((x:any)=>t==='No team'?(!x.p.team||!teams.includes(x.p.team)):x.p.team===t)
+  const teamNames=[...teams,...(entries.some((x:any)=>!x.p.team||!teams.includes(x.p.team))?['Backlog · no team yet']:[])]
+  const byTeam=teamNames.map((t:string)=>({team:t,list:entries.filter((x:any)=>t==='Backlog · no team yet'?(!x.p.team||!teams.includes(x.p.team)):x.p.team===t)
     .sort((a:any,b:any)=>(b.cost?.total||0)-(a.cost?.total||0)||a.p.name.localeCompare(b.p.name))})).filter((g:any)=>g.list.length)
   // People: share of each quarter assigned, and per project
   const qPct=(pm:any,qt:any,pid?:string)=>{
