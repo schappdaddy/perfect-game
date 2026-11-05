@@ -231,30 +231,31 @@ function drawSlide(pptx:any,strategy:any,{projects,strategyItems,tracks,goals,de
       yOf.set(p.id,y+rowH/2);barOf.set(p.id,{x0,x1,s:p.start_date,e:p.ongoing?null:p.end_date||null})
     })
 
-    // Dependency arrows between bars on this slide, as elbow connectors: out of the end of the
-    // blocker, along to the row of what waits on it, then into its start. When that work
-    // starts before the blocker finishes, its bar is outlined in red instead.
-    const seg=(xa:number,ya:number,xb:number,yb:number,color:string,arrow:boolean)=>{
-      const dx=xb-xa,dy=yb-ya
-      slide.addShape(pptx.ShapeType.line,{x:Math.min(xa,xb),y:Math.min(ya,yb),w:Math.abs(dx),h:Math.abs(dy),flipH:dx<0,flipV:dy<0,
-        line:{color,width:1.5,...(arrow?{endArrowType:'triangle'}:{})}})
+    // Dependency lines between bars on this slide, drawn like the app's: each its own smooth
+    // curve from the end of what's waited on to the start of what waits on it, so lines into
+    // the same initiative never share a path. One that starts before what it waits on
+    // finishes is red, and its bar is outlined in red.
+    const curve=(xa:number,ya:number,xb:number,yb:number,color:string)=>{
+      const dx=Math.max(0.25,Math.abs(xb-xa)/2)
+      const c1x=xa+dx,c2x=xb-dx
+      const left=Math.min(xa,xb,c1x,c2x),top=Math.min(ya,yb)
+      const w=Math.max(Math.max(xa,xb,c1x,c2x)-left,0.01),h=Math.max(Math.abs(yb-ya),0.01)
+      slide.addShape(pptx.ShapeType.custGeom,{x:left,y:top,w,h,fill:{type:'none'},line:{color,width:1.5,endArrowType:'triangle'},
+        points:[{x:xa-left,y:ya-top},{x:xb-left,y:yb-top,curve:{type:'cubic',x1:c1x-left,y1:ya-top,x2:c2x-left,y2:yb-top}}]})
     }
-    const barH=rowH*0.6,STUB=0.08
+    const barH=rowH*0.6
     const late:any[]=[]
     for(const d of sDeps){
       const a=barOf.get(d.blocker_id),b=barOf.get(d.blocked_id)
       if(!a||!b)continue
-      const x1=a.x1,y1=yOf.get(d.blocker_id)!,x2=b.x0,y2=yOf.get(d.blocked_id)!
-      const down=y2>y1,edge=y2+(down?-1:1)*barH/2
       const onTime=!!a.e&&b.s>a.e
-      if(onTime&&x2-x1<0.1)seg(x2,y1,x2,edge,ORANGE,true)
-      else if(onTime){const xm=x1+STUB;seg(x1,y1,xm,y1,ORANGE,false);seg(xm,y1,xm,y2,ORANGE,false);seg(xm,y2,x2,y2,ORANGE,true)}
-      else{
+      const y1=yOf.get(d.blocker_id)!,y2=yOf.get(d.blocked_id)!
+      if(!onTime){
         if(!late.some(x=>x.blocked_id===d.blocked_id))
           slide.addShape(pptx.ShapeType.rect,{x:b.x0-0.03,y:y2-barH/2-0.03,w:b.x1-b.x0+0.06,h:barH+0.06,fill:{type:'none'},line:{color:BAD,width:1.75}})
-        late.push(d);if(!lateAll.includes(d))lateAll.push(d);continue
-      }
-      if(!drawnAll.includes(d))drawnAll.push(d)
+        late.push(d);if(!lateAll.includes(d))lateAll.push(d)
+      }else if(!drawnAll.includes(d))drawnAll.push(d)
+      curve(a.x1,y1,b.x0,y2,onTime?ORANGE:BAD)
     }
 
     // Notes: the strategy's description and what the arrows mean
