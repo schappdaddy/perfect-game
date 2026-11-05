@@ -102,26 +102,9 @@ function drawSlide(pptx:any,strategy:any,{projects,strategyItems,tracks,goals,de
     }
   }
 
-  // Paging: rows are sized for reading in a meeting, so a long roadmap continues on another
-  // slide (repeating the section it's in) rather than shrinking the type
-  // At most 20 rows a slide, spread evenly over the slides needed
-  const MAX_ROWS=20
-  const LIMIT=Math.ceil(rows.length/Math.max(1,Math.ceil(rows.length/MAX_ROWS)))+1
-  const pages:Row[][]=[]
-  {
-    let cur:Row[]=[],lastSection:Row|null=null
-    for(const r of rows){
-      if(r.kind==='section')lastSection=r
-      // Don't leave a section heading (or a group heading) alone at the bottom of a slide
-      const need=r.kind==='section'||r.kind==='group'?2:1
-      if(cur.length+need>LIMIT&&cur.length){
-        pages.push(cur);cur=[]
-        if(r.kind!=='section'&&lastSection)cur.push({...lastSection,text:`${lastSection.text} (continued)`})
-      }
-      cur.push(r)
-    }
-    if(cur.length||!pages.length)pages.push(cur)
-  }
+  // One slide for the whole roadmap: rows share the height, and the type is as large as
+  // the rows allow
+  const pages:Row[][]=[rows]
   const freeze:number[]=strategy.freeze_months||[]
   const hasGroups=rows.some(r=>r.kind==='group')
   const name=(id:any)=>(projects as any[]).find(p=>p.id===id)?.name||'?'
@@ -136,15 +119,15 @@ function drawSlide(pptx:any,strategy:any,{projects,strategyItems,tracks,goals,de
   function drawPage(pageRows:Row[],pi:number){
     const slide=pptx.addSlide()
     slide.background={color:CREAM}
-    const BODY_TOP=1.75,BODY_BOTTOM=6.8
-    const rowH=Math.max(0.2,Math.min(0.32,(BODY_BOTTOM-BODY_TOP)/Math.max(pageRows.length,1)))
-    const fs=Math.max(9,Math.min(13,rowH*45)) // points
+    const BODY_TOP=1.65,BODY_BOTTOM=7.0
+    const rowH=Math.min(0.32,(BODY_BOTTOM-BODY_TOP)/Math.max(pageRows.length,1))
+    const fs=Math.max(7,Math.min(13,rowH*58)) // points: the text fills most of the row
     const bodyBottom=BODY_TOP+pageRows.length*rowH
 
     // Title, and the legend in the space to its right
     slide.addShape(pptx.ShapeType.rect,{x:0.25,y:0,w:0.28,h:7.5,fill:{color:'2F3742'},line:{color:'2F3742'}})
     slide.addText(strategy.name,{x:LX,y:0.18,w:6.2,h:0.6,fontSize:28,bold:true,color:INK,fontFace:'Calibri',fit:'shrink',margin:0})
-    slide.addText(`${mode==='tracks'?'Roadmap by track':'Roadmap by team'}${pages.length>1?` · ${pi+1} of ${pages.length}`:''}`,{x:LX,y:0.78,w:6.2,h:0.3,fontSize:15,bold:true,color:ORANGE,margin:0})
+    slide.addText(mode==='tracks'?'Roadmap by track':'Roadmap by team',{x:LX,y:0.78,w:6.2,h:0.3,fontSize:15,bold:true,color:ORANGE,margin:0})
     const legend:[string,any][]=[['Consumer Experience',{fill:{color:NAVY},line:{color:NAVY}}],['Operational Efficiency',{fill:{color:STEEL},line:{color:STEEL}}],
       ['Proposed, not yet planned',{fill:{color:PROPOSED_FILL},line:{color:ORANGE,width:1}}],
       [`Code freeze${freeze.length?' ('+[...freeze].sort((a,b)=>((a+8)%12)-((b+8)%12)).map(m=>MONTHS[m-1]).join(', ')+')':''}`,{fill:{color:FREEZE},line:{color:'C9CDD3',width:0.5}}]]
@@ -158,7 +141,7 @@ function drawSlide(pptx:any,strategy:any,{projects,strategyItems,tracks,goals,de
     })
 
     // Header: fiscal years and quarters
-    const HY=BODY_TOP-0.64
+    const HY=BODY_TOP-0.62
     for(let fy=strategy.start_fy;fy<=strategy.end_fy;fy++){
       const a=Math.max(startAbs,(fy-1)*12+3),b=fy*12+3
       if(b<=startAbs)continue
@@ -186,7 +169,7 @@ function drawSlide(pptx:any,strategy:any,{projects,strategyItems,tracks,goals,de
       const y=BODY_TOP+i*rowH
       if(r.kind==='section'){
         const light=r.style==='light'
-        slide.addText(r.text,{x:LX,y:y+rowH*0.06,w:TX+TW-LX,h:rowH*0.88,fill:{color:light?'E2E7EE':r.color},color:light?'2D3748':'FFFFFF',bold:true,fontSize:fs,valign:'middle',margin:[0,6,0,6]})
+        slide.addText(r.text,{x:LX,y:y+rowH*0.02,w:TX+TW-LX,h:rowH*0.96,fill:{color:light?'E2E7EE':r.color},color:light?'2D3748':'FFFFFF',bold:true,fontSize:Math.max(7,fs*0.88),valign:'middle',margin:[0,6,0,6]})
         return
       }
       if(r.kind==='goals'){
@@ -260,8 +243,8 @@ function drawSlide(pptx:any,strategy:any,{projects,strategyItems,tracks,goals,de
     const across=pi===pages.length-1?sDeps.filter(d=>onRoadmap.has(d.blocker_id)&&onRoadmap.has(d.blocked_id)&&!drawnAll.includes(d)&&!lateAll.includes(d)):[]
     const noteText=[pi===0?strategy.description:'',arrows.length&&pi===pages.length-1?`Arrows: ${arrows.join('; ')}.`:'',
       across.length?`Across slides: ${across.map(d=>`${name(d.blocker_id)} → ${name(d.blocked_id)}`).join('; ')}.`:'',lateText.length?`Red outline: ${lateText.join('; ')}.`:'','FY runs Apr to Mar.'].filter(Boolean).join(' ')
-    const NY=Math.min(6.85,bodyBottom+0.12)
-    slide.addText(noteText,{x:LX,y:NY,w:12.2,h:Math.max(0.3,7.4-NY),fontSize:10,color:'4A5568',valign:'top',margin:0,fit:'shrink'})
+    const NY=Math.min(7.04,bodyBottom+0.06)
+    slide.addText(noteText,{x:LX,y:NY,w:12.2,h:Math.max(0.3,7.45-NY),fontSize:10,color:'4A5568',valign:'top',margin:0,fit:'shrink'})
   }
 }
 
