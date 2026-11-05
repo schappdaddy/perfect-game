@@ -106,13 +106,16 @@ function drawSlide(pptx:any,strategy:any,{projects,strategyItems,tracks,goals,de
   }else{
     // By team: everything on this roadmap (on a track, or open and in the window), per team
     const all=[...live.filter(p=>trackIds.has(p.track_id)&&visible(p)),...offTrack]
-    const names=[...teams,...(all.some(p=>!p.team||!teams.includes(p.team))?['__none']:[])]
+    const names=[...teams,...[...new Set(all.map(p=>p.team).filter(t=>t&&!teams.includes(t)))]]
     for(const tn of names){
-      const list=all.filter(p=>tn==='__none'?(!p.team||!teams.includes(p.team)):p.team===tn)
+      const list=all.filter(p=>p.team===tn)
       if(!list.length)continue
-      rows.push({kind:'section',text:`${tn==='__none'?'NO TEAM':tn.toUpperCase()} · ${list.length} initiative${list.length!==1?'s':''}`,color:tn==='__none'?'6B7280':TEAM_FILL[tn]||'5B7A99',style:'band'})
+      rows.push({kind:'section',text:`${tn.toUpperCase()} · ${list.length} initiative${list.length!==1?'s':''}`,color:TEAM_FILL[tn]||'5B7A99',style:'band'})
       pushList(list)
     }
+    // Initiatives without a team wait in a backlog section at the bottom
+    const noTeam=all.filter(p=>!p.team)
+    if(noTeam.length){rows.push({kind:'section',text:`BACKLOG · NO TEAM YET · ${noTeam.length} initiative${noTeam.length!==1?'s':''}`,style:'light'});pushList(noTeam)}
   }
 
   // One slide for the whole roadmap: rows share the height, and the type is as large as

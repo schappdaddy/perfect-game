@@ -598,12 +598,13 @@ export default function StrategyTab({projects:mainProjects,setProjects,strategie
   const teamView=view.groupBy==='teams'
   if(teamView){
     // Every project on this roadmap grouped by its team here, each team followed by its load
+    // Initiatives without a team wait in a backlog section at the bottom
     const all=[...sTracks.flatMap(onTrack),...backlog]
-    const names=[...teams,...(all.some(p=>!p.team||!teams.includes(p.team))?['__none']:[])]
+    const names=[...teams,...[...new Set(all.map(p=>p.team).filter(t=>t&&!teams.includes(t)))]]
     names.forEach((tn:string,ti:number)=>{
-      const list=groupTogether(sortProjects(all.filter(p=>tn==='__none'?(!p.team||!teams.includes(p.team)):p.team===tn)))
+      const list=groupTogether(sortProjects(all.filter(p=>p.team===tn)))
       const key='team:'+tn,closed=!!view.collapsed[key]
-      rows.push({kind:'track',track:{id:key,name:tn==='__none'?'No team':tn,color:tn==='Consumer Experience'?'#C9D6E3':tn==='Operational Efficiency'?'#6FA6CB':'#7A8FA6',
+      rows.push({kind:'track',track:{id:key,name:tn,color:tn==='Consumer Experience'?'#C9D6E3':tn==='Operational Efficiency'?'#6FA6CB':'#7A8FA6',
         description:`${list.length} initiative${list.length!==1?'s':''}`},index:ti,count:list.length,closed,teamRow:true,h:24})
       if(closed)return
       pushList(list)
@@ -613,6 +614,11 @@ export default function StrategyTab({projects:mainProjects,setProjects,strategie
     if(loads.some(l=>l.team===SHARED_TEAM)){
       rows.push({kind:'band',label:`${SHARED_TEAM.toUpperCase()} · SHARED ACROSS TEAMS`,color:'#3A4A5E',h:22})
       loads.filter(l=>l.team===SHARED_TEAM).forEach(l=>rows.push({kind:'load',load:l,h:ROW_H}))
+    }
+    const noTeam=groupTogether(sortProjects(all.filter(p=>!p.team)))
+    if(noTeam.length){
+      rows.push({kind:'band',key:'__backlogTeam',label:`BACKLOG · NO TEAM YET (${noTeam.length})`,closed:!!view.collapsed.__backlogTeam,color:'#3A4A5E',h:22})
+      if(!view.collapsed.__backlogTeam)pushList(noTeam)
     }
   }
   if(!teamView)sTracks.forEach((t:any,ti:number)=>{

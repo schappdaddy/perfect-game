@@ -73,8 +73,8 @@ export function StrategyReport({strategy,entries,personMonth,people,roles,teams,
   const projName=(id:any)=>(entries as any[]).find(x=>x.p.id===id)?.p.name||'Another initiative'
 
   // ── Projects grouped by team ───────────────────────────────────────────────
-  const teamNames=[...(teams as string[]),...(inScope.some(x=>!x.p.team||!teams.includes(x.p.team))?['No team']:[])]
-  const byTeam=teamNames.map(t=>({team:t,list:inScope.filter(x=>t==='No team'?(!x.p.team||!teams.includes(x.p.team)):x.p.team===t)
+  const teamNames=[...(teams as string[]),...(inScope.some(x=>!x.p.team||!teams.includes(x.p.team))?['Backlog · no team yet']:[])]
+  const byTeam=teamNames.map(t=>({team:t,list:inScope.filter(x=>t==='Backlog · no team yet'?(!x.p.team||!teams.includes(x.p.team)):x.p.team===t)
     .sort((a,b)=>(b.cost?.total||0)-(a.cost?.total||0)||a.p.name.localeCompare(b.p.name))})).filter(g=>g.list.length)
   const slotNames=(x:any)=>{const f=slotted(x.roster,people,roles);return SLOTS.map(sl=>{const r=f.get(sl.key);return r?(personName(r.person_id)||roleName(r.role_id,roles)||'role'):null})}
 
