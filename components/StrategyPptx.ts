@@ -15,6 +15,18 @@ const TEAM_SHORT:any={'Consumer Experience':'CX','Operational Efficiency':'OE','
 const teamShort=(t:string)=>t?TEAM_SHORT[t]||t.split(/\s+/).map(w=>w[0]).join('').toUpperCase():''
 const parts=(iso:string)=>{const[y,m,d]=iso.split('-').map(Number);return{y,m,d}}
 const daysIn=(y:number,m:number)=>new Date(y,m,0).getDate()
+// PowerPoint only shrinks text to fit its box once someone edits it, so labels are sized here
+// to fit their width on one line (Calibri: about half an em a character, more in capitals)
+const fitFs=(text:string,w:number,base:number,bold=false,min=6)=>{
+  const t=String(text||''),caps=t.replace(/[^A-Za-z]/g,'').length>0&&t===t.toUpperCase()
+  const em=(caps?0.64:0.5)+(bold?0.04:0)
+  return Math.max(min,Math.min(base,w*72/Math.max(1,t.length*em)))
+}
+// A block of wrapping text sized so it fits its box (about the same estimate, by lines)
+const fitBlockFs=(text:string,w:number,h:number,base:number,min=7)=>{
+  for(let f=base;f>min;f-=0.5){const perLine=w*72/(f*0.5),lines=Math.ceil(String(text||'').length/perLine);if(lines*f*1.25/72<=h)return f}
+  return min
+}
 const listJoin=(a:string[])=>a.length<2?a.join(''):a.slice(0,-1).join(', ')+' and '+a[a.length-1]
 
 export async function exportStrategiesPptx({strategies,projects,strategyItems,tracks,goals,deps,strategyRoles=[],projectRoles=[],people=[],roles=[],teams=[],fileName}:any){
@@ -66,7 +78,8 @@ function drawSlide(pptx:any,strategy:any,{projects,strategyItems,tracks,goals,de
     }
     return out
   }
-  const label=(p:any)=>`${p.name}${p.team?` (${teamShort(p.team)})`:''}`
+  // "Name (CX)", unless the name already ends with its team
+  const label=(p:any)=>{const t=p.team?teamShort(p.team):'';return t&&!p.name.trim().endsWith(`(${t})`)?`${p.name} (${t})`:p.name}
 
   // Rows
   type Row={kind:'section'|'goals'|'project'|'group',text?:string,color?:string,style?:string,track?:any,p?:any,members?:any[],inGroup?:boolean}
@@ -123,10 +136,16 @@ function drawSlide(pptx:any,strategy:any,{projects,strategyItems,tracks,goals,de
     const rowH=Math.min(0.32,(BODY_BOTTOM-BODY_TOP)/Math.max(pageRows.length,1))
     const fs=Math.max(7,Math.min(13,rowH*58)) // points: the text fills most of the row
     const bodyBottom=BODY_TOP+pageRows.length*rowH
+    // One size for every name on the slide: the largest at which they all fit (not below 8pt);
+    // a name still too long at that size is trimmed with an ellipsis
+    const labelW=(r:Row)=>LW-(r.inGroup?0.16:0)-0.1
+    const projRows=pageRows.filter(r=>r.kind==='project')
+    const labelFs=Math.max(8,Math.min(fs,...projRows.map(r=>fitFs(label(r.p),labelW(r),fs))))
+    const clip=(t:string,w:number,f:number)=>{const max=Math.floor(w*72/(f*0.5));return t.length>max?t.slice(0,Math.max(1,max-1)).trimEnd()+'…':t}
 
     // Title, and the legend in the space to its right
     slide.addShape(pptx.ShapeType.rect,{x:0.25,y:0,w:0.28,h:7.5,fill:{color:'2F3742'},line:{color:'2F3742'}})
-    slide.addText(strategy.name,{x:LX,y:0.18,w:6.2,h:0.6,fontSize:28,bold:true,color:INK,fontFace:'Calibri',fit:'shrink',margin:0})
+    slide.addText(strategy.name,{x:LX,y:0.18,w:6.2,h:0.6,fontSize:fitFs(strategy.name,6.2,28,true,16),bold:true,color:INK,fontFace:'Calibri',margin:0})
     slide.addText(mode==='tracks'?'Roadmap by track':'Roadmap by team',{x:LX,y:0.78,w:6.2,h:0.3,fontSize:15,bold:true,color:ORANGE,margin:0})
     const legend:[string,any][]=[['Consumer Experience',{fill:{color:NAVY},line:{color:NAVY}}],['Operational Efficiency',{fill:{color:STEEL},line:{color:STEEL}}],
       ['Proposed, not yet planned',{fill:{color:PROPOSED_FILL},line:{color:ORANGE,width:1}}],
@@ -137,7 +156,7 @@ function drawSlide(pptx:any,strategy:any,{projects,strategyItems,tracks,goals,de
     legend.forEach(([t,st],i)=>{
       const x=LGX+(i%perRow)*(LGW/perRow),y=0.12+Math.floor(i/perRow)*lh
       slide.addShape(pptx.ShapeType.rect,{x,y:y+0.06,w:0.34,h:0.18,...st})
-      slide.addText(t,{x:x+0.42,y,w:LGW/perRow-0.45,h:lh,fontSize:12,color:'2D3748',valign:'middle',margin:0})
+      slide.addText(t,{x:x+0.42,y,w:LGW/perRow-0.45,h:lh,fontSize:fitFs(t,LGW/perRow-0.5,12),color:'2D3748',valign:'middle',margin:0})
     })
 
     // Header: fiscal years and quarters
@@ -169,22 +188,24 @@ function drawSlide(pptx:any,strategy:any,{projects,strategyItems,tracks,goals,de
       const y=BODY_TOP+i*rowH
       if(r.kind==='section'){
         const light=r.style==='light'
-        slide.addText(r.text,{x:LX,y:y+rowH*0.02,w:TX+TW-LX,h:rowH*0.96,fill:{color:light?'E2E7EE':r.color},color:light?'2D3748':'FFFFFF',bold:true,fontSize:Math.max(7,fs*0.88),valign:'middle',margin:[0,6,0,6]})
+        slide.addText(r.text,{x:LX,y:y+rowH*0.02,w:TX+TW-LX,h:rowH*0.96,fill:{color:light?'E2E7EE':r.color},color:light?'2D3748':'FFFFFF',bold:true,fontSize:fitFs(r.text!,TX+TW-LX-0.2,Math.max(7,fs*0.88),true),valign:'middle',margin:[0,6,0,6]})
         return
       }
       if(r.kind==='goals'){
-        slide.addText(`${r.track.name} goal at each FY start`,{x:LX,y,w:LW,h:rowH,color:ORANGE,bold:true,fontSize:fs,valign:'middle',margin:[0,4,0,4],fit:'shrink'})
+        const gl=`${r.track.name} goal at each FY start`
+        slide.addText(gl,{x:LX,y,w:LW,h:rowH,color:ORANGE,bold:true,fontSize:fitFs(gl,LW-0.1,fs,true),valign:'middle',margin:[0,4,0,4]})
         for(let fy=strategy.start_fy;fy<=strategy.end_fy;fy++){
           const a=Math.max(startAbs,(fy-1)*12+3),b=fy*12+3
           if(b<=startAbs)continue
           const g=(goals as any[]).find(x=>x.track_id===r.track.id&&x.fy===fy)
-          slide.addText(g?.goal||'',{x:xAt(a)+0.02,y:y+rowH*0.06,w:xAt(b)-xAt(a)-0.04,h:rowH*0.88,fill:{color:GOAL_FILL},color:INK,bold:true,fontSize:fs,align:'center',valign:'middle',margin:0,fit:'shrink'})
+          slide.addText(g?.goal||'',{x:xAt(a)+0.02,y:y+rowH*0.06,w:xAt(b)-xAt(a)-0.04,h:rowH*0.88,fill:{color:GOAL_FILL},color:INK,bold:true,fontSize:fitFs(g?.goal||'',xAt(b)-xAt(a)-0.12,fs,true),align:'center',valign:'middle',margin:0})
         }
         return
       }
       if(r.kind==='group'){
         // The group's name, and a bracket over its members' span
-        slide.addText(`${r.text!.toUpperCase()} · runs together`,{x:LX+0.08,y,w:LW-0.08,h:rowH,color:GROUP,bold:true,fontSize:fs,valign:'bottom',margin:[0,4,1,4]})
+        const gf=Math.max(7,labelFs*0.9),gt=clip(`${r.text} · runs together`,LW-0.22,gf*1.08)
+        slide.addText(gt,{x:LX+0.12,y,w:LW-0.12,h:rowH,color:'9A6B12',bold:true,italic:true,fontSize:gf,valign:'middle',margin:[0,4,0,4]})
         const xs=r.members!.filter(m=>m.start_date).map(m=>({a:xStart(m.start_date),b:m.ongoing||!m.end_date?xAt(endAbs+1):xEnd(m.end_date)}))
         if(xs.length){
           const a=Math.min(...xs.map(x=>x.a)),b=Math.max(...xs.map(x=>x.b)),yb=y+rowH*0.62,tick=rowH*0.38
@@ -198,7 +219,7 @@ function drawSlide(pptx:any,strategy:any,{projects,strategyItems,tracks,goals,de
       }
       const p=r.p
       if(r.inGroup)slide.addShape(pptx.ShapeType.line,{x:LX+0.02,y,w:0,h:rowH,line:{color:GROUP,width:2.5}})
-      slide.addText(label(p),{x:LX+(r.inGroup?0.12:0),y,w:LW-(r.inGroup?0.12:0),h:rowH,color:INK,fontSize:fs,valign:'middle',margin:[0,4,0,4],fit:'shrink'})
+      slide.addText(clip(label(p),labelW(r),labelFs),{x:LX+(r.inGroup?0.16:0),y,w:LW-(r.inGroup?0.16:0),h:rowH,color:INK,fontSize:labelFs,valign:'middle',margin:[0,4,0,4]})
       const x0=xStart(p.start_date),x1=p.ongoing||!p.end_date?xAt(endAbs+1):xEnd(p.end_date)
       if(x1<=x0)return
       const proposed=p.planning_state==='proposed'
@@ -244,7 +265,8 @@ function drawSlide(pptx:any,strategy:any,{projects,strategyItems,tracks,goals,de
     const noteText=[pi===0?strategy.description:'',arrows.length&&pi===pages.length-1?`Arrows: ${arrows.join('; ')}.`:'',
       across.length?`Across slides: ${across.map(d=>`${name(d.blocker_id)} → ${name(d.blocked_id)}`).join('; ')}.`:'',lateText.length?`Red outline: ${lateText.join('; ')}.`:'','FY runs Apr to Mar.'].filter(Boolean).join(' ')
     const NY=Math.min(7.04,bodyBottom+0.06)
-    slide.addText(noteText,{x:LX,y:NY,w:12.2,h:Math.max(0.3,7.45-NY),fontSize:10,color:'4A5568',valign:'top',margin:0,fit:'shrink'})
+    const nh=Math.max(0.3,7.45-NY)
+    slide.addText(noteText,{x:LX,y:NY,w:12.2,h:nh,fontSize:fitBlockFs(noteText,12.2,nh,10),color:'4A5568',valign:'top',margin:0})
   }
 }
 
@@ -273,7 +295,7 @@ const fyCellRuns=(t:number,cx:number,ox:number,bold=false)=>t?[{text:fmtK(t),opt
 function table(slide:any,rows:any[],x:number,y:number,colW:number[]){
   slide.addTable(rows,{x,y,colW,border:{type:'solid',pt:0.5,color:LINE},fontFace:'Calibri',margin:[2,4,2,4]})
 }
-function note(slide:any,text:string,y=6.95){slide.addText(text,{x:0.75,y,w:12.2,h:0.4,fontSize:9,color:MUTED,valign:'top',margin:0,fit:'shrink'})}
+function note(slide:any,text:string,y=6.95){slide.addText(text,{x:0.75,y,w:12.2,h:0.45,fontSize:fitBlockFs(text,12.2,0.45,9),color:MUTED,valign:'top',margin:0})}
 
 function drawBudgetSlides(pptx:any,strategy:any,{projects,strategyItems,tracks,strategyRoles,projectRoles,people,roles,teams}:any){
   if(!people.length||!roles.length)return
@@ -303,8 +325,8 @@ function drawBudgetSlides(pptx:any,strategy:any,{projects,strategyItems,tracks,s
       const x=0.75+i*cw
       slide.addShape(pptx.ShapeType.rect,{x:x+0.03,y:1.3,w:cw-0.08,h:0.95,fill:{color:'FFFFFF'},line:{color:LINE,width:0.75}})
       slide.addText(l,{x:x+0.1,y:1.34,w:cw-0.2,h:0.22,fontSize:8,bold:true,color:MUTED,margin:0})
-      slide.addText(v,{x:x+0.1,y:1.56,w:cw-0.2,h:0.36,fontSize:i===0?16:14,bold:true,color:i===0?ORANGE:INK,margin:0,fit:'shrink'})
-      slide.addText(sub,{x:x+0.1,y:1.93,w:cw-0.2,h:0.26,fontSize:8,color:MUTED,margin:0,fit:'shrink'})
+      slide.addText(v,{x:x+0.1,y:1.56,w:cw-0.2,h:0.36,fontSize:fitFs(v,cw-0.25,i===0?16:14,true),bold:true,color:i===0?ORANGE:INK,margin:0})
+      slide.addText(sub,{x:x+0.1,y:1.93,w:cw-0.2,h:0.26,fontSize:fitFs(sub,cw-0.25,8),color:MUTED,margin:0})
     })
     if(!costed.length){note(slide,'Nothing is costed yet: assign people (Developer, QA, Product Owner) to initiatives in this strategy.',2.5);return}
     const cw2=[2.6,...fys.map(()=>(12.2-2.6-1.4-0.8)/cols),1.4,0.8]
