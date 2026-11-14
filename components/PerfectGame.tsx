@@ -10,6 +10,7 @@ import { MilestoneTypeSelect } from './MilestoneTypes'
 import { WORK_TYPE_KEYS, WT_LABEL, WT_COLOR, WorkTag, isWorkType, workTypeOfProject, capacityShare, REQUEST_TYPES } from './WorkTypes'
 import { QuarterPlanner, ReleaseCalendar, ReleaseSelect, QuarterSelect, ReleasesManager, releaseOptions, releaseOf, releaseText, fmtMonthKey } from './Releases'
 import { EpicRow, EpicPanel, epicProject, epicWorkType, convertStoryToEpic, convertEpicToStory } from './BacklogEpics'
+import { FullPlanButton } from './FullPlanExport'
 
 const T = {
   navy:'#0D1B2A',navyMid:'#162436',navyLt:'#1E3048',
@@ -6468,7 +6469,11 @@ function SprintsTab({items,setItems,projects,projectRoles,people,setPeople,roles
   const byRel=relK!=='__all'
   const relIx=relList.indexOf(relK)
   const relWinEnd=byRel?relEndOf(relK):null
-  const relWinStart=byRel?(relIx>0?(()=>{const d=new Date(relEndOf(relList[relIx-1])+'T12:00:00');d.setDate(d.getDate()+1);return localISO(d)})():`${relK}-01`):null
+  // After the previous release; with none before it, from the start of the code-freeze months
+  // right before it (work done in a freeze ships in the next release)
+  const prevMonthOf=(k:string)=>{const[y,m]=k.split('-').map(Number);return m===1?`${y-1}-12`:`${y}-${pad2(m-1)}`}
+  const blockedMonth=(k:string)=>!!(releases as any[]).find((r:any)=>r.month===k)?.no_release
+  const relWinStart=byRel?(relIx>0?(()=>{const d=new Date(relEndOf(relList[relIx-1])+'T12:00:00');d.setDate(d.getDate()+1);return localISO(d)})():(()=>{let m=relK;while(blockedMonth(prevMonthOf(m)))m=prevMonthOf(m);return `${m}-01`})()):null
   const relQuarter=(k:string)=>{const[y,m]=k.split('-').map(Number);const fy=m>=4?y+1:y,q=m>=4?Math.floor((m-4)/3)+1:4;return `FY${String(fy).slice(-2)}-Q${q}`}
   const inPlan=(it:any)=>!byRel||poolScope==='all'?true:poolScope==='release'?it.release_month===relK:(it.release_month===relK||it.plan_quarter===relQuarter(relK)||(it.release_month&&relQuarter(it.release_month)===relQuarter(relK)))
   const allTeamSprints=sprints.filter((s:any)=>s.team===team).sort((a:any,b:any)=>a.start_date<b.start_date?-1:1)
@@ -8814,6 +8819,9 @@ useEffect(()=>{
           ))}
         </div>
         <div style={{marginLeft:'auto',display:'flex',gap:4,alignItems:'center',padding:'0 10px',flexShrink:0}}>
+          {space==='work'&&!mobile&&<span style={{marginRight:6}}><FullPlanButton strategies={strategies} projects={projects} items={items} epics={epics} releases={releases} milestones={milestones} sprints={sprints}
+            strategyItems={strategyItems} tracks={tracks} goals={trackGoals} deps={projectDeps} strategyRoles={strategyRoles} projectRoles={projectRoles} people={people} roles={roles} teams={TEAMS}
+            workTypeOf={(i:any)=>workTypeOfItem(i,projects)} epicWorkTypeOf={(e:any)=>epicWorkType(e,projects)}/></span>}
           {([['work','🏢','Work'],['home','🏠','Home']] as [string,string,string][]).map(([k,icon,label])=>(
             <button key={k} onClick={()=>setSpace(k)}
               style={{background:space===k?'#C8973A':'transparent',color:space===k?'#0D1B2A':'#7A8FA6',border:'1px solid '+(space===k?'#C8973A':'#243447'),borderRadius:14,padding:mobile?'4px 9px':'4px 12px',fontSize:11,fontWeight:700,cursor:'pointer',whiteSpace:'nowrap' as const}}>
