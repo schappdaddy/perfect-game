@@ -14,6 +14,14 @@ const TERMINAL=['Done','Will Not Implement',"Won't Do"]
 const EFFORT_POINTS:any={XS:0.5,S:1,M:2,L:3,XL:5}
 const TEAM_SHORT:any={'Consumer Experience':'CX','Operational Efficiency':'OE','Retail Program':'RP'}
 const PRI_ORDER:any={P1:1,P2:2,P3:3,P4:4}
+// Each kind of work has its own colour on the planning boards, and each team its own tag
+const KIND_CLR={initiative:'#C8973A',epic:'#E07B2A',story:'#5DADE2',milestone:'#B07CE0'}
+const TEAM_TAG:any={'Consumer Experience':{bg:'#D9E2EC',fg:'#14233A'},'Operational Efficiency':{bg:'#6FA6CB',fg:'#0D1B2A'},'Retail Program':{bg:'#76C7A9',fg:'#0D1B2A'}}
+function TeamTag({team}:{team?:string|null}){
+  if(!team)return <span title="No team" style={{fontSize:9.5,fontWeight:800,color:'#7A8FA6',border:'1px dashed #3A4A5E',borderRadius:10,padding:'0 6px',flexShrink:0}}>NO TEAM</span>
+  const c=TEAM_TAG[team]||{bg:'#3A4A5E',fg:'#F4F6F8'}
+  return <span title={team} style={{fontSize:9.5,fontWeight:800,color:c.fg,background:c.bg,borderRadius:10,padding:'1px 7px',flexShrink:0,letterSpacing:0.3}}>{TEAM_SHORT[team]||team}</span>
+}
 const RT_ICON:any={'Bug':'🐞','Tech Debt':'🔧','Enhancement':'✨','Strategic Initiative':'🎯','Business Request':'💼','Testing':'🧪'}
 const pad=(n:number)=>String(n).padStart(2,'0')
 
@@ -330,12 +338,18 @@ export function QuarterPlanner({items,setItems,projects,setProjects,epics=[],set
   const msBlock=(col:string,a:string,b:string)=>{
     const list=msIn(a,b),f=msForm?.col===col?msForm:null
     return(
-      <div style={{display:'flex',flexDirection:'column',gap:3,marginTop:4}}>
+      <div style={{display:'flex',flexDirection:'column',gap:4,margin:'8px 8px 0',padding:'6px 8px',borderRadius:6,background:'rgba(176,124,224,0.10)',border:`1px solid rgba(176,124,224,0.45)`,borderLeft:`3px solid ${KIND_CLR.milestone}`}}>
+        <div style={{display:'flex',alignItems:'center',gap:6}}>
+          <span style={{fontSize:9.5,fontWeight:800,color:KIND_CLR.milestone,letterSpacing:1,whiteSpace:'nowrap' as const}}>◇ MILESTONES{list.length?` · ${list.length}`:''}</span>
+          {!f&&setMilestones&&<button onClick={()=>setMsForm({col,project_id:'',name:'',date:a,min:a,max:b})} style={{marginLeft:'auto',background:'none',border:`1px solid rgba(176,124,224,0.5)`,borderRadius:4,color:KIND_CLR.milestone,fontSize:10,fontWeight:700,padding:'0 6px',cursor:'pointer',whiteSpace:'nowrap' as const}}>+ Add</button>}
+        </div>
+        {!list.length&&!f&&<div style={{fontSize:10,color:'#7A8FA6',fontStyle:'italic'}}>None in this {col.startsWith('q:')?'quarter':'month'}.</div>}
         {list.map(m=>{const p=(projects as any[]).find(x=>x.id===m.project_id);const[,mm,dd]=m.date.split('-').map(Number);return(
           <div key={m.id} title={`${m.name} · ${m.date}${p?' · '+p.name:''}${m.notes?'\n'+m.notes:''}\nClick to mark ${m.completed?'not done':'done'}`} onClick={()=>toggleMilestone(m)}
             style={{display:'flex',alignItems:'center',gap:5,fontSize:10.5,color:m.completed?'#7A8FA6':'#F4F6F8',cursor:'pointer',textDecoration:m.completed?'line-through':'none'}}>
-            <span style={{width:8,height:8,transform:'rotate(45deg)',background:m.completed?'#27AE60':m.color||'#C8973A',flexShrink:0}}/>
-            <span style={{fontWeight:700,color:'#C8973A',flexShrink:0}}>{MONTHS[mm-1]} {dd}</span>
+            <span style={{width:8,height:8,transform:'rotate(45deg)',background:m.completed?'#27AE60':KIND_CLR.milestone,flexShrink:0}}/>
+            <span style={{fontWeight:700,color:KIND_CLR.milestone,flexShrink:0}}>{MONTHS[mm-1]} {dd}</span>
+            {(()=>{const t=(projects as any[]).find(x=>x.id===m.project_id)?.team;return t?<TeamTag team={t}/>:null})()}
             <span style={{overflow:'hidden',textOverflow:'ellipsis',whiteSpace:'nowrap' as const}}>{m.name}{p?<span style={{color:'#7A8FA6'}}> · {p.name}</span>:''}</span>
           </div>
         )})}
@@ -353,7 +367,7 @@ export function QuarterPlanner({items,setItems,projects,setProjects,epics=[],set
               <button onClick={()=>setMsForm(null)} style={{background:'none',border:'1px solid #243447',borderRadius:4,color:'#7A8FA6',fontSize:11,padding:'3px 8px',cursor:'pointer'}}>Cancel</button>
             </div>
           </div>
-        ):setMilestones&&<button onClick={()=>setMsForm({col,project_id:'',name:'',date:a,min:a,max:b})} style={{alignSelf:'flex-start',background:'none',border:'none',color:'#7A8FA6',fontSize:10,padding:0,cursor:'pointer'}}>+ Milestone</button>}
+        ):null}
       </div>
     )
   }
@@ -382,24 +396,26 @@ export function QuarterPlanner({items,setItems,projects,setProjects,epics=[],set
     const ep=!isEpic&&x.epic_id?epicById(x.epic_id):null
     const qi=en.bucket?qFromKey(en.bucket.sustain_quarter):null
     const later=qi&&x.release_month&&x.release_month>qi.months[2]
+    const clr=isEpic?KIND_CLR.epic:KIND_CLR.story
+    const teamOf=en.bucket?.team||x.team||(isEpic?(projects as any[]).find(p=>p.id===x.project_id)?.team:(projects as any[]).find(p=>p.name===x.parent_project)?.team)||null
     return(
     <div key={en.key} draggable onDragStart={e=>{setDragId(en.key);setDragSrc(isInit?'init':'td');e.dataTransfer.effectAllowed='move'}} onDragEnd={()=>{setDragId(null);setOver(null)}}
       onDragOver={o.idx!=null?e=>{e.preventDefault();e.stopPropagation();setOver('pool:'+en.key)}:undefined}
       onDrop={o.idx!=null?e=>{e.preventDefault();e.stopPropagation();dropOnPool(en.key)}:undefined}
       onClick={()=>isEpic?onOpenEpic?.(x):onOpenItem(x)}
-      style={{background:isEpic?'rgba(224,123,42,0.10)':'#1E3048',border:`1px solid ${isEpic?'rgba(224,123,42,0.45)':'#2A3D55'}`,borderLeft:isEpic?'3px solid #E07B2A':isInit?'3px solid #C8973A':undefined,borderTop:over==='pool:'+en.key?'2px solid #C8973A':undefined,borderRadius:6,padding:'6px 8px',cursor:'grab',opacity:dragId===en.key?0.4:1,display:'flex',flexDirection:'column',gap:3}}>
-      <div style={{display:'flex',alignItems:'center',gap:6}}>
+      style={{background:isEpic?'rgba(224,123,42,0.10)':'rgba(93,173,226,0.07)',border:`1px solid ${isEpic?'rgba(224,123,42,0.45)':'rgba(93,173,226,0.35)'}`,borderLeft:`3px solid ${clr}`,borderTop:over==='pool:'+en.key?'2px solid #C8973A':undefined,borderRadius:6,padding:'6px 8px',cursor:'grab',opacity:dragId===en.key?0.4:1,display:'flex',flexDirection:'column',gap:3}}>
+      <div style={{display:'flex',alignItems:'center',gap:6,flexWrap:'wrap' as const,whiteSpace:'nowrap' as const}}>
         {o.idx!=null&&<span style={{fontSize:10,fontWeight:800,color:'#C8973A',minWidth:16}}>{o.idx+1}</span>}
-        {isEpic?<span style={{fontSize:9,fontWeight:800,color:'#E07B2A',letterSpacing:1}}>◆ EPIC</span>
-          :<><span style={{fontSize:10,color:'#7A8FA6',fontFamily:'monospace'}}>{x.item_id}</span><span title={x.request_type} style={{fontSize:11}}>{RT_ICON[x.request_type]||''}</span></>}
-        <span style={{marginLeft:'auto',fontSize:10,fontWeight:700,color:x.priority==='P1'?'#E74C3C':x.priority==='P2'?'#D4820A':'#7A8FA6'}}>{x.priority}</span>
+        {isEpic?<span style={{fontSize:9,fontWeight:800,color:KIND_CLR.epic,letterSpacing:1}}>◆ EPIC</span>
+          :<><span style={{fontSize:9,fontWeight:800,color:KIND_CLR.story,letterSpacing:1}}>▪ STORY</span><span style={{fontSize:10,color:'#7A8FA6',fontFamily:'monospace'}}>{x.item_id}</span><span title={x.request_type} style={{fontSize:11}}>{RT_ICON[x.request_type]||''}</span></>}
+        <span style={{marginLeft:'auto'}}><TeamTag team={teamOf}/></span>
+        <span style={{fontSize:10,fontWeight:700,color:x.priority==='P1'?'#E74C3C':x.priority==='P2'?'#D4820A':'#7A8FA6'}}>{x.priority}</span>
         {(isEpic?ptsOf(en)>0:!!x.effort)&&<span title={isEpic&&!x.effort?'Effort points of its open stories':undefined} style={{fontSize:10,color:'#7A8FA6',border:'1px solid #3A4A5E',borderRadius:3,padding:'0 4px'}}>{isEpic&&!x.effort?ptsOf(en)+' pts':x.effort}</span>}
       </div>
       <div style={{fontSize:12,color:'#F4F6F8',lineHeight:1.3,fontWeight:isEpic?700:400}}>{x.name}</div>
       {o.showQuarter&&qi&&<div style={{fontSize:10,color:'#C8D4E0'}}>🗓 Worked in <b>{qi.label}</b>{later?<span style={{color:'#5DADE2'}}> · ships after</span>:''}</div>}
       {isEpic&&<div style={{fontSize:10,color:'#7A8FA6'}}>{sts.length} stor{sts.length===1?'y':'ies'}{sts.length?` · ${done} done`:''}</div>}
       {(o.showFrom||isInit)&&from&&<div style={{fontSize:10,color:isInit?'#C8973A':'#7A8FA6'}}>{isInit?'◈ ':'In '}{from}{ep?` › ${ep.name}`:''}</div>}
-      {(ALL||(!poolTeam&&o.idx!=null))&&(en.bucket?.team||x.team)&&<div style={{fontSize:10,color:'#7A8FA6'}}>{shortOf(en.bucket?.team||x.team)}</div>}
       {o.init&&o.relBadge&&x.release_month&&<div style={{fontSize:10,color:'#5DADE2'}}>📦 {fmtMonthKey(x.release_month)} release</div>}
       {o.relPicker&&qi&&(
         <div onClick={e=>e.stopPropagation()} style={{display:'flex',alignItems:'center',gap:5}}>
@@ -424,12 +440,15 @@ export function QuarterPlanner({items,setItems,projects,setProjects,epics=[],set
         title="Drag onto a release: the initiative goes live in it"
         style={{background:'rgba(200,151,58,0.10)',border:'1px solid rgba(200,151,58,0.5)',borderLeft:'3px solid #C8973A',borderRadius:6,padding:'6px 8px',cursor:'grab',opacity:dragId===en.key?0.4:1,display:'flex',flexDirection:'column',gap:3}}>
         <div style={{display:'flex',alignItems:'center',gap:6}}>
-          <span style={{fontSize:9,fontWeight:800,color:'#C8973A',letterSpacing:1}}>◈ INITIATIVE{o.goLive?' GO-LIVE':''}</span>
+          <span style={{fontSize:9,fontWeight:800,color:KIND_CLR.initiative,letterSpacing:1,whiteSpace:'nowrap' as const}}>◈ INITIATIVE{o.goLive?' GO-LIVE':''}</span>
           {p.work_type==='sustain'&&<span style={{fontSize:9,color:'#C8D4E0',background:'#4A5D72',borderRadius:3,padding:'0 4px'}}>SUSTAIN</span>}
-          {p.release_month&&(!o.goLive||o.relBadge)&&<span style={{marginLeft:'auto',fontSize:9.5,fontWeight:700,color:'#5DADE2'}}>📦 {fmtMonthKey(p.release_month)}</span>}
+          <span style={{marginLeft:'auto',display:'flex',gap:5,alignItems:'center'}}>
+            {p.release_month&&(!o.goLive||o.relBadge)&&<span style={{fontSize:9.5,fontWeight:700,color:'#5DADE2'}}>📦 {fmtMonthKey(p.release_month)}</span>}
+            <TeamTag team={p.team}/>
+          </span>
         </div>
         <div style={{fontSize:12,fontWeight:800,color:'#F4F6F8',lineHeight:1.3}}>{p.name}</div>
-        <div style={{fontSize:10,color:'#7A8FA6'}}>{ALL&&p.team?`${shortOf(p.team)} · `:''}{p.start_date?`${fmtD(p.start_date)} – ${p.ongoing||!p.end_date?'ongoing':fmtD(p.end_date)}`:'No dates'} · {eps.length} epic{eps.length!==1?'s':''} · {sts.length} stor{sts.length===1?'y':'ies'}</div>
+        <div style={{fontSize:10,color:'#7A8FA6'}}>{p.start_date?`${fmtD(p.start_date)} – ${p.ongoing||!p.end_date?'ongoing':fmtD(p.end_date)}`:'No dates'} · {eps.length} epic{eps.length!==1?'s':''} · {sts.length} stor{sts.length===1?'y':'ies'}</div>
       </div>
     )
   }
@@ -461,7 +480,11 @@ export function QuarterPlanner({items,setItems,projects,setProjects,epics=[],set
         {mode==='releases'&&<label style={{marginLeft:'auto',display:'flex',alignItems:'center',gap:5,fontSize:11,color:'#7A8FA6',cursor:'pointer'}} title="Hide months marked as having no release (e.g. code freeze)">
           <input type="checkbox" checked={hideNoRel} onChange={e=>setHideNoRel(e.target.checked)} style={{accentColor:'#C8973A'}}/>Hide months with no release
         </label>}
-        <button onClick={()=>setMgr(true)} style={{...btn,marginLeft:mode==='releases'?0:'auto'}}>📦 Release dates</button>
+        <span style={{display:'flex',gap:10,alignItems:'center',fontSize:10.5,fontWeight:700,marginLeft:mode==='releases'?0:'auto'}}>
+          <span style={{color:KIND_CLR.initiative}}>◈ Initiative</span><span style={{color:KIND_CLR.epic}}>◆ Epic</span>
+          <span style={{color:KIND_CLR.story}}>▪ Story</span><span style={{color:KIND_CLR.milestone}}>◇ Milestone</span>
+        </span>
+        <button onClick={()=>setMgr(true)} style={btn}>📦 Release dates</button>
       </div>
       <div style={{flex:1,display:'flex',minHeight:0,overflow:'auto'}}>
         {/* Sustain backlog */}
@@ -532,8 +555,8 @@ export function QuarterPlanner({items,setItems,projects,setProjects,epics=[],set
                     {shownTeams.map(t=>{const b=bucketFor(qi.qk,t);return b?<div key={t} style={{fontSize:10.5,color:'#C8973A',marginTop:2}}>{b.name}</div>
                       :<button key={t} onClick={()=>createBucket(qi,t)} style={{marginTop:4,background:'none',border:'1px dashed #3A4A5E',borderRadius:5,color:'#7A8FA6',fontSize:10.5,padding:'2px 8px',cursor:'pointer',display:'block'}}>+ Create {qi.label} Tech Debt ({shortOf(t)})</button>})}
                     <div style={{fontSize:10,color:'#7A8FA6',marginTop:2}}>{list.length} tech debt{ini.length?<span style={{color:'#C8973A'}}> · {ini.length} from initiatives</span>:''} · {pts([...list,...ini])} pts{noRel?<span style={{color:'#D4820A'}}> · {noRel} without a release</span>:''}</div>
-                    {msBlock('q:'+qi.qk,qi.qStart,qi.qEnd)}
                   </div>
+                  {msBlock('q:'+qi.qk,qi.qStart,qi.qEnd)}
                   <div style={colBody}>
                     {ini.filter(en=>en.kind==='project').map(en=>initCard(en,{goLive:true,relBadge:true}))}
                     {ini.filter(en=>en.kind!=='project').map(en=>card(en,{init:true,relBadge:true}))}
@@ -546,7 +569,7 @@ export function QuarterPlanner({items,setItems,projects,setProjects,epics=[],set
             })}
           </div>
         ):(
-          <div style={{flex:1,display:'grid',gridTemplateColumns:`minmax(200px,1fr) ${relCols.map(k=>isBlocked(k)&&![...planned,...initEntries].some(en=>en.x.release_month===k)?'84px':'minmax(170px,1fr)').join(' ')}`,gap:8,padding:12,minHeight:0,overflowX:'auto'}}>
+          <div style={{flex:1,display:'grid',gridTemplateColumns:`minmax(200px,1fr) ${relCols.map(k=>isBlocked(k)&&![...planned,...initEntries].some(en=>en.x.release_month===k)?'84px':'minmax(210px,1fr)').join(' ')}`,gap:8,padding:12,minHeight:0,overflowX:'auto'}}>
             {(()=>{const list=planned.filter(en=>!en.x.release_month&&shownQks.has(en.bucket?.sustain_quarter));return(
               <div onDragOver={e=>{e.preventDefault();setOver('r:none')}} onDragLeave={()=>setOver(o=>o==='r:none'?null:o)} onDrop={e=>{e.preventDefault();dropOnRelease(null)}} style={colBox('r:none',false)}>
                 <div style={colHead}>
@@ -569,8 +592,8 @@ export function QuarterPlanner({items,setItems,projects,setProjects,epics=[],set
                     <div style={{fontSize:12,fontWeight:800,color:blocked?'#7A8FA6':'#F4F6F8'}}>{slim?fmtMonthKey(k):`${fmtMonthKey(k)} release`}</div>
                     <div style={{fontSize:10.5,color:blocked?'#D4820A':r?.release_date?'#C8973A':'#7A8FA6'}}>{blocked?`No release${r?.notes&&!slim?' · '+r.notes:''}`:releaseText(releases,k)}</div>
                     {!slim&&<div style={{fontSize:10,color:'#7A8FA6',marginTop:2}}>{ini.length?<span style={{color:'#C8973A'}}>{ini.length} from initiatives · </span>:''}{td.length} tech debt · {pts(list)} pts</div>}
-                    {!slim&&msBlock('r:'+k,`${k}-01`,lastDay(k))}
                   </div>
+                  {!slim&&msBlock('r:'+k,`${k}-01`,lastDay(k))}
                   <div style={colBody}>{list.map(en=>en.kind==='project'?initCard(en,{goLive:true}):card(en,{showQuarter:true,init:ini.includes(en)}))}{!list.length&&!slim&&empty('Drag planned work here.')}</div>
                 </div>
               )
