@@ -509,19 +509,23 @@ export function QuarterPlanner({items,setItems,projects,setProjects,epics=[],set
           meta:[...bks,`${list.length} planned${ini.length?` · ${ini.length} go-live${ini.length!==1?'s':''}`:''} · ${pts(list)} pts`],
           milestones:msIn(qi.qStart,qi.qEnd).map(toMs),cards:[...ini.map(en=>toCard(en,{release:true})),...list.map(en=>toCard(en,{release:true}))]}
       })
-      const months=quarters.flatMap(q=>q.months).filter(k=>relCols.includes(k))
-      const noRel=planned.filter(en=>!en.x.release_month&&shownQks.has(en.qk as string))
-      const rCols=[...(noRel.length?[{title:'Not in a release yet',sub:`Planned ${quarters[0].label}–${quarters[3].label}`,meta:[`${noRel.length} · ${pts(noRel)} pts`],milestones:[],cards:noRel.map(en=>toCard(en,{quarter:true}))}]:[]),
-        ...months.map(k=>{
-          const td=planned.filter(en=>en.x.release_month===k&&inView(en)),ini=initEntries.filter(en=>en.x.release_month===k),r=releaseOf(releases,k),blocked=isBlocked(k)
-          return{title:`${fmtMonthKey(k)}`,sub:blocked?`No release${r?.notes?' · '+r.notes:''}`:releaseText(releases,k),blocked,slimmable:true,
-            meta:blocked?[]:[`${ini.length?`${ini.length} go-live${ini.length!==1?'s':''} · `:''}${td.length} planned · ${pts([...ini,...td])} pts`],
-            milestones:msIn(`${k}-01`,lastDay(k)).map(toMs),cards:[...ini.map(en=>toCard(en)),...td.map(en=>toCard(en,{quarter:true}))]}
-        })]
+      // The release plan, one slide per quarter: its months, and what's planned there without a release
+      const monthCol=(k:string)=>{
+        const td=planned.filter(en=>en.x.release_month===k&&inView(en)),ini=initEntries.filter(en=>en.x.release_month===k),r=releaseOf(releases,k),blocked=isBlocked(k)
+        return{title:`${fmtMonthKey(k)}`,sub:blocked?`No release${r?.notes?' · '+r.notes:''}`:releaseText(releases,k),blocked,slimmable:true,
+          meta:blocked?[]:[`${ini.length?`${ini.length} go-live${ini.length!==1?'s':''} · `:''}${td.length} planned · ${pts(td)} pts`],
+          milestones:msIn(`${k}-01`,lastDay(k)).map(toMs),cards:[...ini.map(en=>toCard(en)),...td.map(en=>toCard(en,{quarter:true}))]}
+      }
+      const releaseSlides=quarters.map(qi=>{
+        const noRel=planned.filter(en=>!en.x.release_month&&en.qk===qi.qk)
+        const cols:any[]=[...(noRel.length?[{title:'Not in a release yet',sub:`Planned in ${qi.label}`,meta:[`${noRel.length} · ${pts(noRel)} pts`],milestones:[],cards:noRel.map(en=>toCard(en))}]:[]),
+          ...qi.months.filter(k=>relCols.includes(k)).map(monthCol)]
+        return{label:`${qi.label} (${fmtMonthKey(qi.months[0]).slice(0,3)}–${fmtMonthKey(qi.months[2])})`,cols}
+      }).filter(r=>r.cols.some((c:any)=>c.cards.length||c.milestones.length))
       const range=`${quarters[0].label} - ${quarters[3].label}`
       const who=ALL?'All teams':team,wtl=wtF==='all'?'All work':(WT_LABEL as any)[wtF]
       await exportPlanningPptx({title:`Planning · ${range}`,subtitle:`${who} · ${wtl} · exported ${new Date().toLocaleDateString('en-US',{month:'short',day:'numeric',year:'numeric'})}`,
-        quarters:qCols,releases:rCols,fileName:`Planning ${range}${ALL?'':' '+shortOf(team)}`})
+        quarters:qCols,releaseSlides,fileName:`Planning ${range}${ALL?'':' '+shortOf(team)}`})
     }catch(e:any){alert('Failed to export: '+(e?.message||e))}
     setExporting(false)
   }
