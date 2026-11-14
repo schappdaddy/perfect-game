@@ -1,7 +1,7 @@
 'use client'
 import { useState } from 'react'
 import { supabase } from '../lib/supabase'
-import { MilestoneTypeSelect, useMilestoneTypes, typeColor } from './MilestoneTypes'
+import { MilestoneTypeSelect, useMilestoneTypes, typeColor, typeName } from './MilestoneTypes'
 import { WT_LABEL, WorkTag, workTypeOfProject } from './WorkTypes'
 
 // Monthly releases and quarterly planning of all work (New, Sustain and SaaS deliverable).
@@ -487,6 +487,45 @@ export function QuarterPlanner({items,setItems,projects,setProjects,epics=[],set
   const shownQks=new Set(quarters.map(q=>q.qk))
   const inView=(en:Entry)=>shownQks.has(en.qk as string)||relMonths.includes(en.x.release_month)
 
+  // ── PowerPoint: both views as the board shows them (team, work type tab, quarters) ──
+  const [exporting,setExporting]=useState(false)
+  async function exportPpt(){
+    setExporting(true)
+    try{
+      const{exportPlanningPptx}=await import('./PlanningPptx')
+      const WTS:any={new:'New',sustain:'Sustain',saas:'SaaS'}
+      const toMs=(m:any)=>{const p=(projects as any[]).find(x=>x.id===m.project_id);return{date:fmtDay(m.date),name:m.name+(p?` · ${p.name}`:''),type:typeName(mTypes,m.type),color:typeColor(mTypes,m.type),team:p?.team?shortOf(p.team):null,done:!!m.completed}}
+      const toCard=(en:Entry,o:{quarter?:boolean,release?:boolean}={}):any=>{
+        const x=en.x
+        if(en.kind==='project')return{kind:'initiative',name:x.name,team:x.team?shortOf(x.team):null,release:o.release&&x.release_month?fmtMonthKey(x.release_month):null}
+        const home=homeOf(en.kind,x),bk=bucketOf(en.kind,x),t=teamOf(en.kind,x)
+        return{kind:en.kind==='epic'?'epic':'story',name:x.name,ref:en.kind==='item'?x.item_id:undefined,team:t?shortOf(t):null,wt:WTS[wtOf(en.kind,x)],priority:x.priority||null,
+          home:home?`◈ ${home.name}`:bk?`Tech debt · ${bk.name}`:null,release:o.release&&x.release_month?fmtMonthKey(x.release_month):null,quarter:o.quarter&&en.qk?en.qk.replace('-',' '):null}
+      }
+      const qCols=quarters.map(qi=>{
+        const list=planned.filter(en=>en.qk===qi.qk),ini=initEntries.filter(en=>qi.months.includes(en.x.release_month))
+        const bks=shownTeams.map(t=>bucketFor(qi.qk,t)).filter(Boolean).map((b:any)=>`Tech debt: ${b.name}`)
+        return{title:qi.label,sub:`${fmtMonthKey(qi.months[0]).slice(0,3)}–${fmtMonthKey(qi.months[2])}`,now:qi.qk===quarterKey(cur.fy,cur.q),
+          meta:[...bks,`${list.length} planned${ini.length?` · ${ini.length} go-live${ini.length!==1?'s':''}`:''} · ${pts(list)} pts`],
+          milestones:msIn(qi.qStart,qi.qEnd).map(toMs),cards:[...ini.map(en=>toCard(en,{release:true})),...list.map(en=>toCard(en,{release:true}))]}
+      })
+      const months=quarters.flatMap(q=>q.months).filter(k=>relCols.includes(k))
+      const noRel=planned.filter(en=>!en.x.release_month&&shownQks.has(en.qk as string))
+      const rCols=[...(noRel.length?[{title:'Not in a release yet',sub:`Planned ${quarters[0].label}–${quarters[3].label}`,meta:[`${noRel.length} · ${pts(noRel)} pts`],milestones:[],cards:noRel.map(en=>toCard(en,{quarter:true}))}]:[]),
+        ...months.map(k=>{
+          const td=planned.filter(en=>en.x.release_month===k&&inView(en)),ini=initEntries.filter(en=>en.x.release_month===k),r=releaseOf(releases,k),blocked=isBlocked(k)
+          return{title:`${fmtMonthKey(k)}`,sub:blocked?`No release${r?.notes?' · '+r.notes:''}`:releaseText(releases,k),blocked,slimmable:true,
+            meta:blocked?[]:[`${ini.length?`${ini.length} go-live${ini.length!==1?'s':''} · `:''}${td.length} planned · ${pts([...ini,...td])} pts`],
+            milestones:msIn(`${k}-01`,lastDay(k)).map(toMs),cards:[...ini.map(en=>toCard(en)),...td.map(en=>toCard(en,{quarter:true}))]}
+        })]
+      const range=`${quarters[0].label} - ${quarters[3].label}`
+      const who=ALL?'All teams':team,wtl=wtF==='all'?'All work':(WT_LABEL as any)[wtF]
+      await exportPlanningPptx({title:`Planning · ${range}`,subtitle:`${who} · ${wtl} · exported ${new Date().toLocaleDateString('en-US',{month:'short',day:'numeric',year:'numeric'})}`,
+        quarters:qCols,releases:rCols,fileName:`Planning ${range}${ALL?'':' '+shortOf(team)}`})
+    }catch(e:any){alert('Failed to export: '+(e?.message||e))}
+    setExporting(false)
+  }
+
   return(
     <div style={{flex:1,display:'flex',flexDirection:'column',minWidth:0,minHeight:0}}>
       <div style={{display:'flex',alignItems:'center',gap:8,padding:'7px 16px',borderBottom:'1px solid #243447',background:'#162436',flexWrap:'wrap' as const}}>
@@ -507,6 +546,8 @@ export function QuarterPlanner({items,setItems,projects,setProjects,epics=[],set
           <span style={{color:KIND_CLR.story}}>▪ Story</span><span style={{color:KIND_CLR.milestone}}>◇ Milestone</span>
         </span>
         <button onClick={()=>setMgr(true)} style={btn}>📦 Release dates</button>
+        <button onClick={exportPpt} disabled={exporting} title="Download both views (quarters and releases) as PowerPoint, as shown: same team, work type and quarters"
+          style={{...btn,color:'#E07B2A',border:'1px solid rgba(224,123,42,0.5)',fontWeight:700,opacity:exporting?0.6:1}}>{exporting?'Exporting…':'⬇ PPT'}</button>
       </div>
       <div style={{flex:1,display:'flex',minHeight:0,overflow:'auto'}}>
         {/* Sustain backlog */}
