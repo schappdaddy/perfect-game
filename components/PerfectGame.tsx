@@ -2422,26 +2422,34 @@ const sorted=items.filter(i=>!isItemDone(i)).sort((a,b)=>{
     return true
   })
   const filtered=seg==='all'?preSeg:preSeg.filter(i=>wtOf(i)===seg)
-  const segCount=(k:string)=>k==='all'?preSeg.length:preSeg.filter(i=>wtOf(i)===k).length
-  // Effort-weighted split of open work in the current filters, against the sustain share
-  const segPts:any={new:0,sustain:0}
-  preSeg.filter(i=>!ITEM_TERMINAL.includes(i.status)).forEach(i=>{segPts[capacityShare(wtOf(i))]+=EFFORT_POINTS[i.effort]??2})
-  const segTotal=segPts.new+segPts.sustain
-  const segNewPct=segTotal?Math.round(segPts.new/segTotal*100):null
 
   // Epics shown alongside stories, with the same filters (flagged applies only to stories, so
   // it hides epics), in epic rank order
   const epicProjName=(e:any)=>epicProject(e,projects)?.name||''
   const epicRankSort=(a:any,b:any)=>(a.manual_rank??1e9)-(b.manual_rank??1e9)||(PRIORITY_ORDER[a.priority]??4)-(PRIORITY_ORDER[b.priority]??4)||epicProjName(a).localeCompare(epicProjName(b))||(a.sort_order??0)-(b.sort_order??0)
-  const visibleEpics=kind==='stories'||sf||fep==='__none'?[]
+  // Open epics in the current filters, before the work type tab (the tab counts include them)
+  const preSegEpics=kind==='stories'||sf||fep==='__none'?[]
     :(epics as any[]).filter(e=>spaceOf(e)===space&&!ITEM_TERMINAL.includes(e.status)
       &&(ft==='All'||e.team===ft)&&(fp==='All'||e.priority===fp)&&(fst==='All'||e.status===fst)&&(fef==='All'||e.effort===fef)
       &&(fs==='All'||e.swimlane===fs)&&(frt==='All'||e.request_type===frt)&&(frg==='All'||e.region===frg)&&(fvn==='All'||e.vendor===fvn)
       &&(frl==='All'||(frl==='__none'?!e.release_month:e.release_month===frl))
       &&(fpp==='All'||epicProjName(e)===fpp)&&(fep==='All'||fep===e.id)
-      &&(seg==='all'||epicWorkType(e,projects)===seg)
       &&(!srch||e.name.toLowerCase().includes(srch.toLowerCase())))
       .sort(epicRankSort)
+  const visibleEpics=seg==='all'?preSegEpics:preSegEpics.filter(e=>epicWorkType(e,projects)===seg)
+  // Tab counts: open stories and open epics in the current filters (done stories don't count)
+  const segCount=(k:string)=>{
+    const st=preSeg.filter(i=>!ITEM_TERMINAL.includes(i.status)&&(k==='all'||wtOf(i)===k)).length
+    const ep=preSegEpics.filter(e=>k==='all'||epicWorkType(e,projects)===k).length
+    return st+ep
+  }
+  // Effort-weighted split of open work in the current filters (stories, plus epics with no open
+  // stories counted by their own effort), against the sustain share
+  const segPts:any={new:0,sustain:0}
+  preSeg.filter(i=>!ITEM_TERMINAL.includes(i.status)).forEach(i=>{segPts[capacityShare(wtOf(i))]+=EFFORT_POINTS[i.effort]??2})
+  preSegEpics.filter(e=>!(items as any[]).some(i=>i.epic_id===e.id&&!ITEM_TERMINAL.includes(i.status))).forEach(e=>{segPts[capacityShare(epicWorkType(e,projects))]+=EFFORT_POINTS[e.effort]??2})
+  const segTotal=segPts.new+segPts.sustain
+  const segNewPct=segTotal?Math.round(segPts.new/segTotal*100):null
   // Rank an epic at a position (1 = top) among the open epics, renumbering the rest
   async function rankEpic(epic:any,pos:number){
     const list=(epics as any[]).filter(e=>spaceOf(e)===space&&!ITEM_TERMINAL.includes(e.status)&&e.id!==epic.id).sort(epicRankSort)
