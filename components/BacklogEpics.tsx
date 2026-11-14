@@ -1,7 +1,7 @@
 'use client'
 import { useState } from 'react'
 import { supabase } from '../lib/supabase'
-import { ReleaseSelect, releaseText, fmtMonthKey, releaseOptions } from './Releases'
+import { ReleaseSelect, QuarterSelect, releaseText, fmtMonthKey, releaseOptions } from './Releases'
 import { InlineSelect, InlineText, InlineDate } from './InlineEdit'
 import { WORK_TYPE_KEYS, WT_LABEL, WorkTag, isWorkType, workTypeOfProject } from './WorkTypes'
 
@@ -196,8 +196,12 @@ export function EpicPanel({epic,projects,items,setItems,setEpics,statusOpts,prio
           <div><div style={LABEL}>REGION</div>{sel('region',opts.regions||[],'—')}</div>
           <div><div style={LABEL}>VENDOR</div>{sel('vendor',opts.vendors||[],'—')}</div>
         </div>
-        <div><div style={LABEL}>RELEASE</div>
-          <ReleaseSelect value={epic.release_month} releases={releases} onChange={(v:any)=>upd({release_month:v})} style={{...INPUT,cursor:'pointer'}}/></div>
+        <div style={{display:'flex',gap:8}}>
+          <div style={{flex:1}}><div style={LABEL}>QUARTER</div>
+            <QuarterSelect value={epic.plan_quarter} onChange={(v:any)=>upd({plan_quarter:v})} style={{...INPUT,cursor:'pointer'}}/></div>
+          <div style={{flex:1}}><div style={LABEL}>RELEASE</div>
+            <ReleaseSelect value={epic.release_month} releases={releases} onChange={(v:any)=>upd({release_month:v})} style={{...INPUT,cursor:'pointer'}}/></div>
+        </div>
         <div><div style={LABEL}>WORK TYPE</div>
           <select value={epic.work_type||''} onChange={e=>upd({work_type:e.target.value||null})} style={{...INPUT,cursor:'pointer'}}>
             <option value="">Automatic: {WT_LABEL[epicWorkType({...epic,work_type:null},projects) as 'new']}{pr?' (from initiative)':''}</option>

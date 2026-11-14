@@ -8,7 +8,7 @@ import { DependencyLayer, DepHandle, createDependency, deleteDependency, depKey 
 import { InlineSelect, InlineText, InlineDate, InlineEditStyles } from './InlineEdit'
 import { MilestoneTypeSelect } from './MilestoneTypes'
 import { WORK_TYPE_KEYS, WT_LABEL, WT_COLOR, WorkTag, isWorkType, workTypeOfProject, capacityShare, REQUEST_TYPES } from './WorkTypes'
-import { QuarterPlanner, ReleaseCalendar, ReleaseSelect, ReleasesManager, releaseOptions, releaseOf, releaseText, fmtMonthKey } from './Releases'
+import { QuarterPlanner, ReleaseCalendar, ReleaseSelect, QuarterSelect, ReleasesManager, releaseOptions, releaseOf, releaseText, fmtMonthKey } from './Releases'
 import { EpicRow, EpicPanel, epicProject, epicWorkType, convertStoryToEpic, convertEpicToStory } from './BacklogEpics'
 
 const T = {
@@ -3040,10 +3040,17 @@ const sorted=items.filter(i=>!isItemDone(i)).sort((a,b)=>{
                   </div>
                 )
               })()}
-              <div>
-                <div style={{fontSize:11,color:'#7A8FA6',marginBottom:4,letterSpacing:0.5}}>RELEASE</div>
-                <ReleaseSelect value={selected.release_month} releases={releases} onChange={(v:any)=>upd(selected.id,'release_month',v)}
-                  style={{width:'100%',background:'#1E3048',color:'#F4F6F8',border:'1px solid #243447',borderRadius:6,padding:'7px 10px',fontSize:13,cursor:'pointer'}}/>
+              <div style={{display:'flex',gap:8}}>
+                <div style={{flex:1}} title="The quarter it's worked in. Plan on Backlog › Planning to also file tech debt under the quarter's Tech Debt initiative.">
+                  <div style={{fontSize:11,color:'#7A8FA6',marginBottom:4,letterSpacing:0.5}}>QUARTER</div>
+                  <QuarterSelect value={selected.plan_quarter} onChange={(v:any)=>upd(selected.id,'plan_quarter',v)}
+                    style={{width:'100%',background:'#1E3048',color:'#F4F6F8',border:'1px solid #243447',borderRadius:6,padding:'7px 10px',fontSize:13,cursor:'pointer'}}/>
+                </div>
+                <div style={{flex:1}}>
+                  <div style={{fontSize:11,color:'#7A8FA6',marginBottom:4,letterSpacing:0.5}}>RELEASE</div>
+                  <ReleaseSelect value={selected.release_month} releases={releases} onChange={(v:any)=>upd(selected.id,'release_month',v)}
+                    style={{width:'100%',background:'#1E3048',color:'#F4F6F8',border:'1px solid #243447',borderRadius:6,padding:'7px 10px',fontSize:13,cursor:'pointer'}}/>
+                </div>
               </div>
               {space==='work'&&(()=>{
                 const proj=projects.find((p:any)=>p.name===selected.parent_project)
