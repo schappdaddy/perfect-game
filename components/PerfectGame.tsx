@@ -6,6 +6,7 @@ import StrategyTab from './StrategyTab'
 import { EpicsSection } from './Epics'
 import { DependencyLayer, DepHandle, createDependency, deleteDependency, depKey } from './DependencyLayer'
 import { InlineSelect, InlineText, InlineDate, InlineEditStyles } from './InlineEdit'
+import { MilestoneTypeSelect } from './MilestoneTypes'
 import { QuarterPlanner, ReleaseCalendar, ReleaseSelect, ReleasesManager, releaseOptions, releaseOf, releaseText, fmtMonthKey } from './Releases'
 import { EpicRow, EpicPanel, epicProject, epicWorkType, convertStoryToEpic, convertEpicToStory } from './BacklogEpics'
 
@@ -29,7 +30,6 @@ const TEAMS=['Consumer Experience','Operational Efficiency']
 const EFFORTS=['S','M','L','XL']
 const EFFORT_ALLOC:any={S:25,M:50,L:75,XL:100} // default per-person allocation % this project's size implies
 const REQUEST_TYPES=['Bug','Tech Debt','Enhancement','Strategic Initiative','Business Request','Testing']
-const MILESTONE_TYPES_G=['Milestone','Go-Live','Deadline','Review','Release','Code Freeze','UAT','Kickoff']
 const SWIMLANES=['POS','Pricing','Tax','Loyalty','WFM','Inventory','Reporting','SafeSize','Product','Clienteling','Integrations']
 const PRIORITY_ORDER={P1:0,P2:1,P3:2,P4:3,Backlog:4}
 const RAG_COLORS={Green:'#27AE60',Amber:'#D4820A',Red:'#C0392B'}
@@ -1031,7 +1031,6 @@ function ProjectDetail({project,items,setItems,projects,setProjects,milestones,s
   const [savingMilestone,setSavingMilestone]=useState(false)
   const [milestoneForm,setMilestoneForm]=useState({name:'',date:'',type:'Milestone',color:'#C8973A',notes:'',completed:false})
   const COLORS=['#C0392B','#D4820A','#2E86AB','#27AE60','#8E44AD','#E74C3C','#C8973A','#1ABC9C','#2C3E50','#E67E22']
-  const MILESTONE_TYPES=['Milestone','Go-Live','Deadline','Review','Release','Code Freeze','UAT','Kickoff']
   const swimlaneOpts=[...new Set([...SWIMLANES,...items.map(i=>i.swimlane).filter(Boolean)])]
 
   const projectItems=items.filter(i=>i.parent_project===project.name).sort((a,b)=>{
@@ -1278,10 +1277,8 @@ function ProjectDetail({project,items,setItems,projects,setProjects,milestones,s
                   </div>
                   <div>
                     <div style={{fontSize:10,color:'#7A8FA6',marginBottom:3}}>Type</div>
-                    <select value={milestoneForm.type} onChange={e=>setMilestoneForm(p=>({...p,type:e.target.value}))}
-                      style={{width:'100%',background:'#1E3048',color:'#F4F6F8',border:'1px solid #243447',borderRadius:5,padding:'5px 6px',fontSize:12}}>
-                      {MILESTONE_TYPES.map(t=><option key={t}>{t}</option>)}
-                    </select>
+                    <MilestoneTypeSelect value={milestoneForm.type} onChange={v=>setMilestoneForm(p=>({...p,type:v}))}
+                      style={{width:'100%',background:'#1E3048',color:'#F4F6F8',border:'1px solid #243447',borderRadius:5,padding:'5px 6px',fontSize:12}}/>
                   </div>
                 </div>
                 <div>
@@ -1326,10 +1323,8 @@ function ProjectDetail({project,items,setItems,projects,setProjects,milestones,s
                         style={{flex:1,background:'#0F1C2B',border:'1px solid #243447',borderRadius:5,color:'#F4F6F8',fontSize:12,padding:'4px 8px'}}/>
                       <input type="date" value={editMs.date} onChange={e=>setEditMs((p:any)=>({...p,date:e.target.value}))}
                         style={{background:'#0F1C2B',border:'1px solid #243447',borderRadius:5,color:'#F4F6F8',fontSize:11,padding:'4px 6px'}}/>
-                      <select value={editMs.type} onChange={e=>setEditMs((p:any)=>({...p,type:e.target.value}))}
-                        style={{background:'#0F1C2B',border:'1px solid #243447',borderRadius:5,color:'#F4F6F8',fontSize:11,padding:'4px 4px'}}>
-                        {MILESTONE_TYPES_G.map(t=><option key={t} value={t}>{t}</option>)}
-                      </select>
+                      <MilestoneTypeSelect value={editMs.type} onChange={v=>setEditMs((p:any)=>({...p,type:v}))}
+                        style={{background:'#0F1C2B',border:'1px solid #243447',borderRadius:5,color:'#F4F6F8',fontSize:11,padding:'4px 4px'}}/>
                     </div>
                     <div style={{display:'flex',gap:6,alignItems:'center'}}>
                       <input value={editMs.notes||''} onChange={e=>setEditMs((p:any)=>({...p,notes:e.target.value}))} placeholder="Notes..."
@@ -1610,7 +1605,6 @@ function Projects({items,setItems,projects,setProjects,milestones,setMilestones,
   const [milestoneForm,setMilestoneForm]=useState({name:'',date:'',type:'Milestone',color:'#C8973A',notes:'',completed:false})
   const [savingMilestone,setSavingMilestone]=useState(false)
   const COLORS=['#C0392B','#D4820A','#2E86AB','#27AE60','#8E44AD','#E74C3C','#C8973A','#1ABC9C','#2C3E50','#E67E22']
-  const MILESTONE_TYPES=['Milestone','Go-Live','Deadline','Review','Release','Code Freeze','UAT','Kickoff']
   const empty={name:'',description:'',priority:'P3',status:'Planning',rag:'Green',team:'Consumer Experience',effort:'',start_date:'',end_date:'',color:'#2E86AB',ongoing:false}
   const [form,setForm]=useState({...empty})
   
@@ -6227,10 +6221,8 @@ function Desk({items,setItems,projects,setProjects,milestones,setMilestones,task
                       style={{flex:1,background:'#0D1B2A',border:'1px solid #243447',borderRadius:4,color:'#F4F6F8',fontSize:11,padding:'3px 6px'}}/>
                     <input type="date" value={msEdit.date} onChange={e=>setMsEdit((p:any)=>({...p,date:e.target.value}))}
                       style={{background:'#0D1B2A',border:'1px solid #243447',borderRadius:4,color:'#F4F6F8',fontSize:11,padding:'3px 6px'}}/>
-                    <select value={msEdit.type} onChange={e=>setMsEdit((p:any)=>({...p,type:e.target.value}))}
-                      style={{background:'#0D1B2A',border:'1px solid #243447',borderRadius:4,color:'#F4F6F8',fontSize:11,padding:'3px 4px'}}>
-                      {MILESTONE_TYPES_G.map(t=><option key={t} value={t}>{t}</option>)}
-                    </select>
+                    <MilestoneTypeSelect value={msEdit.type} onChange={v=>setMsEdit((p:any)=>({...p,type:v}))}
+                      style={{background:'#0D1B2A',border:'1px solid #243447',borderRadius:4,color:'#F4F6F8',fontSize:11,padding:'3px 4px'}}/>
                     <button onClick={()=>setMsEditId(null)} style={{background:'none',border:'1px solid #243447',borderRadius:4,color:'#7A8FA6',fontSize:10,padding:'2px 7px',cursor:'pointer'}}>Cancel</button>
                     <button onClick={saveMsEdit} disabled={!msEdit.name.trim()||!msEdit.date} style={{background:'#C8973A',border:'none',borderRadius:4,color:'#0D1B2A',fontSize:10,fontWeight:700,padding:'2px 9px',cursor:'pointer',opacity:!msEdit.name.trim()||!msEdit.date?0.5:1}}>Save</button>
                   </div>

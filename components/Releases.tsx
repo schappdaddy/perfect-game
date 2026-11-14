@@ -1,6 +1,7 @@
 'use client'
 import { useState } from 'react'
 import { supabase } from '../lib/supabase'
+import { MilestoneTypeSelect, useMilestoneTypes, typeColor } from './MilestoneTypes'
 
 // Monthly releases and quarterly sustain planning.
 // A release is a month ('2026-11'). Each month can have a release date, or be marked as
@@ -129,7 +130,8 @@ export function QuarterPlanner({items,setItems,projects,setProjects,epics=[],set
   const [poolAll,setPoolAll]=useState(false) // also include sustain work inside new (non-sustain) initiatives
   const [poolTeam,setPoolTeam]=useState(true)
   const [src,setSrcS]=useState<'td'|'init'>(()=>pref('pg_plan_src','td')) // what the left panel lists
-  const [msForm,setMsForm]=useState<any>(null) // {col, project_id, name, date, min, max}
+  const [msForm,setMsForm]=useState<any>(null) // {col, project_id, name, type, date, min, max}
+  const mTypes=useMilestoneTypes()
   const [openInits,setOpenInits]=useState<Record<string,boolean>>({})
   const setSrc=(v:any)=>{setSrcS(v);save('pg_plan_src',v)}
   const [dragId,setDragId]=useState<string|null>(null) // 'item:<id>' | 'epic:<id>'
@@ -322,11 +324,16 @@ export function QuarterPlanner({items,setItems,projects,setProjects,epics=[],set
   async function addMilestone(){
     const f=msForm
     if(!f?.project_id||!f.name?.trim()||!f.date){alert('Pick an initiative, a name and a date.');return}
-    const{data,error}=await supabase.from('milestones').insert({project_id:f.project_id,name:f.name.trim(),date:f.date,type:'milestone',completed:false,
+    const{data,error}=await supabase.from('milestones').insert({project_id:f.project_id,name:f.name.trim(),date:f.date,type:f.type||'Milestone',completed:false,
       sort_order:(milestones as any[]).filter(m=>m.project_id===f.project_id).length,space:'work'}).select().single()
     if(error){alert('Failed to add the milestone: '+error.message);return}
     if(data)setMilestones?.((prev:any[])=>[...prev,data])
     setMsForm(null)
+  }
+  async function setMilestoneType(m:any,type:string){
+    setMilestones?.((prev:any[])=>prev.map(x=>x.id===m.id?{...x,type}:x))
+    const{error}=await supabase.from('milestones').update({type}).eq('id',m.id)
+    if(error)alert('Failed to update the milestone: '+error.message)
   }
   async function toggleMilestone(m:any){
     setMilestones?.((prev:any[])=>prev.map(x=>x.id===m.id?{...x,completed:!m.completed}:x))
@@ -341,14 +348,16 @@ export function QuarterPlanner({items,setItems,projects,setProjects,epics=[],set
       <div style={{display:'flex',flexDirection:'column',gap:4,margin:'8px 8px 0',padding:'6px 8px',borderRadius:6,background:'rgba(176,124,224,0.10)',border:`1px solid rgba(176,124,224,0.45)`,borderLeft:`3px solid ${KIND_CLR.milestone}`}}>
         <div style={{display:'flex',alignItems:'center',gap:6}}>
           <span style={{fontSize:9.5,fontWeight:800,color:KIND_CLR.milestone,letterSpacing:1,whiteSpace:'nowrap' as const}}>◇ MILESTONES{list.length?` · ${list.length}`:''}</span>
-          {!f&&setMilestones&&<button onClick={()=>setMsForm({col,project_id:'',name:'',date:a,min:a,max:b})} style={{marginLeft:'auto',background:'none',border:`1px solid rgba(176,124,224,0.5)`,borderRadius:4,color:KIND_CLR.milestone,fontSize:10,fontWeight:700,padding:'0 6px',cursor:'pointer',whiteSpace:'nowrap' as const}}>+ Add</button>}
+          {!f&&setMilestones&&<button onClick={()=>setMsForm({col,project_id:'',name:'',type:'Milestone',date:a,min:a,max:b})} style={{marginLeft:'auto',background:'none',border:`1px solid rgba(176,124,224,0.5)`,borderRadius:4,color:KIND_CLR.milestone,fontSize:10,fontWeight:700,padding:'0 6px',cursor:'pointer',whiteSpace:'nowrap' as const}}>+ Add</button>}
         </div>
         {!list.length&&!f&&<div style={{fontSize:10,color:'#7A8FA6',fontStyle:'italic'}}>None in this {col.startsWith('q:')?'quarter':'month'}.</div>}
         {list.map(m=>{const p=(projects as any[]).find(x=>x.id===m.project_id);const[,mm,dd]=m.date.split('-').map(Number);return(
           <div key={m.id} title={`${m.name} · ${m.date}${p?' · '+p.name:''}${m.notes?'\n'+m.notes:''}\nClick to mark ${m.completed?'not done':'done'}`} onClick={()=>toggleMilestone(m)}
             style={{display:'flex',alignItems:'center',gap:5,fontSize:10.5,color:m.completed?'#7A8FA6':'#F4F6F8',cursor:'pointer',textDecoration:m.completed?'line-through':'none'}}>
-            <span style={{width:8,height:8,transform:'rotate(45deg)',background:m.completed?'#27AE60':KIND_CLR.milestone,flexShrink:0}}/>
+            <span style={{width:8,height:8,transform:'rotate(45deg)',background:m.completed?'#27AE60':typeColor(mTypes,m.type),flexShrink:0}}/>
             <span style={{fontWeight:700,color:KIND_CLR.milestone,flexShrink:0}}>{MONTHS[mm-1]} {dd}</span>
+            <MilestoneTypeSelect value={m.type} onChange={v=>setMilestoneType(m,v)}
+              style={{flexShrink:0,background:'transparent',color:typeColor(mTypes,m.type),border:`1px solid ${typeColor(mTypes,m.type)}`,borderRadius:10,fontSize:9.5,fontWeight:800,padding:'0 4px',cursor:'pointer',maxWidth:96}}/>
             {(()=>{const t=(projects as any[]).find(x=>x.id===m.project_id)?.team;return t?<TeamTag team={t}/>:null})()}
             <span style={{overflow:'hidden',textOverflow:'ellipsis',whiteSpace:'nowrap' as const}}>{m.name}{p?<span style={{color:'#7A8FA6'}}> · {p.name}</span>:''}</span>
           </div>
@@ -359,6 +368,7 @@ export function QuarterPlanner({items,setItems,projects,setProjects,epics=[],set
               <option value="">Initiative…</option>
               {msOptions.map(p=><option key={p.id} value={p.id}>{p.name}</option>)}
             </select>
+            <MilestoneTypeSelect value={f.type||'Milestone'} onChange={v=>setMsForm({...f,type:v})} style={{background:'#0F1C2B',border:'1px solid #243447',borderRadius:4,color:'#F4F6F8',fontSize:11,padding:'3px 4px'}}/>
             <input autoFocus value={f.name||''} placeholder="Milestone name" onChange={e=>setMsForm({...f,name:e.target.value})} onKeyDown={e=>{if(e.key==='Enter')addMilestone();if(e.key==='Escape')setMsForm(null)}}
               style={{background:'#0F1C2B',border:'1px solid #243447',borderRadius:4,color:'#F4F6F8',fontSize:11,padding:'3px 5px'}}/>
             <input type="date" value={f.date||''} min={f.min} max={f.max} onChange={e=>setMsForm({...f,date:e.target.value})} style={{background:'#0F1C2B',border:'1px solid #243447',borderRadius:4,color:'#F4F6F8',fontSize:11,padding:'3px 5px'}}/>
