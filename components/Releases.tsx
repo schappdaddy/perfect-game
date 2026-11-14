@@ -487,7 +487,7 @@ export function QuarterPlanner({items,setItems,projects,setProjects,epics=[],set
 
   return(
     <div style={{flex:1,display:'flex',flexDirection:'column',minWidth:0,minHeight:0}}>
-      <div style={{display:'flex',alignItems:'center',gap:8,padding:'10px 16px',borderBottom:'1px solid #243447',background:'#162436',flexWrap:'wrap' as const}}>
+      <div style={{display:'flex',alignItems:'center',gap:8,padding:'7px 16px',borderBottom:'1px solid #243447',background:'#162436',flexWrap:'wrap' as const}}>
         <div style={{display:'flex',border:'1px solid #243447',borderRadius:6,overflow:'hidden'}}>
           <button onClick={()=>setMode('quarters')} style={seg(mode==='quarters')} title="Which quarter the work is done in">🗓 Quarters</button>
           <button onClick={()=>setMode('releases')} style={seg(mode==='releases')} title="Which monthly release the work ships in">📦 Releases</button>
@@ -516,9 +516,10 @@ export function QuarterPlanner({items,setItems,projects,setProjects,epics=[],set
             ))}
           </div>}
           {src==='init'?(<>
-            <div style={{padding:'10px 12px',borderBottom:'1px solid #243447'}}>
-              <div style={{fontSize:11,fontWeight:800,color:'#C8973A',letterSpacing:1}}>INITIATIVE WORK · {inits.length}</div>
-              <div style={{fontSize:10.5,color:'#7A8FA6',margin:'3px 0 6px'}}>Open initiatives and their epics and stories not in a release yet. Drag an initiative (its go-live), an epic or a story onto a release, or onto a quarter to put it in that quarter&apos;s first open release. It sits in the quarter of its release; only the release changes, its dates stay with the initiative. Drag back here to take it out.</div>
+            <div style={{padding:'7px 12px',borderBottom:'1px solid #243447'}}>
+              <div title="Open initiatives and their epics and stories not in a release yet. Drag an initiative (its go-live), an epic or a story onto a release, or onto a quarter to put it in that quarter's first open release. Only the release changes; its dates stay with the initiative. Drag back here to take it out."
+                style={{fontSize:11,fontWeight:800,color:'#C8973A',letterSpacing:1,cursor:'help'}}>INITIATIVE WORK · {inits.length} <span style={{color:'#7A8FA6'}}>ⓘ</span></div>
+              <div style={{fontSize:10.5,color:'#7A8FA6',margin:'2px 0 4px'}}>Drag onto a release or a quarter.</div>
               {!ALL&&<label style={{display:'flex',gap:5,alignItems:'center',fontSize:10.5,color:'#7A8FA6',cursor:'pointer'}}><input type="checkbox" checked={poolTeam} onChange={e=>setPoolTeam(e.target.checked)} style={{accentColor:'#C8973A'}}/>Only {short} and unassigned</label>}
             </div>
             <div style={colBody}>
@@ -544,9 +545,10 @@ export function QuarterPlanner({items,setItems,projects,setProjects,epics=[],set
               {!inits.length&&empty('No open initiatives for this team.')}
             </div>
           </>):(<>
-          <div style={{padding:'10px 12px',borderBottom:'1px solid #243447'}}>
+          <div style={{padding:'7px 12px',borderBottom:'1px solid #243447'}}>
             <div style={{fontSize:11,fontWeight:800,color:'#8FA6BC',letterSpacing:1}}>BACKLOG{wtF!=='all'?` · ${(WT_LABEL as any)[wtF].toUpperCase()}`:''} · {poolEpics.length} epic{poolEpics.length!==1?'s':''} · {poolItems.length} stor{poolItems.length===1?'y':'ies'}</div>
-            <div style={{fontSize:10.5,color:'#7A8FA6',margin:'3px 0 6px'}}>Open epics and stories not in a quarter yet, in priority order. Drag to reorder, into a quarter, or straight into a release. Drag back here to unplan. Work inside an initiative is under Initiative work.</div>
+            <div title="Open epics and stories not in a quarter yet, in priority order. Drag to reorder, into a quarter, or straight into a release. Drag back here to unplan. Work inside an initiative is under Initiative work."
+              style={{fontSize:10.5,color:'#7A8FA6',margin:'2px 0 4px',cursor:'help'}}>In priority order. Drag to reorder or plan. <span>ⓘ</span></div>
             {!ALL&&<label style={{display:'flex',gap:5,alignItems:'center',fontSize:10.5,color:'#7A8FA6',cursor:'pointer'}}><input type="checkbox" checked={poolTeam} onChange={e=>setPoolTeam(e.target.checked)} style={{accentColor:'#C8973A'}}/>Only {short} and unassigned</label>}
             <label style={{display:'flex',gap:5,alignItems:'center',fontSize:10.5,color:'#7A8FA6',cursor:'pointer'}}><input type="checkbox" checked={poolAll} onChange={e=>setPoolAll(e.target.checked)} style={{accentColor:'#C8973A'}}/>Also include work inside new initiatives</label>
           </div>
