@@ -2093,7 +2093,10 @@ function Backlog({items,setItems,projects,setProjects,space,ccrs=[],ccrItems=[],
   const [dragEpic,setDragEpic]=useState<any>(null) // epic being dragged to a new rank
   const [overEpic,setOverEpic]=useState<any>(null)
   // List, or quarter planning for tech debt / OpEx
+  const [moreF,setMoreFS]=useState<boolean>(()=>{try{return localStorage.getItem('pg_backlog_more')==='1'}catch{return false}})
+  const setMoreF=(v:boolean)=>{setMoreFS(v);try{localStorage.setItem('pg_backlog_more',v?'1':'0')}catch{}}
   const [bview,setBviewState]=useState<string>(()=>{try{return localStorage.getItem('pg_backlog_view')||'list'}catch{return 'list'}})
+  const planning=bview==='plan'&&space==='work'
   const setBview=(v:string)=>{setBviewState(v);try{localStorage.setItem('pg_backlog_view',v)}catch{}}
   const [frl,setFrl]=useState('All') // release filter: 'All' | '__none' | month
   const [relMgr,setRelMgr]=useState(false)
@@ -2736,8 +2739,8 @@ const sorted=items.filter(i=>!isItemDone(i)).sort((a,b)=>{
           </div>
         </div>
       )}
-      {space==='work'&&<div style={{display:'flex',alignItems:'center',gap:4,padding:'8px 20px 0',background:'#162436',flexWrap:'wrap' as const}}>
-        {[{key:'all',label:'All'},...WORK_TYPES].map(t=>(
+      <div style={{display:'flex',alignItems:'center',gap:4,padding:'8px 20px 0',background:'#162436',flexWrap:'wrap' as const}}>
+        {space==='work'&&<>{[{key:'all',label:'All'},...WORK_TYPES].map(t=>(
           <button key={t.key} onClick={()=>setSeg(t.key)}
             style={{background:seg===t.key?'#0D1B2A':'transparent',color:seg===t.key?'#F4F6F8':'#7A8FA6',border:'1px solid '+(seg===t.key?'#243447':'transparent'),borderBottom:seg===t.key?'2px solid '+(t.key==='sustain'?'#8FA6BC':t.key==='saas'?'#16A085':'#C8973A'):'2px solid transparent',borderRadius:'6px 6px 0 0',padding:'6px 14px',fontSize:12,fontWeight:seg===t.key?700:400,cursor:'pointer'}}>
             {t.label} <span style={{fontSize:10,color:'#7A8FA6',marginLeft:4}}>{segCount(t.key)}</span>
@@ -2749,37 +2752,62 @@ const sorted=items.filter(i=>!isItemDone(i)).sort((a,b)=>{
               style={{background:bview===k?'#C8973A':'#1E3048',color:bview===k?'#0D1B2A':'#C8C8D4',border:'none',fontSize:11,fontWeight:700,padding:'5px 10px',cursor:'pointer'}}>{l}</button>
           ))}
         </div>
-        <button onClick={()=>setRelMgr(true)} style={{background:'none',border:'1px solid #243447',borderRadius:6,color:'#C8C8D4',fontSize:11,padding:'5px 10px',cursor:'pointer',marginLeft:6,marginBottom:4}}>📦 Releases</button>
-        {bview!=='plan'&&segNewPct!=null&&(()=>{
-          const target=100-sustainPct,off=Math.abs(segNewPct-target)>10
-          return(
-            <div title={`Open items in the current filters, weighted by effort (S=1, M=2, L=3, XL=5). Target: ${target}% new initiatives, ${sustainPct}% sustain.`}
-              style={{marginLeft:'auto',display:'flex',alignItems:'center',gap:8,fontSize:11,color:'#7A8FA6',padding:'0 0 4px'}}>
-              <span>Effort split</span>
-              <div style={{position:'relative',width:160,height:8,borderRadius:4,background:'#4A5D72',overflow:'hidden'}}>
-                <div style={{width:segNewPct+'%',height:'100%',background:'#C8973A'}}/>
-                <div style={{position:'absolute',left:target+'%',top:-2,bottom:-2,width:2,background:'#F4F6F8'}}/>
-              </div>
-              <span style={{color:off?'#D4820A':'#C8C8D4',fontWeight:700,fontVariantNumeric:'tabular-nums'}}>{segNewPct} / {100-segNewPct}</span>
-              <span>target {target} / {sustainPct}</span>
-            </div>
-          )
-        })()}
-      </div>}
-      <div style={{display:'flex',gap:8,padding:'10px 20px',borderBottom:'1px solid #243447',flexWrap:'wrap',alignItems:'center',background:'#162436'}}>
+        {!planning&&<button onClick={()=>setRelMgr(true)} style={{background:'none',border:'1px solid #243447',borderRadius:6,color:'#C8C8D4',fontSize:11,padding:'5px 10px',cursor:'pointer',marginLeft:6,marginBottom:4}}>📦 Releases</button>}</>}
+        <div style={{display:'flex',gap:6,marginLeft:'auto',marginBottom:4,flexWrap:'wrap' as const}}>
+          {!planning&&<><button onClick={exportExcel} title="Export current view to Excel in ranked order" style={{...sel,color:'#27AE60',border:'1px solid rgba(39,174,96,0.4)'}}>⬇ Excel</button>
+          <button onClick={()=>{setJrOpen(true);setJrRows([]);setJrErr('');setJrDone('')}} title="Import CSV — Jira exports or hand-built files; matches by RTL ID or Jira Key to update, inserts the rest" style={{...sel,color:'#5DADE2',border:'1px solid rgba(93,173,226,0.4)'}}>⬆ Import CSV</button>
+          <button onClick={()=>setSac(true)} style={{...sel,color:'#7A8FA6'}}>+ Column</button></>}
+          {setEpics&&<button onClick={addEpic} title={fpp!=='All'?`New epic in ${fpp}`:'New epic (set its initiative in the panel)'} style={{...sel,color:'#E07B2A',border:'1px solid rgba(224,123,42,0.5)',fontWeight:700}}>+ Epic</button>}
+          <button onClick={()=>setAi(true)} style={{background:'#C8973A',color:'#0D1B2A',border:'none',borderRadius:6,padding:'5px 14px',fontSize:12,fontWeight:700,cursor:'pointer'}}>+ Add Item</button>
+        </div>
+      </div>
+      {!planning&&<div style={{display:'flex',flexDirection:'column',gap:6,padding:'8px 20px',borderBottom:'1px solid #243447',background:'#162436'}}>
+      <div style={{display:'flex',gap:6,flexWrap:'wrap',alignItems:'center'}}>
         <input placeholder="Search..." value={srch} onChange={e=>setSrch(e.target.value)} style={{...sel,width:160}}/>
-        <select value={ft} onChange={e=>setFt(e.target.value)} style={sel}><option value="All">All Teams</option>{TEAMS.map(t=><option key={t}>{t}</option>)}</select>
+        <select value={ft} onChange={e=>setFt(e.target.value)} style={{...sel,maxWidth:150}}><option value="All">All Teams</option>{TEAMS.map(t=><option key={t}>{t}</option>)}</select>
         <select value={fp} onChange={e=>setFp(e.target.value)} style={sel}><option value="All">All Priorities</option>{PRIORITIES.map(p=><option key={p}>{p}</option>)}</select>
-        <select value={fs} onChange={e=>setFs(e.target.value)} style={sel}><option value="All">All Swimlanes</option>{swimlaneOpts.map(s=><option key={s}>{s}</option>)}</select>
-        <select value={fst} onChange={e=>setFst(e.target.value)} style={sel}><option value="All">All Statuses</option>{statusOpts.map(s=><option key={s}>{s}</option>)}</select>
-        <select value={fpp} onChange={e=>{setFpp(e.target.value);setFep('All')}} style={sel}><option value="All">All Initiatives</option>{[...new Set(items.map(i=>i.parent_project).filter(Boolean))].sort().map(p=><option key={p}>{p}</option>)}</select>
-        <select value={fep} onChange={e=>setFep(e.target.value)} style={sel}>
+        <select value={fst} onChange={e=>setFst(e.target.value)} style={{...sel,maxWidth:150}}><option value="All">All Statuses</option>{statusOpts.map(s=><option key={s}>{s}</option>)}</select>
+        <select value={fpp} onChange={e=>{setFpp(e.target.value);setFep('All')}} style={{...sel,maxWidth:170}}><option value="All">All Initiatives</option>{[...new Set(items.map(i=>i.parent_project).filter(Boolean))].sort().map(p=><option key={p}>{p}</option>)}</select>
+        <select value={fep} onChange={e=>setFep(e.target.value)} style={{...sel,maxWidth:170}}>
           <option value="All">All Epics</option>
           <option value="__none">No epic</option>
           {(epics as any[]).filter(e=>spaceOf(e)===space).map(e=>({e,pn:projects.find((p:any)=>p.id===e.project_id)?.name||''})).filter(({e,pn})=>(fpp==='All'||pn===fpp)&&(!e.project_id||pn))
             .sort((a,b)=>(a.pn||'~').localeCompare(b.pn||'~')||(a.e.sort_order??0)-(b.e.sort_order??0))
             .map(({e,pn})=><option key={e.id} value={e.id}>{fpp==='All'?`${pn||'No initiative'} › ${e.name}`:e.name}</option>)}
         </select>
+        <button onClick={()=>setSf(f=>!f)} style={{...sel,background:sf?'#7D2D00':'#1E3048',color:sf?'#FF8C42':'#7A8FA6',border:`1px solid ${sf?'#FF8C42':'#243447'}`}}>
+          🚩{fc>0&&<span style={{background:'#C8973A',color:'#0D1B2A',borderRadius:10,padding:'0 5px',fontSize:10,fontWeight:700,marginLeft:3}}>{fc}</span>}
+        </button>
+        {(()=>{const n=[fs,frt,frg,fvn,frl,fef].filter(v=>v!=='All').length+(groupBy!=='none'?1:0)+(kind!=='all'?1:0);return(
+          <button onClick={()=>setMoreF(!moreF)} title="Swimlane, type, region, vendor, release, effort, grouping" style={{...sel,color:n?'#E07B2A':'#C8C8D4',border:`1px solid ${n?'#E07B2A':'#243447'}`,fontWeight:700}}>
+            {moreF?'▴':'▾'} More filters{n?` · ${n}`:''}</button>)})()}
+        {!planning&&segNewPct!=null&&(()=>{
+          const target=100-sustainPct,off=Math.abs(segNewPct-target)>10
+          return(
+            <div title={`Open items in the current filters, weighted by effort (S=1, M=2, L=3, XL=5). Target: ${target}% new initiatives, ${sustainPct}% sustain.`}
+              style={{marginLeft:'auto',display:'flex',alignItems:'center',gap:6,fontSize:11,color:'#7A8FA6',padding:0}}>
+              <span style={{whiteSpace:'nowrap' as const}}>New / Sustain</span>
+              <div style={{position:'relative',width:80,height:8,borderRadius:4,background:'#4A5D72',overflow:'hidden'}}>
+                <div style={{width:segNewPct+'%',height:'100%',background:'#C8973A'}}/>
+                <div style={{position:'absolute',left:target+'%',top:-2,bottom:-2,width:2,background:'#F4F6F8'}}/>
+              </div>
+              <span style={{color:off?'#D4820A':'#C8C8D4',fontWeight:700,fontVariantNumeric:'tabular-nums'}}>{segNewPct} / {100-segNewPct}</span>
+              <span style={{whiteSpace:'nowrap' as const}}>target {target}/{sustainPct}</span>
+            </div>
+          )
+        })()}
+      </div>
+      {moreF&&<div style={{display:'flex',gap:6,flexWrap:'wrap',alignItems:'center'}}>
+        <select value={fs} onChange={e=>setFs(e.target.value)} style={sel}><option value="All">All Swimlanes</option>{swimlaneOpts.map(s=><option key={s}>{s}</option>)}</select>
+        <select value={frt} onChange={e=>setFrt(e.target.value)} style={sel}><option value="All">All Types</option>{rtOpts.map(r=><option key={r}>{r}</option>)}</select>
+        <select value={frg} onChange={e=>setFrg(e.target.value)} style={sel}><option value="All">All Regions</option>{regionOpts.map(r=><option key={r}>{r}</option>)}</select>
+        <select value={fvn} onChange={e=>setFvn(e.target.value)} style={sel}><option value="All">All Vendors</option>{vendors.map(v=><option key={v}>{v}</option>)}</select>
+        <select value={frl} onChange={e=>setFrl(e.target.value)} style={{...sel,color:frl==='All'?undefined:'#5DADE2'}}>
+          <option value="All">All Releases</option>
+          <option value="__none">No release</option>
+          {[...new Set([...items.map((i:any)=>i.release_month),...(releases as any[]).filter((r:any)=>!r.no_release).map((r:any)=>r.month)].filter(Boolean))].sort().map((k:any)=><option key={k} value={k}>📦 {fmtMonthKey(k)} · {releaseText(releases,k)}</option>)}
+        </select>
+        <select value={fef} onChange={e=>setFef(e.target.value)} style={sel}><option value="All">All Efforts</option>{EFFORTS.map(e=><option key={e}>{e}</option>)}</select>
         <select value={groupBy} onChange={e=>setGroupBy(e.target.value)} title="Group the list by initiative, or by initiative and epic" style={{...sel,color:groupBy==='none'?'#7A8FA6':'#E07B2A',border:`1px solid ${groupBy==='none'?'#243447':'#E07B2A'}`}}>
           <option value="none">No grouping</option>
           <option value="project">Group by initiative</option>
@@ -2790,26 +2818,8 @@ const sorted=items.filter(i=>!isItemDone(i)).sort((a,b)=>{
           <option value="epics">Epics only</option>
           <option value="stories">Stories only</option>
         </select>
-        <select value={frt} onChange={e=>setFrt(e.target.value)} style={sel}><option value="All">All Types</option>{rtOpts.map(r=><option key={r}>{r}</option>)}</select>
-        <select value={frg} onChange={e=>setFrg(e.target.value)} style={sel}><option value="All">All Regions</option>{regionOpts.map(r=><option key={r}>{r}</option>)}</select>
-        <select value={fvn} onChange={e=>setFvn(e.target.value)} style={sel}><option value="All">All Vendors</option>{vendors.map(v=><option key={v}>{v}</option>)}</select>
-        <select value={frl} onChange={e=>setFrl(e.target.value)} style={{...sel,color:frl==='All'?undefined:'#5DADE2'}}>
-          <option value="All">All Releases</option>
-          <option value="__none">No release</option>
-          {[...new Set([...items.map((i:any)=>i.release_month),...(releases as any[]).filter((r:any)=>!r.no_release).map((r:any)=>r.month)].filter(Boolean))].sort().map((k:any)=><option key={k} value={k}>📦 {fmtMonthKey(k)} · {releaseText(releases,k)}</option>)}
-        </select>
-        <select value={fef} onChange={e=>setFef(e.target.value)} style={sel}><option value="All">All Efforts</option>{EFFORTS.map(e=><option key={e}>{e}</option>)}</select>
-        <button onClick={()=>setSf(f=>!f)} style={{...sel,background:sf?'#7D2D00':'#1E3048',color:sf?'#FF8C42':'#7A8FA6',border:`1px solid ${sf?'#FF8C42':'#243447'}`}}>
-          🚩{fc>0&&<span style={{background:'#C8973A',color:'#0D1B2A',borderRadius:10,padding:'0 5px',fontSize:10,fontWeight:700,marginLeft:3}}>{fc}</span>}
-        </button>
-        <div style={{marginLeft:'auto',display:'flex',gap:8}}>
-          <button onClick={exportExcel} title="Export current view to Excel in ranked order" style={{...sel,color:'#27AE60',border:'1px solid rgba(39,174,96,0.4)'}}>⬇ Excel</button>
-          <button onClick={()=>{setJrOpen(true);setJrRows([]);setJrErr('');setJrDone('')}} title="Import CSV — Jira exports or hand-built files; matches by RTL ID or Jira Key to update, inserts the rest" style={{...sel,color:'#5DADE2',border:'1px solid rgba(93,173,226,0.4)'}}>⬆ Import CSV</button>
-          <button onClick={()=>setSac(true)} style={{...sel,color:'#7A8FA6'}}>+ Column</button>
-          {setEpics&&<button onClick={addEpic} title={fpp!=='All'?`New epic in ${fpp}`:'New epic (set its initiative in the panel)'} style={{...sel,color:'#E07B2A',border:'1px solid rgba(224,123,42,0.5)',fontWeight:700}}>+ Epic</button>}
-          <button onClick={()=>setAi(true)} style={{background:'#C8973A',color:'#0D1B2A',border:'none',borderRadius:6,padding:'5px 14px',fontSize:12,fontWeight:700,cursor:'pointer'}}>+ Add Item</button>
-        </div>
-      </div>
+      </div>}
+      </div>}
 
       <div style={{display:'flex',flex:1,overflow:'hidden'}}>
         {bview==='plan'&&space==='work'?(
