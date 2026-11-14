@@ -2,6 +2,7 @@
 // screen), for the PowerPoint export. Mirrors the Strategy tab: each strategy's own placement
 // of projects (strategy_items) and its own roster once edited there, the same allocation
 // (StrategyBudget.computeAllocation) and the same report tables as StrategyReport.
+import { workTypeOfProject } from './WorkTypes'
 import { computeAllocation, slotted, roleName, rateFor, capexShare, SLOTS, SHARED_TEAM } from './StrategyBudget'
 
 const PROJECT_TERMINAL=['Complete','Cancelled','Done']
@@ -9,7 +10,7 @@ const pad=(n:number)=>String(n).padStart(2,'0')
 const daysIn=(y:number,m:number)=>new Date(y,m,0).getDate()
 const monthStartISO=(abs:number)=>{const y=Math.floor(abs/12),m=abs-y*12+1;return `${y}-${pad(m)}-01`}
 const monthEndISO=(abs:number)=>{const y=Math.floor(abs/12),m=abs-y*12+1;return `${y}-${pad(m)}-${pad(daysIn(y,m))}`}
-const workType=(p:any)=>p?.work_type==='sustain'||p?.planning_state==='bau'?'sustain':'new'
+const workType=workTypeOfProject
 const workdays=(key:string)=>{const[y,m]=key.split('-').map(Number);let n=0;const d=new Date(y,m-1,1);while(d.getMonth()===m-1){if(d.getDay()!==0&&d.getDay()!==6)n++;d.setDate(d.getDate()+1)};return n}
 const workdaysBetween=(a:string,b:string)=>{let n=0;const d=new Date(a+'T12:00:00'),e=new Date(b+'T12:00:00');while(d<=e){if(d.getDay()!==0&&d.getDay()!==6)n++;d.setDate(d.getDate()+1)};return n}
 const Q_HOURS=520

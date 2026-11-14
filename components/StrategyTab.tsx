@@ -3,6 +3,7 @@ import { useState, useEffect, useRef, Fragment } from 'react'
 import { supabase } from '../lib/supabase'
 import { DependencyLayer, DepHandle, createDependency, deleteDependency, depKey } from './DependencyLayer'
 import { StrategyReport } from './StrategyReport'
+import { WT_LABEL, WT_COLOR, WORK_TYPE_KEYS, workTypeOfProject, capacityShare } from './WorkTypes'
 import { exportStrategiesPptx } from './StrategyPptx'
 import { StrategyBudgetPanel, StaffingSection, computeAllocation, slotted, overlapsFor, SLOTS, SHARED_TEAM } from './StrategyBudget'
 
@@ -25,10 +26,11 @@ const TEAM_COLORS:any={'Consumer Experience':'#D9E2EC','Operational Efficiency':
 const PROPOSED='#E07B2A'
 const GROUP='#C8973A'
 const STATE_LABEL:any={planned:'Planned',proposed:'Proposed'}
-const WORK_LABEL:any={new:'New initiative',sustain:'Sustain'}
+const WORK_LABEL:any={...WT_LABEL,new:'New initiative'}
 const SUSTAIN='#4A5D72'
 // 'bau' was the earlier way to mark sustain work; it still reads as planned + sustain
-const workType=(p:any)=>p?.work_type==='sustain'||p?.planning_state==='bau'?'sustain':'new'
+const workType=workTypeOfProject
+const SAAS=WT_COLOR.saas.bg
 const TRACK_COLORS=['#5B7A99','#E07B2A','#27AE60','#8E44AD','#C8973A','#2E86AB']
 
 const pad=(n:number)=>String(n).padStart(2,'0')
@@ -538,7 +540,7 @@ export default function StrategyTab({projects:mainProjects,setProjects,strategie
   }))
   const sustainPct=Number(strategy.bau_pct)||0
   const limits:any={new:100-sustainPct,sustain:sustainPct}
-  const typeById=new Map((projects as any[]).map(p=>[p.id,workType(p)]))
+  const typeById=new Map((projects as any[]).map(p=>[p.id,capacityShare(workType(p))]))
   const split:any={new:0,sustain:0}
   const loads:any[]=[]
   const loadTeams=[...(teams as string[]),...((people as any[]).some(p=>p.team===SHARED_TEAM)?[SHARED_TEAM]:[])]
@@ -729,7 +731,7 @@ export default function StrategyTab({projects:mainProjects,setProjects,strategie
   const sel=selId?projById(selId):null
   const selEpic=typeof selId==='string'&&selId.startsWith('epic:')?(epics as any[]).find(e=>'epic:'+e.id===selId)||null:null
   const counts={planned:0,proposed:0,sustain:0} as any
-  shown.forEach(p=>{counts[state(p)]++;if(workType(p)==='sustain')counts.sustain++})
+  shown.forEach(p=>{counts[state(p)]++;if(workType(p)!=='new')counts.sustain++})
   const today=todayISO()
   const todayX=today>=winStart&&today<=winEnd?posStart(today):null
 
@@ -954,7 +956,7 @@ export default function StrategyTab({projects:mainProjects,setProjects,strategie
                 // Project row
                 const p=r.p,ex=extent(p),st=state(p)
                 const isSel=sel?.id===p.id
-                const color=st==='proposed'?PROPOSED:workType(p)==='sustain'?SUSTAIN:(TEAM_COLORS[p.team]||'#7A8FA6')
+                const color=st==='proposed'?PROPOSED:workType(p)==='sustain'?SUSTAIN:workType(p)==='saas'?SAAS:(TEAM_COLORS[p.team]||'#7A8FA6')
                 const done=PROJECT_TERMINAL.includes(p.status)
                 return(
                   <div key={ri} style={{display:'flex',height:r.h,position:'relative',zIndex:1}}>
@@ -998,6 +1000,7 @@ export default function StrategyTab({projects:mainProjects,setProjects,strategie
             <Legend swatch={{background:TEAM_COLORS['Operational Efficiency']}} label="Operational Efficiency (planned)"/>
             <Legend swatch={{background:'rgba(224,123,42,0.28)',border:`1.5px solid ${PROPOSED}`}} label="Proposed, not yet planned"/>
             <Legend swatch={{background:SUSTAIN}} label="Sustain: tech debt, stabilization & enhancements"/>
+            <Legend swatch={{background:SAAS}} label="SaaS deliverable"/>
             {view.showEpics&&<Legend swatch={{background:'rgba(224,123,42,0.65)',height:8,borderRadius:4}} label="Epic"/>}
             {view.showEpics&&<Legend swatch={{border:`1px dashed ${EPIC}`,height:8,borderRadius:4}} label="Epic dated by its stories"/>}
             <Legend swatch={{borderTop:`2px solid ${GROUP}`,borderLeft:`2px solid ${GROUP}`,borderRight:`2px solid ${GROUP}`,height:6}} label="Group: runs at the same time"/>
@@ -1102,12 +1105,12 @@ function ProjectPanel({p,state,tracks,groups=[],projects,deps,shown,issues,updPr
       <div style={SECTION}>
         <div style={H}>WORK TYPE</div>
         <div style={{display:'flex',gap:4}}>
-          {['new','sustain'].map(k=>(
+          {WORK_TYPE_KEYS.map(k=>(
             <button key={k} onClick={()=>updProject(p.id,{work_type:k,...(p.planning_state==='bau'?{planning_state:'planned'}:{})})}
-              style={{flex:1,background:workType(p)===k?(k==='sustain'?SUSTAIN:'#C8973A'):'transparent',color:workType(p)===k?(k==='sustain'?'#F4F6F8':'#0D1B2A'):'#C8C8D4',border:'1px solid '+(workType(p)===k?'transparent':'#243447'),borderRadius:5,fontSize:11,fontWeight:700,padding:'5px 0',cursor:'pointer'}}>{WORK_LABEL[k]}</button>
+              style={{flex:1,background:workType(p)===k?WT_COLOR[k].bg:'transparent',color:workType(p)===k?WT_COLOR[k].fg:'#C8C8D4',border:'1px solid '+(workType(p)===k?'transparent':'#243447'),borderRadius:5,fontSize:11,fontWeight:700,padding:'5px 0',cursor:'pointer'}}>{WORK_LABEL[k]}</button>
           ))}
         </div>
-        <div style={{fontSize:10,color:'#7A8FA6'}}>Sustain is tech debt, system stabilization and enhancements to existing things. It counts toward the sustain share.</div>
+        <div style={{fontSize:10,color:'#7A8FA6'}}>Sustain is tech debt, system stabilization and enhancements to existing things. Sustain and SaaS deliverables count toward the sustain share.</div>
       </div>
       {staffing}
       <div style={SECTION}>
@@ -1286,6 +1289,7 @@ function SettingsPanel({strategy,tracks,projects,teams,issues,setSelId,updStrate
         <select value={np.wt} onChange={e=>setNp({...np,wt:e.target.value})} style={INPUT}>
           <option value="new">New initiative</option>
           <option value="sustain">Sustain (tech debt, stabilization & enhancements)</option>
+          <option value="saas">SaaS deliverable</option>
         </select>
         <button disabled={!np.name.trim()} onClick={async()=>{await createProject(np.name,np.team,np.track,np.wt);setNp({...np,name:''})}}
           style={{background:PROPOSED,border:'none',borderRadius:5,color:'#0D1B2A',fontWeight:700,fontSize:12,padding:'7px 0',cursor:'pointer',opacity:np.name.trim()?1:0.5}}>+ Add as proposed</button>

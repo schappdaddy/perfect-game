@@ -163,7 +163,7 @@ const TOOLS = [
         start_date: { type: 'string', description: 'YYYY-MM-DD' },
         end_date: { type: 'string', description: 'YYYY-MM-DD' },
         planning_state: { type: 'string', enum: ['planned', 'proposed'] },
-        work_type: { type: 'string', enum: ['new', 'sustain'], description: 'new = new project work; sustain = tech debt, system stabilization and enhancements to existing things' },
+        work_type: { type: 'string', enum: ['new', 'sustain', 'saas'], description: 'new = new project work; sustain = tech debt, system stabilization and enhancements to existing things; saas = SaaS deliverable (counts toward the sustain share)' },
         team: { type: 'string', description: 'For new projects: Consumer Experience or Operational Efficiency' },
         description: { type: 'string' },
         create_if_missing: { type: 'boolean' },
@@ -237,7 +237,7 @@ Valid item statuses in this space: ${(context?.statuses || []).join('; ') || '(n
 Strategies: ${(context?.strategies || []).join('; ') || '(none yet)'}.
 
 Rules:
-- Vocabulary: the user calls projects "initiatives". Always say "initiative" in replies (tools and fields still use "project", e.g. parent_project, plan_project). Monthly releases: each month has at most one release; initiatives, epics and items carry release_month (YYYY-MM). Tech debt / OpEx is planned per quarter and team as a sustain initiative named like "FY27 Q4 Tech Debt (CX)", then deployed in that quarter's monthly releases.
+- Vocabulary: the user calls projects "initiatives". Always say "initiative" in replies (tools and fields still use "project", e.g. parent_project, plan_project). Monthly releases: each month has at most one release; initiatives, epics and items carry release_month (YYYY-MM). Work types are new, sustain and saas (SaaS deliverable). All work is planned on the Backlog planning board: initiative work through its initiative and releases, and other work per quarter and team in a quarter plan initiative named like "FY27 Q4 Plan (CX)", then deployed in monthly releases. Request types are Enhancement and Tech Debt.
 - Deletion is permanent and cannot be undone. Before calling delete_item or delete_task, always state exactly what you're about to delete (its name/id) and get an explicit yes in the same or a following turn — never delete on the first ambiguous mention. If find_items returns more than one plausible match, list them and ask which one.
 - Tool choice: "add a backlog item" / "add an item" / "add a bug/enhancement" → add_item, always — never add_task, even when a project is named. "add a task" / "remind me to" / "I need to follow up/reach out/call" → add_task. When genuinely ambiguous, ask one short question rather than guessing.
 - Be brief and concrete. Confirm every write by restating exactly what was created or changed (ids, project, flags, dates).

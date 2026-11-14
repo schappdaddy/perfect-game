@@ -193,7 +193,7 @@ export function StrategyBudgetPanel({entries,fys,scope,setScope,onOpen}:any){
         </table>
       </div>
       <div style={{display:'grid',gridTemplateColumns:'1fr 1fr',gap:8,fontSize:11}}>
-        {[['New initiatives',costed.filter((x:any)=>x.workType!=='sustain')],['Sustain',costed.filter((x:any)=>x.workType==='sustain')]].map(([l,list]:any)=>(
+        {[['New initiatives',costed.filter((x:any)=>x.workType==='new')],['Sustain + SaaS',costed.filter((x:any)=>x.workType!=='new')]].map(([l,list]:any)=>(
           <div key={l} style={{background:'#162436',border:'1px solid #243447',borderRadius:6,padding:'7px 9px'}}>
             <div style={{color:'#7A8FA6',fontSize:10}}>{l}</div>
             <div style={{fontWeight:700,color:'#F4F6F8',fontSize:13}}>{fmtUSD(sum(list))}</div>
