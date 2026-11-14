@@ -110,7 +110,7 @@ const nextQ=(fy:number,q:number,n:number)=>{q+=n;while(q>4){q-=4;fy++}while(q<1)
 
 // Two plans for the same work: which quarter it's worked in (the quarter's tech debt
 // initiative), and which monthly release it ships in (which can be after the quarter).
-export function QuarterPlanner({items,setItems,projects,setProjects,epics=[],setEpics,releases,setReleases,teams,workTypeOf,epicWorkTypeOf,onOpenItem,onOpenEpic}:any){
+export function QuarterPlanner({items,setItems,projects,setProjects,epics=[],setEpics,releases,setReleases,teams,workTypeOf,epicWorkTypeOf,onOpenItem,onOpenEpic,milestones=[],setMilestones}:any){
   const cur=fyQuarterOf(monthKeyOf(new Date()))
   const pref=(k:string,d:any)=>{try{const v=localStorage.getItem(k);return v==null?d:JSON.parse(v)}catch{return d}}
   const save=(k:string,v:any)=>{try{localStorage.setItem(k,JSON.stringify(v))}catch{}}
@@ -120,7 +120,8 @@ export function QuarterPlanner({items,setItems,projects,setProjects,epics=[],set
   const [hideNoRel,setHideNoRelS]=useState<boolean>(()=>pref('pg_plan_hide_norel2',false))
   const [poolAll,setPoolAll]=useState(false) // also include sustain work inside new (non-sustain) initiatives
   const [poolTeam,setPoolTeam]=useState(true)
-  const [src,setSrcS]=useState<'td'|'init'>(()=>pref('pg_plan_src','td')) // Releases view: what the left panel lists
+  const [src,setSrcS]=useState<'td'|'init'>(()=>pref('pg_plan_src','td')) // what the left panel lists
+  const [msForm,setMsForm]=useState<any>(null) // {col, project_id, name, date, min, max}
   const [openInits,setOpenInits]=useState<Record<string,boolean>>({})
   const setSrc=(v:any)=>{setSrcS(v);save('pg_plan_src',v)}
   const [dragId,setDragId]=useState<string|null>(null) // 'item:<id>' | 'epic:<id>'
@@ -133,10 +134,14 @@ export function QuarterPlanner({items,setItems,projects,setProjects,epics=[],set
   const setMode=(v:any)=>{setModeS(v);save('pg_plan_mode',v)}
   const setHideNoRel=(v:boolean)=>{setHideNoRelS(v);save('pg_plan_hide_norel2',v)}
 
-  const short=TEAM_SHORT[team]||team
+  // team '__all' shows every team: each quarter then has one tech debt initiative per team
+  const ALL=team==='__all'||!teams.includes(team)
+  const short=ALL?'all teams':TEAM_SHORT[team]||team
+  const shortOf=(t:string)=>TEAM_SHORT[t]||t
   const quarters=[0,1,2,3].map(n=>{const{fy,q}=nextQ(fq.fy,fq.q,n);return qInfo(fy,q)})
-  const teamBuckets=(projects as any[]).filter(p=>p.sustain_quarter&&p.team===team)
-  const bucketFor=(qk:string)=>teamBuckets.find(p=>p.sustain_quarter===qk)
+  const teamBuckets=(projects as any[]).filter(p=>p.sustain_quarter&&(ALL||p.team===team))
+  const bucketFor=(qk:string,t:string)=>teamBuckets.find(p=>p.sustain_quarter===qk&&p.team===t)
+  const shownTeams:string[]=ALL?teams:[team]
   const bucketNames=new Set((projects as any[]).filter(p=>p.sustain_quarter).map(p=>p.name))
   const bucketIds=new Set((projects as any[]).filter(p=>p.sustain_quarter).map(p=>p.id))
   const projectNames=new Set((projects as any[]).map(p=>p.name))
@@ -149,7 +154,7 @@ export function QuarterPlanner({items,setItems,projects,setProjects,epics=[],set
   type Entry={kind:'item'|'epic'|'project',x:any,key:string,bucket:any}
   const ent=(kind:'item'|'epic'|'project',x:any,bucket:any=null):Entry=>({kind,x,key:`${kind}:${x.id}`,bucket})
   const rank=(a:Entry,b:Entry)=>(a.x.manual_rank??1e9)-(b.x.manual_rank??1e9)||(PRI_ORDER[a.x.priority]||9)-(PRI_ORDER[b.x.priority]||9)||(a.x.created_at||'').localeCompare(b.x.created_at||'')
-  const teamOk=(x:any)=>!poolTeam||!x.team||x.team===team
+  const teamOk=(x:any)=>ALL||!poolTeam||!x.team||x.team===team
   // Ongoing Sustain initiatives (e.g. vendor deliverables) hold tech debt that still needs a
   // quarter, so their work is in the backlog by default; Sustain work inside new initiatives
   // only when asked
@@ -167,7 +172,7 @@ export function QuarterPlanner({items,setItems,projects,setProjects,epics=[],set
     ...(items as any[]).filter(i=>(i.space||'work')==='work'&&!coveredByEpic.has(i.epic_id)).map(i=>({i,b:teamBuckets.find(b=>b.name===i.parent_project)})).filter(({b})=>b).map(({i,b})=>ent('item',i,b))].sort(rank)
   // Initiative work released in the same monthly releases (its initiative and dates are its own)
   const INIT_DONE=['Complete','Cancelled','Done']
-  const inits=(projects as any[]).filter(p=>!p.sustain_quarter&&(p.space||'work')==='work'&&!INIT_DONE.includes(p.status)&&(!poolTeam||!p.team||p.team===team))
+  const inits=(projects as any[]).filter(p=>!p.sustain_quarter&&(p.space||'work')==='work'&&!INIT_DONE.includes(p.status)&&(ALL||!poolTeam||!p.team||p.team===team))
     .sort((a,b)=>(a.start_date||'9999').localeCompare(b.start_date||'9999')||a.name.localeCompare(b.name))
   const initIds=new Set(inits.map(p=>p.id)),initNames=new Set(inits.map(p=>p.name))
   const initEpics=(epics as any[]).filter(e=>initIds.has(e.project_id)&&open(e))
@@ -214,12 +219,12 @@ export function QuarterPlanner({items,setItems,projects,setProjects,epics=[],set
       for(const st of storiesOf(x))if(open(st)&&(!st.release_month||st.release_month===x.release_month))await updItem(st.id,{release_month:month})
     }
   }
-  async function createBucket(qi:any){
-    const name=`${qi.label} Tech Debt (${short})`
+  async function createBucket(qi:any,t:string){
+    const name=`${qi.label} Tech Debt (${shortOf(t)})`
     const ex=(projects as any[]).find(p=>p.name.toLowerCase()===name.toLowerCase())
     if(ex){alert(`An initiative called "${name}" already exists.`);return null}
-    const{data,error}=await supabase.from('projects').insert({name,team,status:'Planning',priority:'P2',rag:'Green',color:'#4A5D72',
-      description:`Tech debt and OpEx for ${team}, ${qi.label}. Planned for the quarter, deployed in monthly releases.`,
+    const{data,error}=await supabase.from('projects').insert({name,team:t,status:'Planning',priority:'P2',rag:'Green',color:'#4A5D72',
+      description:`Tech debt and OpEx for ${t}, ${qi.label}. Planned for the quarter, deployed in monthly releases.`,
       start_date:qi.qStart,end_date:qi.qEnd,work_type:'sustain',planning_state:'planned',budget_type:'support',sustain_quarter:qi.qk,space:'work',sort_order:projects.length}).select().single()
     if(error){alert('Failed to create the initiative: '+error.message);return null}
     if(data)setProjects((prev:any[])=>[...prev,data])
@@ -233,15 +238,24 @@ export function QuarterPlanner({items,setItems,projects,setProjects,epics=[],set
   async function setPlan(en:Entry,{qi,release}:{qi?:any,release?:string|null}){
     const x=en.x
     const fromQ=en.bucket?qFromKey(en.bucket.sustain_quarter):null
-    const toQ=qi===undefined?fromQ:qi
+    let toQ=qi===undefined?fromQ:qi
+    // Its quarter follows a new release, except one in the quarter right after (worked this
+    // quarter, ships next)
+    if(qi===undefined&&release&&fromQ){
+      const rq=fyQuarterOf(release),nx=nextQ(fromQ.fy,fromQ.q,1),rk=quarterKey(rq.fy,rq.q)
+      if(rk!==fromQ.qk&&rk!==quarterKey(nx.fy,nx.q))toQ=qInfo(rq.fy,rq.q)
+    }
     const rel=toQ===null?null:release===undefined?(x.release_month||null):release
+    // Which team's tech debt initiative: the one it's in, the team chosen above, or its own
+    const planTeam=en.bucket?.team||(ALL?(x.team||(en.kind==='epic'?(projects as any[]).find(p=>p.id===x.project_id)?.team:null)):team)
+    if(toQ&&!planTeam){alert(`"${x.name}" has no team. Give it a team, or pick a team at the top, to plan it into a quarter.`);return}
     if(rel&&isBlocked(rel)){alert(`${fmtMonthKey(rel)} has no release. Pick another month, or change it under 📦 Releases.`);return}
     if(rel&&toQ&&rel<toQ.months[0]&&!confirm(`${fmtMonthKey(rel)} is before ${toQ.label} starts. Ship it then anyway?`))return
     // Ask before moving work out of another initiative, and only then create the quarter's one
     const fromName=en.kind==='epic'?(projects as any[]).find(p=>p.id===x.project_id)?.name:x.parent_project
-    if(toQ&&!en.bucket&&fromName&&projectNames.has(fromName)&&!confirm(`"${x.name}" is in "${fromName}". Move it to ${toQ.label} Tech Debt (${short})?`))return
-    let bucket=toQ?bucketFor(toQ.qk):null
-    if(toQ&&!bucket){bucket=await createBucket(toQ);if(!bucket)return}
+    if(toQ&&!en.bucket&&fromName&&projectNames.has(fromName)&&!confirm(`"${x.name}" is in "${fromName}". Move it to ${toQ.label} Tech Debt (${shortOf(planTeam)})?`))return
+    let bucket=toQ?bucketFor(toQ.qk,planTeam):null
+    if(toQ&&!bucket){bucket=await createBucket(toQ,planTeam);if(!bucket)return}
     const dates=(y:any)=>open(y)&&plannerDated(y,fromQ)?(toQ?datesFor(toQ,rel):{start_date:null,end_date:null}):{}
     let end:string|null=null
     if(en.kind==='item'){
@@ -283,7 +297,66 @@ export function QuarterPlanner({items,setItems,projects,setProjects,epics=[],set
     if(en.bucket)await setPlan(en,{qi:null})
     await reorderPool({...en,bucket:null},beforeKey)
   }
-  async function dropOnQuarter(qi:any){const en=take();if(en&&dragSrc!=='init'&&en.bucket?.sustain_quarter!==qi.qk)await setPlan(en,{qi})}
+  async function dropOnQuarter(qi:any){
+    const en=take();if(!en)return
+    if(dragSrc==='init'){
+      // Initiative work sits in the quarter of its release: give it the quarter's first open one
+      if(en.x.release_month&&qi.months.includes(en.x.release_month))return
+      const m=qi.months.find((k:string)=>!isBlocked(k))
+      if(!m){alert(`${qi.label} has no release months open. Mark one under 📦 Release dates, or drop it in another quarter.`);return}
+      await setRelease(en,m);return
+    }
+    if(en.bucket?.sustain_quarter!==qi.qk)await setPlan(en,{qi})
+  }
+  // Milestones of the initiatives in view, by date
+  const msTeamOk=(m:any)=>{if(ALL)return true;const p=(projects as any[]).find(x=>x.id===m.project_id);return !p?.team||p.team===team}
+  const msIn=(a:string,b:string)=>(milestones as any[]).filter(m=>m.date&&m.date>=a&&m.date<=b&&(m.space||'work')==='work'&&msTeamOk(m)).sort((x,y)=>x.date.localeCompare(y.date))
+  async function addMilestone(){
+    const f=msForm
+    if(!f?.project_id||!f.name?.trim()||!f.date){alert('Pick an initiative, a name and a date.');return}
+    const{data,error}=await supabase.from('milestones').insert({project_id:f.project_id,name:f.name.trim(),date:f.date,type:'milestone',completed:false,
+      sort_order:(milestones as any[]).filter(m=>m.project_id===f.project_id).length,space:'work'}).select().single()
+    if(error){alert('Failed to add the milestone: '+error.message);return}
+    if(data)setMilestones?.((prev:any[])=>[...prev,data])
+    setMsForm(null)
+  }
+  async function toggleMilestone(m:any){
+    setMilestones?.((prev:any[])=>prev.map(x=>x.id===m.id?{...x,completed:!m.completed}:x))
+    const{error}=await supabase.from('milestones').update({completed:!m.completed}).eq('id',m.id)
+    if(error)alert('Failed to update the milestone: '+error.message)
+  }
+  // The milestones block at the top of a quarter or release column, with "+ Milestone"
+  const msOptions=(projects as any[]).filter(p=>(p.space||'work')==='work'&&!['Complete','Cancelled','Done'].includes(p.status)&&(ALL||!p.team||p.team===team)).sort((a,b)=>a.name.localeCompare(b.name))
+  const msBlock=(col:string,a:string,b:string)=>{
+    const list=msIn(a,b),f=msForm?.col===col?msForm:null
+    return(
+      <div style={{display:'flex',flexDirection:'column',gap:3,marginTop:4}}>
+        {list.map(m=>{const p=(projects as any[]).find(x=>x.id===m.project_id);const[,mm,dd]=m.date.split('-').map(Number);return(
+          <div key={m.id} title={`${m.name} · ${m.date}${p?' · '+p.name:''}${m.notes?'\n'+m.notes:''}\nClick to mark ${m.completed?'not done':'done'}`} onClick={()=>toggleMilestone(m)}
+            style={{display:'flex',alignItems:'center',gap:5,fontSize:10.5,color:m.completed?'#7A8FA6':'#F4F6F8',cursor:'pointer',textDecoration:m.completed?'line-through':'none'}}>
+            <span style={{width:8,height:8,transform:'rotate(45deg)',background:m.completed?'#27AE60':m.color||'#C8973A',flexShrink:0}}/>
+            <span style={{fontWeight:700,color:'#C8973A',flexShrink:0}}>{MONTHS[mm-1]} {dd}</span>
+            <span style={{overflow:'hidden',textOverflow:'ellipsis',whiteSpace:'nowrap' as const}}>{m.name}{p?<span style={{color:'#7A8FA6'}}> · {p.name}</span>:''}</span>
+          </div>
+        )})}
+        {f?(
+          <div onClick={e=>e.stopPropagation()} style={{display:'flex',flexDirection:'column',gap:4,padding:6,border:'1px solid #3A4A5E',borderRadius:5,background:'#162436'}}>
+            <select value={f.project_id||''} onChange={e=>setMsForm({...f,project_id:e.target.value})} style={{background:'#0F1C2B',border:'1px solid #243447',borderRadius:4,color:'#F4F6F8',fontSize:11,padding:'3px 4px'}}>
+              <option value="">Initiative…</option>
+              {msOptions.map(p=><option key={p.id} value={p.id}>{p.name}</option>)}
+            </select>
+            <input autoFocus value={f.name||''} placeholder="Milestone name" onChange={e=>setMsForm({...f,name:e.target.value})} onKeyDown={e=>{if(e.key==='Enter')addMilestone();if(e.key==='Escape')setMsForm(null)}}
+              style={{background:'#0F1C2B',border:'1px solid #243447',borderRadius:4,color:'#F4F6F8',fontSize:11,padding:'3px 5px'}}/>
+            <input type="date" value={f.date||''} min={f.min} max={f.max} onChange={e=>setMsForm({...f,date:e.target.value})} style={{background:'#0F1C2B',border:'1px solid #243447',borderRadius:4,color:'#F4F6F8',fontSize:11,padding:'3px 5px'}}/>
+            <div style={{display:'flex',gap:4}}>
+              <button onClick={addMilestone} style={{flex:1,background:'#C8973A',border:'none',borderRadius:4,color:'#0D1B2A',fontSize:11,fontWeight:700,padding:'3px 0',cursor:'pointer'}}>Add</button>
+              <button onClick={()=>setMsForm(null)} style={{background:'none',border:'1px solid #243447',borderRadius:4,color:'#7A8FA6',fontSize:11,padding:'3px 8px',cursor:'pointer'}}>Cancel</button>
+            </div>
+          </div>
+        ):setMilestones&&<button onClick={()=>setMsForm({col,project_id:'',name:'',date:a,min:a,max:b})} style={{alignSelf:'flex-start',background:'none',border:'none',color:'#7A8FA6',fontSize:10,padding:0,cursor:'pointer'}}>+ Milestone</button>}
+      </div>
+    )
+  }
   async function dropOnRelease(month:string|null){
     const en=take();if(!en)return
     if(dragSrc==='init'){await setRelease(en,month);return}
@@ -300,7 +373,7 @@ export function QuarterPlanner({items,setItems,projects,setProjects,epics=[],set
   // Release choices for a card: the months from its quarter's start through the next quarter
   const releaseChoices=(qi:any)=>{const out:string[]=[];for(let n=0;n<6;n++)out.push(addMonths(qi.months[0],n));return out}
   // A plain render function (not a component), so cards aren't remounted mid-drag
-  const card=(en:Entry,o:{idx?:number,showFrom?:boolean,relPicker?:boolean,showQuarter?:boolean,init?:boolean}={})=>{
+  const card=(en:Entry,o:{idx?:number,showFrom?:boolean,relPicker?:boolean,showQuarter?:boolean,init?:boolean,relBadge?:boolean}={})=>{
     const x=en.x,isEpic=en.kind==='epic'
     if(en.kind==='project')return initCard(en,o)
     const isInit=!!o.init
@@ -326,7 +399,8 @@ export function QuarterPlanner({items,setItems,projects,setProjects,epics=[],set
       {o.showQuarter&&qi&&<div style={{fontSize:10,color:'#C8D4E0'}}>🗓 Worked in <b>{qi.label}</b>{later?<span style={{color:'#5DADE2'}}> · ships after</span>:''}</div>}
       {isEpic&&<div style={{fontSize:10,color:'#7A8FA6'}}>{sts.length} stor{sts.length===1?'y':'ies'}{sts.length?` · ${done} done`:''}</div>}
       {(o.showFrom||isInit)&&from&&<div style={{fontSize:10,color:isInit?'#C8973A':'#7A8FA6'}}>{isInit?'◈ ':'In '}{from}{ep?` › ${ep.name}`:''}</div>}
-      {!poolTeam&&o.idx!=null&&x.team&&<div style={{fontSize:10,color:'#7A8FA6'}}>{TEAM_SHORT[x.team]||x.team}</div>}
+      {(ALL||(!poolTeam&&o.idx!=null))&&(en.bucket?.team||x.team)&&<div style={{fontSize:10,color:'#7A8FA6'}}>{shortOf(en.bucket?.team||x.team)}</div>}
+      {o.init&&o.relBadge&&x.release_month&&<div style={{fontSize:10,color:'#5DADE2'}}>📦 {fmtMonthKey(x.release_month)} release</div>}
       {o.relPicker&&qi&&(
         <div onClick={e=>e.stopPropagation()} style={{display:'flex',alignItems:'center',gap:5}}>
           <span style={{fontSize:11}}>📦</span>
@@ -352,10 +426,10 @@ export function QuarterPlanner({items,setItems,projects,setProjects,epics=[],set
         <div style={{display:'flex',alignItems:'center',gap:6}}>
           <span style={{fontSize:9,fontWeight:800,color:'#C8973A',letterSpacing:1}}>◈ INITIATIVE{o.goLive?' GO-LIVE':''}</span>
           {p.work_type==='sustain'&&<span style={{fontSize:9,color:'#C8D4E0',background:'#4A5D72',borderRadius:3,padding:'0 4px'}}>SUSTAIN</span>}
-          {p.release_month&&!o.goLive&&<span style={{marginLeft:'auto',fontSize:9.5,fontWeight:700,color:'#5DADE2'}}>📦 {fmtMonthKey(p.release_month)}</span>}
+          {p.release_month&&(!o.goLive||o.relBadge)&&<span style={{marginLeft:'auto',fontSize:9.5,fontWeight:700,color:'#5DADE2'}}>📦 {fmtMonthKey(p.release_month)}</span>}
         </div>
         <div style={{fontSize:12,fontWeight:800,color:'#F4F6F8',lineHeight:1.3}}>{p.name}</div>
-        <div style={{fontSize:10,color:'#7A8FA6'}}>{p.start_date?`${fmtD(p.start_date)} – ${p.ongoing||!p.end_date?'ongoing':fmtD(p.end_date)}`:'No dates'} · {eps.length} epic{eps.length!==1?'s':''} · {sts.length} stor{sts.length===1?'y':'ies'}</div>
+        <div style={{fontSize:10,color:'#7A8FA6'}}>{ALL&&p.team?`${shortOf(p.team)} · `:''}{p.start_date?`${fmtD(p.start_date)} – ${p.ongoing||!p.end_date?'ongoing':fmtD(p.end_date)}`:'No dates'} · {eps.length} epic{eps.length!==1?'s':''} · {sts.length} stor{sts.length===1?'y':'ies'}</div>
       </div>
     )
   }
@@ -383,7 +457,7 @@ export function QuarterPlanner({items,setItems,projects,setProjects,epics=[],set
         <div style={{fontSize:13,fontWeight:800,color:'#F4F6F8',textAlign:'center' as const}}>{quarters[0].label} – {quarters[3].label}</div>
         <button onClick={()=>setFq(nextQ(fq.fy,fq.q,1))} style={btn}>›</button>
         {(fq.fy!==cur.fy||fq.q!==cur.q)&&<button onClick={()=>setFq(cur)} style={{...btn,color:'#7A8FA6'}}>From this quarter</button>}
-        <select value={team} onChange={e=>setTeam(e.target.value)} style={btn}>{teams.map((t:string)=><option key={t} value={t}>{t}</option>)}</select>
+        <select value={ALL?'__all':team} onChange={e=>setTeam(e.target.value)} style={btn}><option value="__all">All teams</option>{teams.map((t:string)=><option key={t} value={t}>{t}</option>)}</select>
         {mode==='releases'&&<label style={{marginLeft:'auto',display:'flex',alignItems:'center',gap:5,fontSize:11,color:'#7A8FA6',cursor:'pointer'}} title="Hide months marked as having no release (e.g. code freeze)">
           <input type="checkbox" checked={hideNoRel} onChange={e=>setHideNoRel(e.target.checked)} style={{accentColor:'#C8973A'}}/>Hide months with no release
         </label>}
@@ -393,16 +467,16 @@ export function QuarterPlanner({items,setItems,projects,setProjects,epics=[],set
         {/* Sustain backlog */}
         <div onDragOver={e=>{e.preventDefault();if(over!=='pool')setOver(o=>o?.startsWith('pool:')?o:'pool')}} onDrop={e=>{e.preventDefault();dropOnPool(null)}}
           style={{width:280,flexShrink:0,borderRight:'1px solid #243447',display:'flex',flexDirection:'column',background:over==='pool'?'rgba(200,151,58,0.06)':'transparent'}}>
-          {mode==='releases'&&<div style={{display:'flex',borderBottom:'1px solid #243447'}}>
+          {<div style={{display:'flex',borderBottom:'1px solid #243447'}}>
             {([['td','Tech debt backlog'],['init','Initiative work']] as const).map(([k,l])=>(
               <button key={k} onClick={()=>setSrc(k)} style={{flex:1,background:src===k?'#0F1C2B':'#162436',color:src===k?'#F4F6F8':'#7A8FA6',border:'none',borderBottom:`2px solid ${src===k?'#C8973A':'transparent'}`,fontSize:11,fontWeight:700,padding:'8px 0',cursor:'pointer'}}>{l}</button>
             ))}
           </div>}
-          {mode==='releases'&&src==='init'?(<>
+          {src==='init'?(<>
             <div style={{padding:'10px 12px',borderBottom:'1px solid #243447'}}>
               <div style={{fontSize:11,fontWeight:800,color:'#C8973A',letterSpacing:1}}>INITIATIVE WORK · {inits.length}</div>
-              <div style={{fontSize:10.5,color:'#7A8FA6',margin:'3px 0 6px'}}>Open initiatives and their epics and stories not in a release yet. Drag an initiative (its go-live), an epic or a story onto a release. Only the release changes; dates stay with the initiative. Drag back here to take it out.</div>
-              <label style={{display:'flex',gap:5,alignItems:'center',fontSize:10.5,color:'#7A8FA6',cursor:'pointer'}}><input type="checkbox" checked={poolTeam} onChange={e=>setPoolTeam(e.target.checked)} style={{accentColor:'#C8973A'}}/>Only {short} and unassigned</label>
+              <div style={{fontSize:10.5,color:'#7A8FA6',margin:'3px 0 6px'}}>Open initiatives and their epics and stories not in a release yet. Drag an initiative (its go-live), an epic or a story onto a release, or onto a quarter to put it in that quarter&apos;s first open release. It sits in the quarter of its release; only the release changes, its dates stay with the initiative. Drag back here to take it out.</div>
+              {!ALL&&<label style={{display:'flex',gap:5,alignItems:'center',fontSize:10.5,color:'#7A8FA6',cursor:'pointer'}}><input type="checkbox" checked={poolTeam} onChange={e=>setPoolTeam(e.target.checked)} style={{accentColor:'#C8973A'}}/>Only {short} and unassigned</label>}
             </div>
             <div style={colBody}>
               {inits.map(p=>{
@@ -430,7 +504,7 @@ export function QuarterPlanner({items,setItems,projects,setProjects,epics=[],set
           <div style={{padding:'10px 12px',borderBottom:'1px solid #243447'}}>
             <div style={{fontSize:11,fontWeight:800,color:'#8FA6BC',letterSpacing:1}}>SUSTAIN BACKLOG · {poolEpics.length} epic{poolEpics.length!==1?'s':''} · {poolItems.length} stor{poolItems.length===1?'y':'ies'}</div>
             <div style={{fontSize:10.5,color:'#7A8FA6',margin:'3px 0 6px'}}>Open Sustain epics and stories, in priority order. Drag to reorder, into a quarter, or straight into a release. Drag back here to unplan.</div>
-            <label style={{display:'flex',gap:5,alignItems:'center',fontSize:10.5,color:'#7A8FA6',cursor:'pointer'}}><input type="checkbox" checked={poolTeam} onChange={e=>setPoolTeam(e.target.checked)} style={{accentColor:'#C8973A'}}/>Only {short} and unassigned</label>
+            {!ALL&&<label style={{display:'flex',gap:5,alignItems:'center',fontSize:10.5,color:'#7A8FA6',cursor:'pointer'}}><input type="checkbox" checked={poolTeam} onChange={e=>setPoolTeam(e.target.checked)} style={{accentColor:'#C8973A'}}/>Only {short} and unassigned</label>}
             <label style={{display:'flex',gap:5,alignItems:'center',fontSize:10.5,color:'#7A8FA6',cursor:'pointer'}}><input type="checkbox" checked={poolAll} onChange={e=>setPoolAll(e.target.checked)} style={{accentColor:'#C8973A'}}/>Also include Sustain work inside new initiatives</label>
           </div>
           <div style={colBody}>
@@ -443,7 +517,9 @@ export function QuarterPlanner({items,setItems,projects,setProjects,epics=[],set
         {mode==='quarters'?(
           <div style={{flex:1,display:'grid',gridTemplateColumns:'repeat(4,minmax(220px,1fr))',gap:10,padding:12,minWidth:900,minHeight:0}}>
             {quarters.map(qi=>{
-              const b=bucketFor(qi.qk),list=planned.filter(en=>en.bucket?.sustain_quarter===qi.qk),noRel=list.filter(en=>!en.x.release_month).length
+              const list=planned.filter(en=>en.bucket?.sustain_quarter===qi.qk),noRel=list.filter(en=>!en.x.release_month).length
+              // Initiative work released in this quarter
+              const ini=initEntries.filter(en=>qi.months.includes(en.x.release_month)&&!(en.kind==='item'&&withEpic(en.x)))
               return(
                 <div key={qi.qk} onDragOver={e=>{e.preventDefault();setOver('q:'+qi.qk)}} onDragLeave={()=>setOver(o=>o==='q:'+qi.qk?null:o)} onDrop={e=>{e.preventDefault();dropOnQuarter(qi)}}
                   style={colBox('q:'+qi.qk,qi.qk===quarterKey(cur.fy,cur.q))}>
@@ -453,13 +529,17 @@ export function QuarterPlanner({items,setItems,projects,setProjects,epics=[],set
                       <span style={{fontSize:10.5,color:'#7A8FA6'}}>{fmtMonthKey(qi.months[0]).slice(0,3)}–{fmtMonthKey(qi.months[2])}</span>
                       {qi.qk===quarterKey(cur.fy,cur.q)&&<span style={{fontSize:9,fontWeight:800,color:'#C8973A',marginLeft:'auto'}}>NOW</span>}
                     </div>
-                    {b?<div style={{fontSize:10.5,color:'#C8973A',marginTop:2}}>{b.name}</div>
-                      :<button onClick={()=>createBucket(qi)} style={{marginTop:4,background:'none',border:'1px dashed #3A4A5E',borderRadius:5,color:'#7A8FA6',fontSize:10.5,padding:'2px 8px',cursor:'pointer'}}>+ Create {qi.label} Tech Debt ({short})</button>}
-                    <div style={{fontSize:10,color:'#7A8FA6',marginTop:2}}>{list.length} planned · {pts(list)} pts{noRel?<span style={{color:'#D4820A'}}> · {noRel} without a release</span>:''}</div>
+                    {shownTeams.map(t=>{const b=bucketFor(qi.qk,t);return b?<div key={t} style={{fontSize:10.5,color:'#C8973A',marginTop:2}}>{b.name}</div>
+                      :<button key={t} onClick={()=>createBucket(qi,t)} style={{marginTop:4,background:'none',border:'1px dashed #3A4A5E',borderRadius:5,color:'#7A8FA6',fontSize:10.5,padding:'2px 8px',cursor:'pointer',display:'block'}}>+ Create {qi.label} Tech Debt ({shortOf(t)})</button>})}
+                    <div style={{fontSize:10,color:'#7A8FA6',marginTop:2}}>{list.length} tech debt{ini.length?<span style={{color:'#C8973A'}}> · {ini.length} from initiatives</span>:''} · {pts([...list,...ini])} pts{noRel?<span style={{color:'#D4820A'}}> · {noRel} without a release</span>:''}</div>
+                    {msBlock('q:'+qi.qk,qi.qStart,qi.qEnd)}
                   </div>
                   <div style={colBody}>
+                    {ini.filter(en=>en.kind==='project').map(en=>initCard(en,{goLive:true,relBadge:true}))}
+                    {ini.filter(en=>en.kind!=='project').map(en=>card(en,{init:true,relBadge:true}))}
+                    {list.length>0&&ini.length>0&&<div style={{fontSize:9.5,fontWeight:800,color:'#8FA6BC',letterSpacing:0.8,marginTop:2}}>TECH DEBT</div>}
                     {list.map(en=>card(en,{relPicker:true}))}
-                    {!list.length&&empty(b?'Drag epics or stories here.':'Drag work here; the initiative is created for you.')}
+                    {!list.length&&!ini.length&&empty('Drag tech debt or initiative work here.')}
                   </div>
                 </div>
               )
@@ -489,6 +569,7 @@ export function QuarterPlanner({items,setItems,projects,setProjects,epics=[],set
                     <div style={{fontSize:12,fontWeight:800,color:blocked?'#7A8FA6':'#F4F6F8'}}>{slim?fmtMonthKey(k):`${fmtMonthKey(k)} release`}</div>
                     <div style={{fontSize:10.5,color:blocked?'#D4820A':r?.release_date?'#C8973A':'#7A8FA6'}}>{blocked?`No release${r?.notes&&!slim?' · '+r.notes:''}`:releaseText(releases,k)}</div>
                     {!slim&&<div style={{fontSize:10,color:'#7A8FA6',marginTop:2}}>{ini.length?<span style={{color:'#C8973A'}}>{ini.length} from initiatives · </span>:''}{td.length} tech debt · {pts(list)} pts</div>}
+                    {!slim&&msBlock('r:'+k,`${k}-01`,lastDay(k))}
                   </div>
                   <div style={colBody}>{list.map(en=>en.kind==='project'?initCard(en,{goLive:true}):card(en,{showQuarter:true,init:ini.includes(en)}))}{!list.length&&!slim&&empty('Drag planned work here.')}</div>
                 </div>

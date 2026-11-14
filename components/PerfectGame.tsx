@@ -2060,7 +2060,7 @@ function PanelField({label,field,type='text',selected,upd}:{label:string,field:s
   )
 }
 
-function Backlog({items,setItems,projects,setProjects,space,ccrs=[],ccrItems=[],setCcrItems,epics=[],setEpics,sustainPct=30,releases=[],setReleases}:{items:any[],setItems:any,projects:any[],setProjects:any,space:string,ccrs?:any[],ccrItems?:any[],setCcrItems?:any,epics?:any[],setEpics?:any,sustainPct?:number,releases?:any[],setReleases?:any}) {
+function Backlog({items,setItems,projects,setProjects,space,ccrs=[],ccrItems=[],setCcrItems,epics=[],setEpics,sustainPct=30,releases=[],setReleases,milestones=[],setMilestones}:{items:any[],setItems:any,projects:any[],setProjects:any,space:string,ccrs?:any[],ccrItems?:any[],setCcrItems?:any,epics?:any[],setEpics?:any,sustainPct?:number,releases?:any[],setReleases?:any,milestones?:any[],setMilestones?:any}) {
   // CCR membership helpers — the link is a junction row, edited from either side
   const itemCcrLink=(itemId:any)=>{const l=(ccrItems as any[]).find((x:any)=>x.item_id===itemId);return l?{link:l,ccr:(ccrs as any[]).find((c:any)=>c.id===l.ccr_id)}:null}
   async function detachItemCcr(itemId:any){
@@ -2820,7 +2820,7 @@ const sorted=items.filter(i=>!isItemDone(i)).sort((a,b)=>{
 
       <div style={{display:'flex',flex:1,overflow:'hidden'}}>
         {bview==='plan'&&space==='work'?(
-          <QuarterPlanner items={items} setItems={setItems} projects={projects} setProjects={setProjects} releases={releases} setReleases={setReleases}
+          <QuarterPlanner items={items} setItems={setItems} projects={projects} setProjects={setProjects} releases={releases} setReleases={setReleases} milestones={milestones} setMilestones={setMilestones}
             epics={(epics as any[]).filter((e:any)=>spaceOf(e)===space)} setEpics={setEpics} epicWorkTypeOf={(e:any)=>epicWorkType(e,projects)}
             teams={TEAMS} workTypeOf={wtOf} onOpenItem={(i:any)=>{setSelEpicId(null);setSelected(i)}} onOpenEpic={(e:any)=>{setSelected(null);setSelEpicId(e.id)}}/>
         ):(
@@ -8867,7 +8867,7 @@ useEffect(()=>{
         </div>}
       </div>
       <div style={{flex:1,overflow:'hidden'}}>
-        {activeTab==='backlog'&&<Backlog items={sItems} setItems={setSItems} projects={sProjects} setProjects={setSProjects} space={space} ccrs={ccrs} ccrItems={ccrItems} setCcrItems={setCcrItems} epics={epics} setEpics={setEpics} sustainPct={Number(strategies[0]?.bau_pct??30)} releases={releases} setReleases={setReleases}/>}
+        {activeTab==='backlog'&&<Backlog items={sItems} setItems={setSItems} projects={sProjects} setProjects={setSProjects} space={space} ccrs={ccrs} ccrItems={ccrItems} setCcrItems={setCcrItems} epics={epics} setEpics={setEpics} sustainPct={Number(strategies[0]?.bau_pct??30)} releases={releases} setReleases={setReleases} milestones={sMilestones} setMilestones={setSMilestones}/>}
         {activeTab==='strategy'&&<StrategyTab projects={projects} setProjects={setProjects} strategies={strategies} setStrategies={setStrategies} tracks={tracks} setTracks={setTracks} goals={trackGoals} setGoals={setTrackGoals} deps={projectDeps} setDeps={setProjectDeps}
           people={people} teams={TEAMS} computeCapacity={(ps:any[],prs:any[])=>capacityByMonth(ps,prs,people,roles,items.filter(inSpace))}
           strategyItems={strategyItems} setStrategyItems={setStrategyItems} roles={roles} projectRoles={projectRoles} setProjectRoles={setProjectRoles}
