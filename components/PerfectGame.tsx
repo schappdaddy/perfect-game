@@ -2053,7 +2053,7 @@ function PanelField({label,field,type='text',selected,upd}:{label:string,field:s
   )
 }
 
-function Backlog({items,setItems,projects,setProjects,space,ccrs=[],ccrItems=[],setCcrItems,epics=[],setEpics,sustainPct=30,releases=[],setReleases,milestones=[],setMilestones}:{items:any[],setItems:any,projects:any[],setProjects:any,space:string,ccrs?:any[],ccrItems?:any[],setCcrItems?:any,epics?:any[],setEpics?:any,sustainPct?:number,releases?:any[],setReleases?:any,milestones?:any[],setMilestones?:any}) {
+function Backlog({mode='list',items,setItems,projects,setProjects,space,ccrs=[],ccrItems=[],setCcrItems,epics=[],setEpics,sustainPct=30,releases=[],setReleases,milestones=[],setMilestones}:{mode?:string,items:any[],setItems:any,projects:any[],setProjects:any,space:string,ccrs?:any[],ccrItems?:any[],setCcrItems?:any,epics?:any[],setEpics?:any,sustainPct?:number,releases?:any[],setReleases?:any,milestones?:any[],setMilestones?:any}) {
   // CCR membership helpers — the link is a junction row, edited from either side
   const itemCcrLink=(itemId:any)=>{const l=(ccrItems as any[]).find((x:any)=>x.item_id===itemId);return l?{link:l,ccr:(ccrs as any[]).find((c:any)=>c.id===l.ccr_id)}:null}
   async function detachItemCcr(itemId:any){
@@ -2095,9 +2095,8 @@ function Backlog({items,setItems,projects,setProjects,space,ccrs=[],ccrItems=[],
   // List, or quarter planning for tech debt / OpEx
   const [moreF,setMoreFS]=useState<boolean>(()=>{try{return localStorage.getItem('pg_backlog_more')==='1'}catch{return false}})
   const setMoreF=(v:boolean)=>{setMoreFS(v);try{localStorage.setItem('pg_backlog_more',v?'1':'0')}catch{}}
-  const [bview,setBviewState]=useState<string>(()=>{try{return localStorage.getItem('pg_backlog_view')||'list'}catch{return 'list'}})
-  const planning=bview==='plan'&&space==='work'
-  const setBview=(v:string)=>{setBviewState(v);try{localStorage.setItem('pg_backlog_view',v)}catch{}}
+  // The Planning tab shows the planning board; the Backlog tab the list
+  const planning=mode==='plan'&&space==='work'
   const [frl,setFrl]=useState('All') // release filter: 'All' | '__none' | month
   const [relMgr,setRelMgr]=useState(false)
   const [kind,setKindState]=useState<string>(()=>{try{return localStorage.getItem('pg_backlog_kind')||'all'}catch{return 'all'}}) // 'all' | 'epics' | 'stories'
@@ -2754,12 +2753,6 @@ const sorted=items.filter(i=>!isItemDone(i)).sort((a,b)=>{
             {t.label} <span style={{fontSize:10,color:'#7A8FA6',marginLeft:4}}>{segCount(t.key)}</span>
           </button>
         ))}
-        <div style={{display:'flex',border:'1px solid #243447',borderRadius:6,overflow:'hidden',marginLeft:12,marginBottom:4}}>
-          {[['list','≡ List'],['plan','🗓 Planning']].map(([k,l])=>(
-            <button key={k} onClick={()=>setBview(k)} title={k==='plan'?'Plan all work into quarters, then into monthly releases':'The full backlog'}
-              style={{background:bview===k?'#C8973A':'#1E3048',color:bview===k?'#0D1B2A':'#C8C8D4',border:'none',fontSize:11,fontWeight:700,padding:'5px 10px',cursor:'pointer'}}>{l}</button>
-          ))}
-        </div>
         {!planning&&<button onClick={()=>setRelMgr(true)} style={{background:'none',border:'1px solid #243447',borderRadius:6,color:'#C8C8D4',fontSize:11,padding:'5px 10px',cursor:'pointer',marginLeft:6,marginBottom:4}}>📦 Releases</button>}</>}
         <div style={{display:'flex',gap:6,marginLeft:'auto',marginBottom:4,flexWrap:'wrap' as const}}>
           {!planning&&<><button onClick={exportExcel} title="Export current view to Excel in ranked order" style={{...sel,color:'#27AE60',border:'1px solid rgba(39,174,96,0.4)'}}>⬇ Excel</button>
@@ -2830,7 +2823,7 @@ const sorted=items.filter(i=>!isItemDone(i)).sort((a,b)=>{
       </div>}
 
       <div style={{display:'flex',flex:1,overflow:'hidden'}}>
-        {bview==='plan'&&space==='work'?(
+        {planning?(
           <QuarterPlanner workType={seg} items={items} setItems={setItems} projects={projects} setProjects={setProjects} releases={releases} setReleases={setReleases} milestones={milestones} setMilestones={setMilestones}
             epics={(epics as any[]).filter((e:any)=>spaceOf(e)===space)} setEpics={setEpics} epicWorkTypeOf={(e:any)=>epicWorkType(e,projects)}
             teams={TEAMS} workTypeOf={wtOf} onOpenItem={(i:any)=>{setSelEpicId(null);setSelected(i)}} onOpenEpic={(e:any)=>{setSelected(null);setSelEpicId(e.id)}}/>
@@ -4194,112 +4187,8 @@ function Roadmap({items,setItems,projects,setProjects,milestones,setMilestones,t
           </div>
         </div>
 
-        {/* Planning Panel */}
-        <div
-          data-backlog-panel="true"
-          style={{borderLeft:'1px solid #243447',background:backlogHover?'rgba(200,151,58,0.05)':'#162436',flexShrink:0,display:'flex',flexDirection:'column',transition:'width 0.2s, background 0.2s',width:backlogOpen?280:32,minWidth:32,overflow:'hidden',outline:backlogHover?'2px dashed #C8973A':'none'}}
-          onDragOver={e=>{e.preventDefault();setBacklogHover(true)}}
-          onDragLeave={()=>setBacklogHover(false)}
-          onDrop={async e=>{
-            e.preventDefault();setBacklogHover(false)
-            const itemId=e.dataTransfer.getData('itemId')
-            if(itemId){setItems((prev:any[])=>prev.map(i=>i.id===itemId?{...i,start_date:null,end_date:null}:i));await supabase.from('items').update({start_date:null,end_date:null}).eq('id',itemId);return}
-            const projectId=e.dataTransfer.getData('projectId')
-            if(projectId){setProjects((prev:any[])=>prev.map(p=>p.id===projectId?{...p,start_date:null,end_date:null}:p));await supabase.from('projects').update({start_date:null,end_date:null}).eq('id',projectId)}
-          }}>
-          <button onClick={()=>setBacklogOpen(o=>!o)} style={{background:'none',border:'none',borderBottom:'1px solid #243447',cursor:'pointer',padding:'10px 8px',display:'flex',alignItems:'center',gap:6,color:'#C8973A',fontSize:11,fontWeight:700,letterSpacing:1,whiteSpace:'nowrap' as const,width:'100%',flexShrink:0}}>
-            <span style={{fontSize:12}}>{backlogOpen?'▶':'◀'}</span>
-            {backlogOpen&&<span>PLANNING PANEL</span>}
-          </button>
-          {backlogOpen&&(
-            <div style={{flex:1,overflowY:'auto',display:'flex',flexDirection:'column'}}>
-              {backlogHover&&<div style={{background:'rgba(200,151,58,0.15)',border:'2px dashed #C8973A',borderRadius:8,padding:'10px 8px',textAlign:'center' as const,margin:8,fontSize:11,color:'#C8973A',fontWeight:700}}>Drop here to remove from roadmap</div>}
-              {/* Projects */}
-              <div style={{borderBottom:'1px solid #243447',flexShrink:0}}>
-                <button onClick={()=>setProjectsPanelOpen(o=>!o)} style={{background:'none',border:'none',cursor:'pointer',padding:'10px 12px',display:'flex',alignItems:'center',gap:6,color:'#2E86AB',fontSize:11,fontWeight:700,letterSpacing:1,width:'100%',whiteSpace:'nowrap' as const}}>
-                  <span style={{fontSize:10}}>{projectsPanelOpen?'▼':'▶'}</span>
-                  <span>◈ INITIATIVES ({filteredProjects.filter(p=>(!p.start_date||!p.end_date)&&!p.ongoing).length})</span>
-                  <span style={{marginLeft:'auto',fontSize:9,color:'#7A8FA6',fontWeight:400}}>drag to set dates</span>
-                </button>
-                {projectsPanelOpen&&(
-                  <div style={{padding:'0 8px 10px'}}>
-                    {/* ∞ projects deliberately excluded — they don't get a normal
-                        start/end committed here, since their forecast is item-based,
-                        not project-timeline-based. Dragging one onto the roadmap to
-                        "set dates" wouldn't mean anything for how it's actually planned. */}
-                    {filteredProjects.filter(p=>(!p.start_date||!p.end_date)&&!p.ongoing).map(project=>{
-                      const rc=ragColor(project.rag)
-                      const pclr=pc(project.priority)
-                      const childCount=withDates.filter(i=>i.parent_project===project.name).length
-                      const totalCount=items.filter(i=>i.parent_project===project.name).length
-                      return(
-                        <div key={project.id} draggable
-                          onDragStart={e=>{e.dataTransfer.setData('projectId',project.id);e.dataTransfer.setData('projectName',project.name);e.dataTransfer.effectAllowed='copy'}}
-                          style={{background:'#1E3048',borderTop:'1px solid #243447',borderRight:'1px solid #243447',borderBottom:'1px solid #243447',borderLeft:`3px solid ${rc}`,borderRadius:6,padding:'8px 10px',marginBottom:6,cursor:'grab',userSelect:'none' as const,transition:'border-color 0.15s'}}
-                          onMouseEnter={e=>(e.currentTarget.style.borderColor='#2E86AB')}
-                          onMouseLeave={e=>{e.currentTarget.style.borderTopColor='#243447';e.currentTarget.style.borderRightColor='#243447';e.currentTarget.style.borderBottomColor='#243447'}}>
-                          <div style={{display:'flex',alignItems:'center',gap:5,marginBottom:3}}>
-                            <span style={{background:pclr.bg,color:'#fff',padding:'1px 5px',borderRadius:3,fontSize:9,fontWeight:700}}>{project.priority}</span>
-                            <span style={{fontSize:10,color:rc,fontWeight:700}}>{project.rag==='Green'?'🟢':project.rag==='Amber'?'🟡':project.rag==='Red'?'🔴':'⚪'}</span>
-                            <span style={{fontSize:9,color:'#7A8FA6',marginLeft:'auto'}}>{project.team==='Consumer Experience'?'CE':'OE'}</span>
-                          </div>
-                          <div style={{fontSize:11,color:'#F4F6F8',fontWeight:600,lineHeight:1.3,marginBottom:3}}>{project.name}</div>
-                          <div style={{display:'flex',gap:8,fontSize:9,color:'#7A8FA6'}}>
-                            <span>{childCount} committed · {totalCount-childCount} backlog</span>
-                            {project.start_date&&project.end_date?<span style={{color:'#27AE60',marginLeft:'auto'}}>✓ dated</span>:<span style={{color:'#D4820A',marginLeft:'auto'}}>no dates</span>}
-                          </div>
-                        </div>
-                      )
-                    })}
-                    {filteredProjects.filter(p=>!p.start_date||!p.end_date).length===0&&<div style={{fontSize:11,color:'#7A8FA6',fontStyle:'italic',padding:'8px 4px'}}>All initiatives dated ✓</div>}
-                  </div>
-                )}
-              </div>
-              {/* Backlog */}
-              <div style={{flexShrink:0}}>
-                <button onClick={()=>setBacklogSectionOpen(o=>!o)} style={{background:'none',border:'none',borderBottom:'1px solid #243447',cursor:'pointer',padding:'10px 12px',display:'flex',alignItems:'center',gap:6,color:'#C8973A',fontSize:11,fontWeight:700,letterSpacing:1,width:'100%',whiteSpace:'nowrap' as const}}>
-                  <span style={{fontSize:10}}>{backlogSectionOpen?'▼':'▶'}</span>
-                  <span>📋 BACKLOG ({uncommitted.length})</span>
-                  <span style={{marginLeft:'auto',fontSize:9,color:'#7A8FA6',fontWeight:400}}>drag to commit</span>
-                </button>
-                {backlogSectionOpen&&(
-                  <div style={{padding:'8px 8px 10px'}}>
-                    <div style={{fontSize:10,color:'#7A8FA6',marginBottom:8,lineHeight:1.5}}>Drag onto an initiative row · Drag roadmap bars here to remove</div>
-                    {uncommitted.length===0&&!backlogHover&&<div style={{textAlign:'center' as const,padding:16,color:'#7A8FA6',fontSize:11}}><div style={{fontSize:18,marginBottom:6}}>🎯</div>All items committed!</div>}
-                    {uncommitted.map(item=>{
-                      const pclr=pc(item.priority)
-                      const r=rice(item)
-                      return(
-                        <div key={item.id} draggable
-                          onDragStart={e=>{e.dataTransfer.setData('itemId',item.id);e.dataTransfer.effectAllowed='copy'}}
-                          onClick={()=>setDetailItem(item)}
-                          style={{background:'#1E3048',borderTop:'1px solid #243447',borderRight:'1px solid #243447',borderBottom:'1px solid #243447',borderLeft:`3px solid ${pclr.bg}`,borderRadius:6,padding:'8px 10px',marginBottom:6,cursor:'grab',userSelect:'none' as const,transition:'border-color 0.15s'}}
-                          onMouseEnter={e=>{e.currentTarget.style.borderTopColor='#C8973A';e.currentTarget.style.borderRightColor='#C8973A';e.currentTarget.style.borderBottomColor='#C8973A'}}
-                          onMouseLeave={e=>{e.currentTarget.style.borderTopColor='#243447';e.currentTarget.style.borderRightColor='#243447';e.currentTarget.style.borderBottomColor='#243447'}}>
-                          <div style={{display:'flex',alignItems:'center',gap:5,marginBottom:3}}>
-                            <span style={{background:pclr.bg,color:'#fff',padding:'1px 5px',borderRadius:3,fontSize:9,fontWeight:700}}>{item.priority}</span>
-                            <span style={{fontSize:9,color:'#7A8FA6',fontFamily:'monospace'}}>{item.item_id}</span>
-                            {item.effort&&<span style={{fontSize:9,color:'#7A8FA6',marginLeft:'auto'}}>{item.effort}</span>}
-                          </div>
-                          <div style={{fontSize:11,color:'#F4F6F8',lineHeight:1.3,marginBottom:3}}>{rt(item.request_type)} {item.name}</div>
-                          <div style={{display:'flex',alignItems:'center',gap:6,marginBottom:3,flexWrap:'wrap' as const}}>
-                            {item.status&&<span style={{fontSize:9,fontWeight:700,color:sc(item.status)}}>{item.status}</span>}
-                            {item.vendor_delivery_date&&<span style={{fontSize:9,color:'#7A8FA6'}}>🚚 {item.vendor_delivery_date}</span>}
-                          </div>
-                          <div style={{display:'flex',gap:8,fontSize:9,color:'#7A8FA6'}}>
-                            {item.wsjf&&<span>WSJF: <span style={{color:'#E8B95A',fontWeight:700}}>{parseFloat(item.wsjf).toFixed(1)}</span></span>}
-                            {r&&<span>RICE: <span style={{color:'#27AE60',fontWeight:700}}>{r}</span></span>}
-                            {item.swimlane&&<span style={{marginLeft:'auto'}}>{item.swimlane}</span>}
-                          </div>
-                        </div>
-                      )
-                    })}
-                  </div>
-                )}
-              </div>
-            </div>
-          )}
-        </div>
+        {/* Items and initiatives are planned on the Planning tab, not here */}
+
       </div>
 
       {/* Drag tooltip */}
@@ -6427,7 +6316,7 @@ function Desk({items,setItems,projects,setProjects,milestones,setMilestones,task
 
 
 // ── DONE — history of completed projects and items ───────────────────────
-function SprintsTab({items,setItems,projects,projectRoles,people,setPeople,roles,sprints,setSprints,itemAssignments,setItemAssignments}:any){
+function SprintsTab({items,setItems,projects,projectRoles,people,setPeople,roles,sprints,setSprints,itemAssignments,setItemAssignments,releases=[]}:any){
   const [newSprintStart,setNewSprintStart]=useState<any>({})   // team -> date string, the "start a new sprint" input per column
   const [assignOpen,setAssignOpen]=useState<any>(null)          // item.id currently showing its "+ assign person" mini-form
   const [assignPerson,setAssignPerson]=useState('')
@@ -6565,9 +6454,28 @@ function SprintsTab({items,setItems,projects,projectRoles,people,setPeople,roles
   const allTeamsSorted=allTeams
   const team=selectedTeam&&allTeamsSorted.includes(selectedTeam)?selectedTeam:allTeamsSorted[0]
 
-  const teamSprints=sprints.filter((s:any)=>s.team===team).sort((a:any,b:any)=>a.start_date<b.start_date?-1:1)
-  const lastEnd=teamSprints.length?teamSprints[teamSprints.length-1].end_date:null
-  const readyBacklog=items.filter((it:any)=>it.team===team&&!it.sprint_id&&!ITEM_TERMINAL.includes(it.status))
+  // Sprints follow the plan: pick a release; its sprints are those inside the release's
+  // window (after the previous release, up to this one), and the pool is the work planned
+  // for it (or for its quarter, or the whole backlog)
+  const pad2=(n:number)=>String(n).padStart(2,'0')
+  const nowKey=(()=>{const d=new Date();return `${d.getFullYear()}-${pad2(d.getMonth()+1)}`})()
+  const relList=(releases as any[]).filter((r:any)=>!r.no_release).map((r:any)=>r.month).sort()
+  const relEndOf=(k:string)=>{const r=(releases as any[]).find((x:any)=>x.month===k);if(r?.release_date)return r.release_date;const[y,m]=k.split('-').map(Number);return `${k}-${pad2(new Date(y,m,0).getDate())}`}
+  const [relK,setRelKS]=useState<string>(()=>{try{const v=localStorage.getItem('pg_sprint_rel');if(v)return v}catch{};return relList.find((k:string)=>relEndOf(k)>=localISO(new Date()))||'__all'})
+  const setRelK=(v:string)=>{setRelKS(v);try{localStorage.setItem('pg_sprint_rel',v)}catch{}}
+  const [poolScope,setPoolScopeS]=useState<string>(()=>{try{return localStorage.getItem('pg_sprint_pool')||'release'}catch{return 'release'}})
+  const setPoolScope=(v:string)=>{setPoolScopeS(v);try{localStorage.setItem('pg_sprint_pool',v)}catch{}}
+  const byRel=relK!=='__all'
+  const relIx=relList.indexOf(relK)
+  const relWinEnd=byRel?relEndOf(relK):null
+  const relWinStart=byRel?(relIx>0?(()=>{const d=new Date(relEndOf(relList[relIx-1])+'T12:00:00');d.setDate(d.getDate()+1);return localISO(d)})():`${relK}-01`):null
+  const relQuarter=(k:string)=>{const[y,m]=k.split('-').map(Number);const fy=m>=4?y+1:y,q=m>=4?Math.floor((m-4)/3)+1:4;return `FY${String(fy).slice(-2)}-Q${q}`}
+  const inPlan=(it:any)=>!byRel||poolScope==='all'?true:poolScope==='release'?it.release_month===relK:(it.release_month===relK||it.plan_quarter===relQuarter(relK)||(it.release_month&&relQuarter(it.release_month)===relQuarter(relK)))
+  const allTeamSprints=sprints.filter((s:any)=>s.team===team).sort((a:any,b:any)=>a.start_date<b.start_date?-1:1)
+  const teamSprints=byRel?allTeamSprints.filter((s:any)=>s.start_date<=relWinEnd!&&s.end_date>=relWinStart!):allTeamSprints
+  const sprintNo=(s:any)=>allTeamSprints.indexOf(s)+1
+  const lastEnd=allTeamSprints.length?allTeamSprints[allTeamSprints.length-1].end_date:null
+  const readyBacklog=items.filter((it:any)=>it.team===team&&!it.sprint_id&&!ITEM_TERMINAL.includes(it.status)&&inPlan(it))
     .sort((a:any,b:any)=>(a.committed_priority??a.sort_order??999)-(b.committed_priority??b.sort_order??999))
   const groupByProject=(list:any[])=>{
     const map=new Map<string,any[]>()
@@ -6584,7 +6492,7 @@ function SprintsTab({items,setItems,projects,projectRoles,people,setPeople,roles
     })
   }
   const readyGroups=groupByProject(readyBacklog)
-  const allStats=teamSprints.map((sp:any,ix:number)=>({sprint:sp,ix,stats:sprintStats(sp,items,itemAssignments,projects,projectRoles,people,roles)}))
+  const allStats=teamSprints.map((sp:any)=>({sprint:sp,ix:sprintNo(sp)-1,stats:sprintStats(sp,items,itemAssignments,projects,projectRoles,people,roles)}))
 
   return(
     <div style={{height:'100%',overflowY:'auto',padding:'20px 28px'}}>
@@ -6604,8 +6512,22 @@ function SprintsTab({items,setItems,projects,projectRoles,people,setPeople,roles
         ))}
       </div>
 
+      <div style={{display:'flex',alignItems:'center',gap:10,flexWrap:'wrap' as const,marginBottom:12}}>
+        <span style={{fontSize:11,fontWeight:700,color:'#5DADE2',letterSpacing:0.8}}>📦 RELEASE</span>
+        <select value={relK} onChange={e=>setRelK(e.target.value)} style={{background:'#1E3048',color:'#F4F6F8',border:'1px solid #243447',borderRadius:6,fontSize:12,padding:'5px 8px',cursor:'pointer'}}>
+          <option value="__all">All sprints (not by release)</option>
+          {relList.map((k:string)=>{const[y,m]=k.split('-').map(Number);return <option key={k} value={k}>{['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec'][m-1]} {y} release · {relEndOf(k)}</option>})}
+        </select>
+        {byRel&&<span style={{fontSize:11,color:'#7A8FA6'}}>Sprints from {relWinStart} to {relWinEnd} · {teamSprints.length} sprint{teamSprints.length!==1?'s':''}</span>}
+        {byRel&&<div style={{display:'flex',border:'1px solid #243447',borderRadius:6,overflow:'hidden',marginLeft:'auto'}} title="What the pool below lists">
+          {[['release','Planned for this release'],['quarter',`Planned this quarter (${relQuarter(relK).replace('-',' ')})`],['all','Whole backlog']].map(([k,l])=>(
+            <button key={k} onClick={()=>setPoolScope(k)} style={{background:poolScope===k?'#C8973A':'#1E3048',color:poolScope===k?'#0D1B2A':'#C8C8D4',border:'none',fontSize:11,fontWeight:700,padding:'5px 10px',cursor:'pointer'}}>{l}</button>
+          ))}
+        </div>}
+      </div>
+      {byRel&&!teamSprints.length&&<div style={{fontSize:11,color:'#E8B95A',marginBottom:12}}>No {team} sprints fall in this release yet. Start one below.</div>}
       <div style={{fontSize:11,color:readyBacklog.length<3?'#E8B95A':'#7A8FA6',marginBottom:16}}>
-        {readyBacklog.length} item{readyBacklog.length!==1?'s':''} in the backlog not yet scheduled{readyBacklog.length<3?' — runway is getting thin':''}
+        {readyBacklog.length} item{readyBacklog.length!==1?'s':''} {byRel&&poolScope!=='all'?(poolScope==='release'?'planned for this release':'planned this quarter'):'in the backlog'} not yet in a sprint{readyBacklog.length<3&&(!byRel||poolScope==='all')?' — runway is getting thin':''}
         <button onClick={recalculateAllItemDates} disabled={recalcBusy} title="One-time cleanup: recompute every sprint-placed item's dates from its current assignments — useful if dates look wrong after an engine update"
           style={{marginLeft:12,background:'none',border:'1px solid #243447',borderRadius:5,color:'#7A8FA6',fontSize:10,padding:'3px 9px',cursor:'pointer',opacity:recalcBusy?0.5:1}}>
           {recalcBusy?'Recalculating…':'🔄 Recalculate item dates'}
@@ -6690,6 +6612,7 @@ function SprintsTab({items,setItems,projects,projectRoles,people,setPeople,roles
                           <div style={{display:'flex',alignItems:'center',gap:6,fontSize:11}}>
                             <span style={{color:'#7A8FA6',fontFamily:'monospace',fontSize:9}}>{it.item_id}</span>
                             <span style={{color:'#F4F6F8',flex:1,overflow:'hidden',whiteSpace:'nowrap' as const,textOverflow:'ellipsis'}}>{rt(it.request_type)} {it.name}</span>
+                            {byRel&&it.release_month!==relK&&<span title={it.release_month?`Planned for the ${it.release_month} release, not this one`:'Not planned for any release'} style={{fontSize:8,color:'#E8B95A',border:'1px solid #E8B95A',borderRadius:4,padding:'0 5px',whiteSpace:'nowrap' as const}}>{it.release_month?`⚠ ${it.release_month} release`:'⚠ not in the plan'}</span>}
                             {it.carriedOver&&<span title={`Originally placed in an earlier sprint — real work extends into this one`} style={{fontSize:8,color:'#C8973A',border:'1px solid #C8973A',borderRadius:4,padding:'0 5px'}}>↳ carried over</span>}
                             <span style={{color:sc(it.status),fontSize:9,fontWeight:700}}>{it.status}</span>
                             <span style={{color:'#7A8FA6',fontSize:9,border:'1px solid #243447',borderRadius:4,padding:'0 5px'}}>{it.effort||'M'}</span>
@@ -6764,8 +6687,8 @@ function SprintsTab({items,setItems,projects,projectRoles,people,setPeople,roles
               style={{background:'#27AE60',border:'none',borderRadius:6,color:'#fff',fontSize:11,fontWeight:700,padding:'6px 14px',cursor:'pointer',opacity:newSprintStart[team]?1:0.5}}>+ New Sprint</button>
           </div>
 
-          <div style={{fontSize:11,fontWeight:700,color:'#5DADE2',letterSpacing:1,marginBottom:8}}>READY BACKLOG — BY INITIATIVE</div>
-          {readyBacklog.length===0&&<div style={{fontSize:11,color:'#7A8FA6',fontStyle:'italic'}}>Nothing left in the backlog right now.</div>}
+          <div style={{fontSize:11,fontWeight:700,color:'#5DADE2',letterSpacing:1,marginBottom:8}}>{byRel&&poolScope==='release'?'PLANNED FOR THIS RELEASE':byRel&&poolScope==='quarter'?'PLANNED THIS QUARTER':'READY BACKLOG'} — BY INITIATIVE</div>
+          {readyBacklog.length===0&&<div style={{fontSize:11,color:'#7A8FA6',fontStyle:'italic'}}>{byRel&&poolScope!=='all'?'Everything planned here is in a sprint. Plan more on the Planning tab, or show the whole backlog.':'Nothing left in the backlog right now.'}</div>}
           {readyGroups.map(([projName,groupItems]:any)=>{
             const proj=projects.find((p:any)=>p.name===projName)
             return(
@@ -6790,7 +6713,7 @@ function SprintsTab({items,setItems,projects,projectRoles,people,setPeople,roles
                     <span style={{color:'#7A8FA6',fontSize:9,border:'1px solid #243447',borderRadius:4,padding:'0 5px',flexShrink:0}}>{it.effort||'M'}</span>
                     <select value="" onChange={e=>placeItem(it,e.target.value)} style={{fontSize:10,background:'#0D1B2A',border:'1px solid #243447',borderRadius:5,color:'#7A8FA6',padding:'3px 5px'}}>
                       <option value="">+ Add to sprint…</option>
-                      {teamSprints.filter((s:any)=>!s.closed).map((s:any,ix:number)=><option key={s.id} value={s.id}>Sprint {teamSprints.indexOf(s)+1} ({s.start_date})</option>)}
+                      {teamSprints.filter((s:any)=>!s.closed).map((s:any)=><option key={s.id} value={s.id}>Sprint {sprintNo(s)} ({s.start_date})</option>)}
                     </select>
                   </div>
                   )
@@ -8777,7 +8700,7 @@ export default function PerfectGame() {
   const sItems=items.filter(inSpace),sProjects=projects.filter(inSpace),sMilestones=milestones.filter(inSpace)
   const setSItems=scopedSetter(setItems),setSProjects=scopedSetter(setProjects),setSMilestones=scopedSetter(setMilestones)
   // Teams & Stakeholder are work-only concepts
-  useEffect(()=>{if(space==='home'&&(activeTab==='teams'||activeTab==='stakeholder'||activeTab==='budget'||activeTab==='sprints'||activeTab==='strategy'))setActiveTab('desk')},[space])
+  useEffect(()=>{if(space==='home'&&(activeTab==='teams'||activeTab==='stakeholder'||activeTab==='budget'||activeTab==='sprints'||activeTab==='strategy'||activeTab==='planning'))setActiveTab('desk')},[space])
 
 useEffect(()=>{
     async function load(){
@@ -8846,12 +8769,15 @@ useEffect(()=>{
   },0)
 
   const TABS=[
+  // In order of operation: strategy → roadmap → plan the quarter and its releases → sprints;
+  // then the backlog of everything, the initiatives, and the rest
   {key:'desk',label:'Desk',icon:'✎'},
   {key:'strategy',label:'Strategy',icon:'◭'},
-  {key:'projects',label:'Initiatives',icon:'◈',badge:totalViolations>0?totalViolations:null},
-  {key:'backlog',label:'Backlog',icon:'≡'},
   {key:'roadmap',label:'Roadmap',icon:'◫'},
+  ...(space==='work'?[{key:'planning',label:'Planning',icon:'🗓'}]:[]),
   {key:'sprints',label:'Sprints',icon:'⚡'},
+  {key:'backlog',label:'Backlog',icon:'≡'},
+  {key:'projects',label:'Initiatives',icon:'◈',badge:totalViolations>0?totalViolations:null},
   {key:'teams',label:'Teams',icon:'⬡'},
   {key:'stakeholder',label:'Stakeholder',icon:'◉'},
   {key:'done',label:'Done',icon:'✓'},
@@ -8900,7 +8826,8 @@ useEffect(()=>{
         </div>}
       </div>
       <div style={{flex:1,overflow:'hidden'}}>
-        {activeTab==='backlog'&&<Backlog items={sItems} setItems={setSItems} projects={sProjects} setProjects={setSProjects} space={space} ccrs={ccrs} ccrItems={ccrItems} setCcrItems={setCcrItems} epics={epics} setEpics={setEpics} sustainPct={Number(strategies[0]?.bau_pct??30)} releases={releases} setReleases={setReleases} milestones={sMilestones} setMilestones={setSMilestones}/>}
+        {activeTab==='backlog'&&<Backlog mode="list" items={sItems} setItems={setSItems} projects={sProjects} setProjects={setSProjects} space={space} ccrs={ccrs} ccrItems={ccrItems} setCcrItems={setCcrItems} epics={epics} setEpics={setEpics} sustainPct={Number(strategies[0]?.bau_pct??30)} releases={releases} setReleases={setReleases} milestones={sMilestones} setMilestones={setSMilestones}/>}
+        {activeTab==='planning'&&<Backlog mode="plan" items={sItems} setItems={setSItems} projects={sProjects} setProjects={setSProjects} space={space} ccrs={ccrs} ccrItems={ccrItems} setCcrItems={setCcrItems} epics={epics} setEpics={setEpics} sustainPct={Number(strategies[0]?.bau_pct??30)} releases={releases} setReleases={setReleases} milestones={sMilestones} setMilestones={setSMilestones}/>}
         {activeTab==='strategy'&&<StrategyTab projects={projects} setProjects={setProjects} strategies={strategies} setStrategies={setStrategies} tracks={tracks} setTracks={setTracks} goals={trackGoals} setGoals={setTrackGoals} deps={projectDeps} setDeps={setProjectDeps}
           people={people} teams={TEAMS} computeCapacity={(ps:any[],prs:any[])=>capacityByMonth(ps,prs,people,roles,items.filter(inSpace))}
           strategyItems={strategyItems} setStrategyItems={setStrategyItems} roles={roles} projectRoles={projectRoles} setProjectRoles={setProjectRoles}
@@ -8917,7 +8844,7 @@ useEffect(()=>{
         {activeTab==='stakeholder'&&<Stakeholder items={sItems} projects={sProjects} milestones={sMilestones}/>}
         {activeTab==='done'&&<DoneTab items={sItems} setItems={setSItems} projects={sProjects} setProjects={setSProjects} ccrs={ccrs} ccrItems={ccrItems} space={space}/>}
         {activeTab==='budget'&&<BudgetTab roles={roles} setRoles={setRoles} people={people} setPeople={setPeople} projects={sProjects} items={sItems} projectRoles={projectRoles} itemAssignments={itemAssignments} qBudgets={qBudgets} setQBudgets={setQBudgets}/>}
-        {activeTab==='sprints'&&<SprintsTab items={sItems} setItems={setSItems} projects={sProjects} projectRoles={projectRoles} people={people} setPeople={setPeople} roles={roles} sprints={sprints} setSprints={setSprints} itemAssignments={itemAssignments} setItemAssignments={setItemAssignments}/>}
+        {activeTab==='sprints'&&<SprintsTab releases={releases} items={sItems} setItems={setSItems} projects={sProjects} projectRoles={projectRoles} people={people} setPeople={setPeople} roles={roles} sprints={sprints} setSprints={setSprints} itemAssignments={itemAssignments} setItemAssignments={setItemAssignments}/>}
       </div>
     </div>
   )
