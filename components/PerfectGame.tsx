@@ -3348,7 +3348,9 @@ function Roadmap({items,setItems,projects,setProjects,milestones,setMilestones,t
     return am-bm
   })
   const [hideDone,setHideDone]=useState(false)
-  const filteredProjects=projects.filter(p=>(ft==='All'||p.team===ft)&&(!hideDone||!PROJECT_TERMINAL.includes(p.status)))
+  // Quarter plans with nothing planned in them yet aren't worth a roadmap row
+  const emptyPlan=(p:any)=>p.sustain_quarter&&!items.some((i:any)=>i.parent_project===p.name)&&!(epics as any[]).some((e:any)=>e.project_id===p.id)
+  const filteredProjects=projects.filter(p=>(ft==='All'||p.team===ft)&&(!hideDone||!PROJECT_TERMINAL.includes(p.status))&&!emptyPlan(p))
   const flaggedItems=items.filter(flagStk) // roadmap discussion = stakeholder audience
 
   async function saveDiscussNote(item){
@@ -3651,6 +3653,19 @@ function Roadmap({items,setItems,projects,setProjects,milestones,setMilestones,t
       return{k,date,dated:!!r?.release_date,x:pct(date)}
     }).filter(Boolean) as any[]
   })()
+  // Release chips close together (e.g. Jan 9 and Feb 1) go on a second lane instead of overlapping
+  const relTagged=(k:string)=>projects.filter((p:any)=>p.release_month===k).length+(epics as any[]).filter((e:any)=>e.release_month===k).length+items.filter((i:any)=>i.release_month===k).length
+  const relLane=(()=>{
+    const m=new Map<string,number>(),ends=[-1e9,-1e9]
+    for(const r of [...relMarks].sort((a:any,b:any)=>a.x-b.x)){
+      const n=relTagged(r.k),w=46+(n?String(n).length*7+12:0)
+      const lane=r.x-w/2>ends[0]+4?0:r.x-w/2>ends[1]+4?1:0
+      ends[lane]=r.x+w/2;m.set(r.k,lane)
+    }
+    return m
+  })()
+  const relTwoLanes=[...relLane.values()].some(v=>v===1)
+  const REL_H=relTwoLanes?42:24
   function CfShading(){
     return(
       <>{relMarks.map((r:any)=><div key={'rel-'+r.k} style={{position:'absolute',top:0,bottom:0,left:r.x,width:0,borderLeft:`1px ${r.dated?'solid':'dashed'} rgba(93,173,226,0.45)`,zIndex:1,pointerEvents:'none'}}/>)}
@@ -3674,7 +3689,7 @@ function Roadmap({items,setItems,projects,setProjects,milestones,setMilestones,t
     const widthPx=barPx(item.start_date,item.end_date)
     return(
       <div data-dep-key={depKey('item',item.id)} style={{position:'absolute',top:6,height:28,left:leftPx,width:widthPx,zIndex:3,minWidth:8,opacity:isDragging?0.6:isTerminal?0.75:1}}>
-        <div onMouseDown={e=>startBarDrag(e,item,'left')} style={{position:'absolute',left:0,top:0,bottom:0,width:8,cursor:'ew-resize',zIndex:5,background:'rgba(255,255,255,0.2)',borderRadius:'4px 0 0 4px'}}/>
+        <div className="pg-rs" onMouseDown={e=>startBarDrag(e,item,'left')} style={{position:'absolute',left:0,top:0,bottom:0,width:8,cursor:'ew-resize',zIndex:5,borderRadius:'4px 0 0 4px'}}/>
         <div draggable onDragStart={e=>{e.dataTransfer.setData('itemId',item.id);e.dataTransfer.effectAllowed='move'}}
           onMouseDown={e=>startBarDrag(e,item,'move')}
           title="Drag to reschedule — click the item's name on the left to edit it"
@@ -3687,7 +3702,7 @@ function Roadmap({items,setItems,projects,setProjects,milestones,setMilestones,t
           })()}
           {item.name}
         </div>
-        <div onMouseDown={e=>startBarDrag(e,item,'right')} style={{position:'absolute',right:0,top:0,bottom:0,width:8,cursor:'ew-resize',zIndex:5,background:'rgba(255,255,255,0.2)',borderRadius:'0 4px 4px 0'}}/>
+        <div className="pg-rs" onMouseDown={e=>startBarDrag(e,item,'right')} style={{position:'absolute',right:0,top:0,bottom:0,width:8,cursor:'ew-resize',zIndex:5,borderRadius:'0 4px 4px 0'}}/>
         {setDeps&&!isDragging&&<DepHandle k={depKey('item',item.id)}/>}
       </div>
     )
@@ -3835,6 +3850,8 @@ function Roadmap({items,setItems,projects,setProjects,milestones,setMilestones,t
                 label column and the bars fall out of sync by exactly the ruler's height
                 the moment Sprints is toggled on. */}
             {showSprints&&sprintBands.length>0&&<div style={{height:24,flexShrink:0,background:'#0D1B2A',borderBottom:'1px solid #243447'}}/>}
+            {/* Same for the releases strip */}
+            {showReleases&&relMarks.length>0&&<div style={{height:REL_H,flexShrink:0,background:'#0D1B2A',borderBottom:'1px solid #243447',display:'flex',alignItems:'center',padding:'0 12px',fontSize:9.5,fontWeight:700,color:'#5DADE2',letterSpacing:0.8}}>📦 RELEASES</div>}
             <div ref={labelRef} style={{flex:1,overflowY:'hidden'}}>
               {groups.map((group:any)=>{
                 const isCollapsed=getCollapsed()[group.id]
@@ -3848,9 +3865,9 @@ function Roadmap({items,setItems,projects,setProjects,milestones,setMilestones,t
                       <button onClick={()=>toggleCollapse(group.id)} style={{background:'none',border:'none',cursor:'pointer',color:'#C8973A',fontSize:14,padding:'2px 4px',lineHeight:1,flexShrink:0}}>
                         {isCollapsed?'▶':'▼'}
                       </button>
-                      <div style={{overflow:'hidden',flex:1}}>
-                        <div style={{display:'flex',alignItems:'center',gap:5,marginBottom:2}}>
-                          <span onClick={()=>setQuickProject(group)} title="Click to edit this initiative" style={{fontSize:12,fontWeight:700,color:'#F4F6F8',overflow:'hidden',whiteSpace:'nowrap' as const,textOverflow:'ellipsis',maxWidth:110,cursor:'pointer'}}>{group.name}{group.ongoing?' ∞':''}</span>
+                      <div style={{overflow:'hidden',flex:1,minWidth:0}}>
+                        <div title={group.name} style={{display:'flex',alignItems:'center',gap:5,marginBottom:2,minWidth:0}}>
+                          <span onClick={()=>setQuickProject(group)} title="Click to edit this initiative" style={{fontSize:12,fontWeight:700,color:'#F4F6F8',overflow:'hidden',whiteSpace:'nowrap' as const,textOverflow:'ellipsis',minWidth:0,cursor:'pointer'}}>{group.name}{group.ongoing?' ∞':''}</span>
                           <span style={{fontSize:10,color:rc,fontWeight:700,flexShrink:0}}>{group.rag==='Green'?'🟢':group.rag==='Amber'?'🟡':group.rag==='Red'?'🔴':'⚪'}</span>
                           {group.violations.length>0&&<span style={{fontSize:9,color:'#E74C3C',flexShrink:0}}>⚠️</span>}
                         </div>
@@ -3964,6 +3981,7 @@ function Roadmap({items,setItems,projects,setProjects,milestones,setMilestones,t
               </div>
             )}
             <div ref={depRef} style={{minWidth:TOTAL_W,position:'relative'}}>
+              <style>{'.pg-rs{transition:background .1s}.pg-rs:hover{background:rgba(255,255,255,0.28)}'}</style>
               {setDeps&&<DependencyLayer containerRef={depRef} deps={roadmapDeps} isBad={depBad} label={depName}
                 onCreate={(a:string,b:string)=>createDependency(a,b,deps as any[],setDeps)}
                 onDelete={(d:any)=>{if(confirm(`Remove the dependency ${depName(depKey(d.blocker_type,d.blocker_id))} → ${depName(depKey(d.blocked_type,d.blocked_id))}?`))deleteDependency(d,setDeps)}}/>}
@@ -4002,13 +4020,13 @@ function Roadmap({items,setItems,projects,setProjects,milestones,setMilestones,t
               )}
 
               {showReleases&&relMarks.length>0&&(
-                <div style={{position:'sticky' as const,top:showSprints&&sprintBands.length>0?60:36,zIndex:9,height:24,background:'#0D1B2A',borderBottom:'1px solid #243447'}}>
+                <div style={{position:'sticky' as const,top:showSprints&&sprintBands.length>0?60:36,zIndex:9,height:REL_H,background:'#0D1B2A',borderBottom:'1px solid #243447'}}>
                   {relMarks.map((r:any)=>{
                     const tagged=[...projects.filter((p:any)=>p.release_month===r.k).map((p:any)=>({kind:'Initiative',name:p.name})),
                       ...(epics as any[]).filter((e:any)=>e.release_month===r.k).map((e:any)=>({kind:'Epic',name:e.name})),
                       ...items.filter((i:any)=>i.release_month===r.k).map((i:any)=>({kind:'Story',name:i.name,id:i.item_id}))]
                     return(
-                      <div key={r.k} style={{position:'absolute',left:r.x,top:0,bottom:0,transform:'translateX(-50%)',display:'flex',alignItems:'center'}}>
+                      <div key={r.k} style={{position:'absolute',left:r.x,top:relTwoLanes?(relLane.get(r.k)?21:3):0,height:relTwoLanes?18:24,transform:'translateX(-50%)',display:'flex',alignItems:'center',zIndex:relPopover===r.k?2:1}}>
                         <span onClick={()=>setRelPopover(relPopover===r.k?null:r.k)} title={`${fmtMonthKey(r.k)} release${r.dated?' · '+r.date:' · date not set'}\n${tagged.length} tagged. Click for the list.`}
                           style={{background:r.dated?'#5DADE2':'transparent',color:r.dated?'#0D1B2A':'#5DADE2',border:'1px '+(r.dated?'solid':'dashed')+' #5DADE2',fontSize:10,fontWeight:800,padding:'1px 7px',borderRadius:10,whiteSpace:'nowrap' as const,cursor:'pointer'}}>
                           📦 {fmtMonthKey(r.k).slice(0,3)}{tagged.length?` · ${tagged.length}`:''}
@@ -4048,7 +4066,7 @@ function Roadmap({items,setItems,projects,setProjects,milestones,setMilestones,t
                   <div key={group.id} data-project-id={group.id} data-project-name={group.name}>
                     {/* Parent bar row */}
                     <div style={{height:PARENT_H,background:rb,borderBottom:'1px solid #243447',borderTop:`2px solid ${rbd}`,position:'relative'}}>
-                      <div style={{position:'absolute',top:0,bottom:0,left:todayPx(),width:2,background:'#E74C3C',opacity:0.5,zIndex:4,pointerEvents:'none'}}/>
+                      <div style={{position:'absolute',top:0,bottom:0,left:todayPx(),width:2,background:'#E74C3C',opacity:0.5,zIndex:1,pointerEvents:'none'}}/>
                       <CfShading/>
                       {cols.map((col,ci)=>(
                         <div key={col.key}
@@ -4059,14 +4077,14 @@ function Roadmap({items,setItems,projects,setProjects,milestones,setMilestones,t
                       ))}
                       {group.bar_start&&group.bar_end&&(
                         <div data-dep-key={depKey('project',group.id)} style={{position:'absolute',top:10,height:32,left:pct(group.bar_start),width:group.ongoing?Math.max(cols.length*COL_W-pct(group.bar_start),8):barPx(group.bar_start,group.bar_end),zIndex:3,minWidth:8}}>
-                          <div onMouseDown={e=>startProjectBarDrag(e,group,'left')} style={{position:'absolute',left:0,top:0,bottom:0,width:10,cursor:'ew-resize',zIndex:5,background:'rgba(255,255,255,0.2)',borderRadius:'4px 0 0 4px'}}/>
+                          <div className="pg-rs" onMouseDown={e=>startProjectBarDrag(e,group,'left')} style={{position:'absolute',left:0,top:0,bottom:0,width:10,cursor:'ew-resize',zIndex:5,borderRadius:'4px 0 0 4px'}}/>
                           <div draggable onDragStart={e=>{e.dataTransfer.setData('projectId',group.id);e.dataTransfer.effectAllowed='move'}}
                             onMouseDown={e=>startProjectBarDrag(e,group,'move')}
                             style={{position:'absolute',left:0,right:0,top:0,bottom:0,background:PROJECT_TERMINAL.includes(group.status)?'repeating-linear-gradient(45deg,#2E3D4E,#2E3D4E 8px,#26333F 8px,#26333F 16px)':group.ongoing?`linear-gradient(90deg, ${rc} 0%, ${rc} 55%, ${rc}33 100%)`:rc,borderRadius:6,display:'flex',alignItems:'center',padding:'0 14px',fontSize:11,fontWeight:700,color:PROJECT_TERMINAL.includes(group.status)?'#8FA3B8':'#fff',overflow:'hidden',whiteSpace:'nowrap' as const,opacity:draggingBar===group.id?0.7:PROJECT_TERMINAL.includes(group.status)?0.75:0.9,border:PROJECT_TERMINAL.includes(group.status)?'1px solid #3A4A5E':group.ongoing?'1px dashed rgba(255,255,255,0.45)':group.violations.length>0?'2px dashed rgba(255,255,255,0.5)':'none',boxShadow:PROJECT_TERMINAL.includes(group.status)?'none':`0 2px 8px ${rc}55`,cursor:draggingBar===group.id?'grabbing':'grab'}}>
                             {PROJECT_TERMINAL.includes(group.status)?(group.status==='Cancelled'?'✕':'✓'):group.rag==='Red'?'🔴':group.rag==='Amber'?'🟡':group.rag==='Green'?'🟢':'⚪'} {group.name}{group.ongoing?' ∞':''}{PROJECT_TERMINAL.includes(group.status)?` — ${group.status}`:''}
                             {!PROJECT_TERMINAL.includes(group.status)&&group.violations.length>0&&<span style={{marginLeft:6,fontSize:10}}>⚠️</span>}
                           </div>
-                          <div onMouseDown={e=>startProjectBarDrag(e,group,'right')} style={{position:'absolute',right:0,top:0,bottom:0,width:10,cursor:'ew-resize',zIndex:5,background:'rgba(255,255,255,0.2)',borderRadius:'0 4px 4px 0'}}/>
+                          <div className="pg-rs" onMouseDown={e=>startProjectBarDrag(e,group,'right')} style={{position:'absolute',right:0,top:0,bottom:0,width:10,cursor:'ew-resize',zIndex:5,borderRadius:'0 4px 4px 0'}}/>
                           {setDeps&&!group.ongoing&&<DepHandle k={depKey('project',group.id)}/>}
                         </div>
                       )}
@@ -4088,7 +4106,7 @@ function Roadmap({items,setItems,projects,setProjects,milestones,setMilestones,t
                     {!isCollapsed&&roadmapRows(group,childItems).map((r:any,idx:number)=>{
                       if(r.kind==='epic'){const e=r.epic,x=r.ext;return(
                         <div key={'ep'+e.id} style={{height:ROW_H,borderBottom:'1px solid #243447',background:'rgba(224,123,42,0.04)',position:'relative'}}>
-                          <div style={{position:'absolute',top:0,bottom:0,left:todayPx(),width:2,background:'#E74C3C',opacity:0.3,zIndex:4,pointerEvents:'none'}}/>
+                          <div style={{position:'absolute',top:0,bottom:0,left:todayPx(),width:2,background:'#E74C3C',opacity:0.3,zIndex:1,pointerEvents:'none'}}/>
                           <CfShading/>
                           {x?(
                             <div data-dep-key={depKey('epic',e.id)} title={`◆ ${e.name}\n${x.s} → ${x.e}${x.derived?'\nDates from its stories':''}`}
@@ -4105,7 +4123,7 @@ function Roadmap({items,setItems,projects,setProjects,milestones,setMilestones,t
                       const isViolation=!!group.violations.find((v:any)=>v.id===item.id)
                       return(
                         <div key={item.id} style={{height:ROW_H,borderBottom:'1px solid #243447',background:isViolation?'rgba(192,57,43,0.05)':idx%2===0?'#0D1B2A':'#111D2C',position:'relative'}}>
-                          <div style={{position:'absolute',top:0,bottom:0,left:todayPx(),width:2,background:'#E74C3C',opacity:0.3,zIndex:4,pointerEvents:'none'}}/>
+                          <div style={{position:'absolute',top:0,bottom:0,left:todayPx(),width:2,background:'#E74C3C',opacity:0.3,zIndex:1,pointerEvents:'none'}}/>
                           <CfShading/>
                           {cols.map((col,ci)=>(
                             <div key={col.key}
@@ -4126,7 +4144,7 @@ function Roadmap({items,setItems,projects,setProjects,milestones,setMilestones,t
               {orphans.length>0&&(
                 <div>
                   <div style={{height:PARENT_H,background:'rgba(122,143,166,0.08)',borderBottom:'1px solid #243447',borderTop:'2px solid #243447',position:'relative'}}>
-                    <div style={{position:'absolute',top:0,bottom:0,left:todayPx(),width:2,background:'#E74C3C',opacity:0.3,zIndex:4,pointerEvents:'none'}}/>
+                    <div style={{position:'absolute',top:0,bottom:0,left:todayPx(),width:2,background:'#E74C3C',opacity:0.3,zIndex:1,pointerEvents:'none'}}/>
                     {cols.map((col,ci)=>(
                       <div key={col.key}
                         style={{position:'absolute',top:0,bottom:0,left:ci*COL_W,width:COL_W,background:dragOverProject===''&&dragOverCol===col.key?'rgba(200,151,58,0.15)':'transparent'}}
@@ -4137,7 +4155,7 @@ function Roadmap({items,setItems,projects,setProjects,milestones,setMilestones,t
                   </div>
                   {!getCollapsed()['__orphans']&&orphans.map((item,idx)=>(
                     <div key={item.id} style={{height:ROW_H,borderBottom:'1px solid #243447',background:idx%2===0?'#0D1B2A':'#111D2C',position:'relative'}}>
-                      <div style={{position:'absolute',top:0,bottom:0,left:todayPx(),width:2,background:'#E74C3C',opacity:0.3,zIndex:4,pointerEvents:'none'}}/>
+                      <div style={{position:'absolute',top:0,bottom:0,left:todayPx(),width:2,background:'#E74C3C',opacity:0.3,zIndex:1,pointerEvents:'none'}}/>
                       <CfShading/>
                       {cols.map((col,ci)=>(
                         <div key={col.key}

@@ -116,10 +116,19 @@ export function DependencyLayer({containerRef,deps,isBad,onCreate,onDelete,label
     const dx=Math.max(24,Math.abs(x2-x1)/2)
     return `M${x1},${y1} C${x1+dx},${y1} ${x2-dx},${y2} ${x2},${y2}`
   }
+  // When the dependent starts before its blocker ends, a right-to-left curve loops across
+  // other rows; instead leave the blocker from its bottom (or top) edge, just above where the
+  // dependent starts, and come into the dependent's start
+  const depPath=(a:any,b:any)=>{
+    if(b.x0>=a.x1+16||Math.abs(b.y-a.y)<4)return path(a.x1,a.y,b.x0,b.y)
+    const down=b.y>a.y,sx=Math.max(a.x0+8,Math.min(a.x1-8,b.x0-14)),sy=down?a.top+a.h:a.top
+    const x2=b.x0,y2=b.y
+    return `M${sx},${sy} C${sx},${y2} ${Math.min(sx,x2-18)},${y2} ${x2},${y2}`
+  }
   const lines=deps.map(d=>{
     const a=boxes[fromKey(d)],b=boxes[toKey(d)]
     if(!a||!b)return null
-    return{d,dPath:path(a.x1,a.y,b.x0,b.y),bad:!!isBad?.(d)}
+    return{d,dPath:depPath(a,b),bad:!!isBad?.(d)}
   }).filter(Boolean) as {d:DepRow,dPath:string,bad:boolean}[]
   const over=link?.over?boxes[link.over]:null
   const src=link?boxes[link.from]:null
