@@ -27,7 +27,7 @@ const trunc=(text:string,w:number,fs:number,bold=false)=>{
 // Width of a short all-caps label at a size (Calibri capitals run wider)
 const capsW=(t:string,fs:number)=>t.length*fs*0.66/72+0.08
 
-export type PlanCard={kind:'initiative'|'epic'|'story',name:string,ref?:string,team?:string|null,wt?:string,home?:string|null,release?:string|null,quarter?:string|null,priority?:string|null}
+export type PlanCard={kind:'initiative'|'epic'|'story',name:string,ref?:string,team?:string|null,wt?:string,home?:string|null,release?:string|null,quarter?:string|null,priority?:string|null,status?:string|null,flag?:string|null}
 export type PlanMilestone={date:string,name:string,type:string,color?:string|null,team?:string|null,done?:boolean}
 export type PlanColumn={title:string,sub?:string,meta?:string[],milestones:PlanMilestone[],cards:PlanCard[],blocked?:boolean,now?:boolean,slimmable?:boolean}
 
@@ -40,7 +40,7 @@ export async function exportPlanningPptx({title,subtitle,quarters,releaseSlides,
   await pptx.writeFile({fileName:fileName+'.pptx'})
 }
 
-function drawBoard(pptx:any,title:string,subtitle:string,cols:PlanColumn[]){
+export function drawBoard(pptx:any,title:string,subtitle:string,cols:PlanColumn[]){
   const slide=pptx.addSlide()
   slide.background={color:CREAM}
   slide.addShape(pptx.ShapeType.rect,{x:0.25,y:0,w:0.28,h:7.5,fill:{color:'2F3742'},line:{color:'2F3742'}})
@@ -147,15 +147,16 @@ function drawColumn(pptx:any,slide:any,c:PlanColumn,x:number,w:number,top:number
       // Line 1: the kind label, then id, team, work type, priority, release / quarter
       const bfs=6.5,bw=capsW(K.label,bfs)
       slide.addText(K.label,{x:tx,y:cy+0.04,w:bw,h:0.15,fontSize:bfs,bold:true,color:K.badgeInk,fill:{color:K.badge},align:'center',valign:'middle',margin:0})
-      const tags=[cd.ref,cd.team,cd.wt,cd.priority,cd.release?`Release ${cd.release}`:null,cd.quarter].filter(Boolean).join(' · ')
+      const tags=[cd.ref,cd.team,cd.wt,cd.priority,cd.status,cd.release?`Release ${cd.release}`:null,cd.quarter].filter(Boolean).join(' · ')
       if(tags)slide.addText(trunc(tags,tw-bw-0.06,7),{x:tx+bw+0.06,y:cy+0.03,w:tw-bw-0.06,h:0.17,fontSize:7,bold:true,color:K.meta,margin:0,valign:'middle'})
       // Line 2: the name; line 3: the initiative it belongs to
       slide.addText(trunc(cd.name,tw,nameFs,true),{x:tx,y:cy+0.2,w:tw,h:0.2,fontSize:nameFs,bold:true,color:K.name,margin:0,valign:'middle'})
-      if(cd.home&&ch>=0.5)slide.addText(trunc(cd.home,tw,7),{x:tx,y:cy+0.39,w:tw,h:0.14,fontSize:7,color:K.home,margin:0})
+      if(cd.flag)slide.addText(trunc(cd.flag,tw,7,true),{x:tx,y:cy+0.39,w:tw,h:0.14,fontSize:7,bold:true,color:'C0392B',margin:0})
+      else if(cd.home&&ch>=0.5)slide.addText(trunc(cd.home,tw,7),{x:tx,y:cy+0.39,w:tw,h:0.14,fontSize:7,color:K.home,margin:0})
     }else{
       const bfs=6,bw=capsW(K.short,bfs)
       slide.addText(K.short,{x:tx,y:cy+(ch-0.14)/2,w:bw,h:0.14,fontSize:bfs,bold:true,color:K.badgeInk,fill:{color:K.badge},align:'center',valign:'middle',margin:0})
-      const nw=tw-bw-0.06,team=cd.team?`  ${cd.team}`:''
+      const nw=tw-bw-0.06,team=(cd.team?`  ${cd.team}`:'')+(cd.flag?`  ⚠ ${cd.flag}`:'')
       slide.addText([{text:trunc(cd.name,nw-0.3,nameFs,true),options:{bold:true,color:K.name}},{text:team,options:{color:K.meta,fontSize:nameFs-1.5}}],
         {x:tx+bw+0.06,y:cy,w:nw,h:ch,fontSize:nameFs,valign:'middle',margin:0})
     }

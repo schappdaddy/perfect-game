@@ -42,6 +42,13 @@ export async function exportStrategiesPptx({strategies,projects,strategyItems,tr
   await pptx.writeFile({fileName:(fileName||(strategies.length===1?strategies[0].name:'Strategies'))+'.pptx'})
 }
 
+// A strategy's slides added to a deck being built elsewhere (the full-plan export)
+export function addStrategySlides(pptx:any,strategy:any,{projects,strategyItems,tracks,goals,deps,strategyRoles=[],projectRoles=[],people=[],roles=[],teams=[]}:any,{roadmap=true,budget=true}:{roadmap?:boolean,budget?:boolean}={}){
+  const ctx={projects,strategyItems,tracks,goals,deps,teams}
+  if(roadmap){drawSlide(pptx,strategy,ctx,'tracks');drawSlide(pptx,strategy,ctx,'teams')}
+  if(budget)drawBudgetSlides(pptx,strategy,{projects,strategyItems,tracks,strategyRoles,projectRoles,people,roles,teams})
+}
+
 function drawSlide(pptx:any,strategy:any,{projects,strategyItems,tracks,goals,deps,teams=[]}:any,mode:'tracks'|'teams'){
   const sRows=(strategyItems as any[]).filter(r=>r.strategy_id===strategy.id&&r.item_type==='project')
   const live=(projects as any[]).filter(p=>(p.space||'work')==='work').map(p=>{
