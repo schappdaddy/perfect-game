@@ -6,6 +6,8 @@ import StrategyTab from './StrategyTab'
 import { EpicsSection } from './Epics'
 import { DependencyLayer, DepHandle, createDependency, deleteDependency, depKey } from './DependencyLayer'
 import { InlineSelect, InlineText, InlineDate, InlineEditStyles } from './InlineEdit'
+import { MilestoneTypeSelect } from './MilestoneTypes'
+import { WORK_TYPE_KEYS, WT_LABEL, WT_COLOR, WorkTag, isWorkType, workTypeOfProject, capacityShare, REQUEST_TYPES } from './WorkTypes'
 import { QuarterPlanner, ReleaseCalendar, ReleaseSelect, ReleasesManager, releaseOptions, releaseOf, releaseText, fmtMonthKey } from './Releases'
 import { EpicRow, EpicPanel, epicProject, epicWorkType, convertStoryToEpic, convertEpicToStory } from './BacklogEpics'
 
@@ -28,8 +30,6 @@ const PROJECT_STATUSES=['Queued','Planning','In Progress','Testing','On Hold','C
 const TEAMS=['Consumer Experience','Operational Efficiency']
 const EFFORTS=['S','M','L','XL']
 const EFFORT_ALLOC:any={S:25,M:50,L:75,XL:100} // default per-person allocation % this project's size implies
-const REQUEST_TYPES=['Bug','Tech Debt','Enhancement','Strategic Initiative','Business Request','Testing']
-const MILESTONE_TYPES_G=['Milestone','Go-Live','Deadline','Review','Release','Code Freeze','UAT','Kickoff']
 const SWIMLANES=['POS','Pricing','Tax','Loyalty','WFM','Inventory','Reporting','SafeSize','Product','Clienteling','Integrations']
 const PRIORITY_ORDER={P1:0,P2:1,P3:2,P4:3,Backlog:4}
 const RAG_COLORS={Green:'#27AE60',Amber:'#D4820A',Red:'#C0392B'}
@@ -47,11 +47,10 @@ const isItemDone=(i:any)=>ITEM_TERMINAL.includes(i?.status)
 // Capacity split: new-project work vs. sustain work (tech debt, system stabilization and
 // enhancements to existing things). A project carries its work type; an item follows its
 // project unless overridden, and items with no project fall back to their request type.
-const WORK_TYPES=[{key:'new',label:'New initiatives'},{key:'sustain',label:'Tech debt / Stabilization & Enhancements'}]
-const SUSTAIN_REQUEST_TYPES=['Bug','Tech Debt','Enhancement','Testing']
-const workTypeOfProject=(p:any)=>p?.work_type==='sustain'||p?.planning_state==='bau'?'sustain':'new'
+const WORK_TYPES=WORK_TYPE_KEYS.map(k=>({key:k,label:WT_LABEL[k]}))
+const SUSTAIN_REQUEST_TYPES=['Tech Debt','Enhancement']
 function workTypeOfItem(item:any,projects:any[]){
-  if(item.work_type==='new'||item.work_type==='sustain')return item.work_type
+  if(isWorkType(item.work_type))return item.work_type
   const pr=item.parent_project&&projects.find((p:any)=>p.name===item.parent_project)
   if(pr)return workTypeOfProject(pr)
   return SUSTAIN_REQUEST_TYPES.includes(item.request_type)?'sustain':'new'
@@ -1026,12 +1025,11 @@ function ProjectDetail({project,items,setItems,projects,setProjects,milestones,s
   }
   const [addingItem,setAddingItem]=useState(false)
   const [savingItem,setSavingItem]=useState(false)
-  const [newItem,setNewItem]=useState({name:'',priority:'P3',swimlane:'POS',effort:'M',status:'New',request_type:'Bug',region:'',vendor:'Deckers',description:''})
+  const [newItem,setNewItem]=useState({name:'',priority:'P3',swimlane:'POS',effort:'M',status:'New',request_type:'Enhancement',region:'',vendor:'Deckers',description:''})
   const [addingMilestone,setAddingMilestone]=useState(false)
   const [savingMilestone,setSavingMilestone]=useState(false)
   const [milestoneForm,setMilestoneForm]=useState({name:'',date:'',type:'Milestone',color:'#C8973A',notes:'',completed:false})
   const COLORS=['#C0392B','#D4820A','#2E86AB','#27AE60','#8E44AD','#E74C3C','#C8973A','#1ABC9C','#2C3E50','#E67E22']
-  const MILESTONE_TYPES=['Milestone','Go-Live','Deadline','Review','Release','Code Freeze','UAT','Kickoff']
   const swimlaneOpts=[...new Set([...SWIMLANES,...items.map(i=>i.swimlane).filter(Boolean)])]
 
   const projectItems=items.filter(i=>i.parent_project===project.name).sort((a,b)=>{
@@ -1062,7 +1060,7 @@ function ProjectDetail({project,items,setItems,projects,setProjects,milestones,s
     if(error){alert('Failed to add item: '+error.message);setSavingItem(false);return}
     if(data) setItems([...items,data])
     setSavingItem(false);setAddingItem(false)
-    setNewItem({name:'',priority:'P3',swimlane:'POS',effort:'M',status:'New',request_type:'Bug',region:'',vendor:'Deckers',description:''})
+    setNewItem({name:'',priority:'P3',swimlane:'POS',effort:'M',status:'New',request_type:'Enhancement',region:'',vendor:'Deckers',description:''})
   }
   async function saveMilestone(){
     if(!milestoneForm.name.trim()||!milestoneForm.date) return
@@ -1174,11 +1172,11 @@ function ProjectDetail({project,items,setItems,projects,setProjects,milestones,s
                       style={{background:bType===k?'#1E3048':'transparent',color:bType===k?'#F4F6F8':'#7A8FA6',border:'1px solid '+(bType===k?'#3A4A5E':'#243447'),borderRadius:5,padding:'2px 8px',fontSize:9,fontWeight:700,cursor:'pointer'}}>{label}</button>
                   ))}
                 </div>
-                <div style={{display:'flex',gap:3}} title="Work type for the capacity split: new initiative work, or sustain (tech debt, stabilization & enhancements)">
-                  {[['new','✦ New'],['sustain','⟳ Sustain']].map(([k,label])=>{
+                <div style={{display:'flex',gap:3}} title="Work type: New, Sustain (tech debt, stabilization & enhancements) or SaaS deliverable">
+                  {[['new','✦ New'],['sustain','⟳ Sustain'],['saas','☁ SaaS']].map(([k,label])=>{
                     const on=workTypeOfProject(project)===k
                     return <button key={k} onClick={()=>updProjectField({work_type:k,...(project.planning_state==='bau'?{planning_state:'planned'}:{})})}
-                      style={{background:on?(k==='sustain'?'#4A5D72':'#1E3048'):'transparent',color:on?'#F4F6F8':'#7A8FA6',border:'1px solid '+(on?'#3A4A5E':'#243447'),borderRadius:5,padding:'2px 8px',fontSize:9,fontWeight:700,cursor:'pointer'}}>{label}</button>
+                      style={{background:on?(k==='new'?'#1E3048':(WT_COLOR as any)[k].bg):'transparent',color:on?'#F4F6F8':'#7A8FA6',border:'1px solid '+(on?'#3A4A5E':'#243447'),borderRadius:5,padding:'2px 8px',fontSize:9,fontWeight:700,cursor:'pointer'}}>{label}</button>
                   })}
                 </div>
                 <select value={project.effort||''} onChange={e=>changeEffort(e.target.value)} title="Effort — sets the default allocation % for roster rows below. Changing it also updates any existing row still at the old default."
@@ -1278,10 +1276,8 @@ function ProjectDetail({project,items,setItems,projects,setProjects,milestones,s
                   </div>
                   <div>
                     <div style={{fontSize:10,color:'#7A8FA6',marginBottom:3}}>Type</div>
-                    <select value={milestoneForm.type} onChange={e=>setMilestoneForm(p=>({...p,type:e.target.value}))}
-                      style={{width:'100%',background:'#1E3048',color:'#F4F6F8',border:'1px solid #243447',borderRadius:5,padding:'5px 6px',fontSize:12}}>
-                      {MILESTONE_TYPES.map(t=><option key={t}>{t}</option>)}
-                    </select>
+                    <MilestoneTypeSelect value={milestoneForm.type} onChange={v=>setMilestoneForm(p=>({...p,type:v}))}
+                      style={{width:'100%',background:'#1E3048',color:'#F4F6F8',border:'1px solid #243447',borderRadius:5,padding:'5px 6px',fontSize:12}}/>
                   </div>
                 </div>
                 <div>
@@ -1326,10 +1322,8 @@ function ProjectDetail({project,items,setItems,projects,setProjects,milestones,s
                         style={{flex:1,background:'#0F1C2B',border:'1px solid #243447',borderRadius:5,color:'#F4F6F8',fontSize:12,padding:'4px 8px'}}/>
                       <input type="date" value={editMs.date} onChange={e=>setEditMs((p:any)=>({...p,date:e.target.value}))}
                         style={{background:'#0F1C2B',border:'1px solid #243447',borderRadius:5,color:'#F4F6F8',fontSize:11,padding:'4px 6px'}}/>
-                      <select value={editMs.type} onChange={e=>setEditMs((p:any)=>({...p,type:e.target.value}))}
-                        style={{background:'#0F1C2B',border:'1px solid #243447',borderRadius:5,color:'#F4F6F8',fontSize:11,padding:'4px 4px'}}>
-                        {MILESTONE_TYPES_G.map(t=><option key={t} value={t}>{t}</option>)}
-                      </select>
+                      <MilestoneTypeSelect value={editMs.type} onChange={v=>setEditMs((p:any)=>({...p,type:v}))}
+                        style={{background:'#0F1C2B',border:'1px solid #243447',borderRadius:5,color:'#F4F6F8',fontSize:11,padding:'4px 4px'}}/>
                     </div>
                     <div style={{display:'flex',gap:6,alignItems:'center'}}>
                       <input value={editMs.notes||''} onChange={e=>setEditMs((p:any)=>({...p,notes:e.target.value}))} placeholder="Notes..."
@@ -1610,7 +1604,6 @@ function Projects({items,setItems,projects,setProjects,milestones,setMilestones,
   const [milestoneForm,setMilestoneForm]=useState({name:'',date:'',type:'Milestone',color:'#C8973A',notes:'',completed:false})
   const [savingMilestone,setSavingMilestone]=useState(false)
   const COLORS=['#C0392B','#D4820A','#2E86AB','#27AE60','#8E44AD','#E74C3C','#C8973A','#1ABC9C','#2C3E50','#E67E22']
-  const MILESTONE_TYPES=['Milestone','Go-Live','Deadline','Review','Release','Code Freeze','UAT','Kickoff']
   const empty={name:'',description:'',priority:'P3',status:'Planning',rag:'Green',team:'Consumer Experience',effort:'',start_date:'',end_date:'',color:'#2E86AB',ongoing:false}
   const [form,setForm]=useState({...empty})
   
@@ -2122,7 +2115,7 @@ function Backlog({items,setItems,projects,setProjects,space,ccrs=[],ccrItems=[],
   const [ai,setAi]=useState(false)
   const [sav,setSav]=useState(false)
   const [selected,setSelected]=useState(null)
-  const [ni,setNi]=useState({name:'',priority:'P3',swimlane:'POS',team:'Consumer Experience',effort:'M',status:'New',request_type:'Bug',region:'',vendor:'Deckers',description:''})
+  const [ni,setNi]=useState({name:'',priority:'P3',swimlane:'POS',team:'Consumer Experience',effort:'M',status:'New',request_type:'Enhancement',region:'',vendor:'Deckers',description:''})
   const [vendors,setVendors]=useState(['Deckers','Salesforce','GreyOrange','Legion','SafeSize','ID.me','Adyen','Agilence','Boomi'])
   const [swimlaneOpts,setSwimOpts]=useState([...SWIMLANES])
   const [statusOpts,setStatusOpts]=useState([...statusesFor(space)])
@@ -2163,7 +2156,7 @@ function Backlog({items,setItems,projects,setProjects,space,ccrs=[],ccrItems=[],
   const normType=(t:string)=>{
     const exact=REQUEST_TYPES.find(x=>x.toLowerCase()===t.trim().toLowerCase())
     if(exact)return exact
-    return /bug|defect/i.test(t)?'Bug':/debt/i.test(t)?'Tech Debt':/epic|initiative/i.test(t)?'Strategic Initiative':/story|task|improvement|enhancement/i.test(t)?'Enhancement':null
+    return /bug|defect|debt|test/i.test(t)?'Tech Debt':/epic|initiative|story|task|improvement|enhancement|request|feature/i.test(t)?'Enhancement':null
   }
   const normStatus=(st:string):string|null=>{
     const exact=statusesFor(space).find(x=>x.toLowerCase()===st.trim().toLowerCase())
@@ -2429,7 +2422,7 @@ const sorted=items.filter(i=>!isItemDone(i)).sort((a,b)=>{
   const segCount=(k:string)=>k==='all'?preSeg.length:preSeg.filter(i=>wtOf(i)===k).length
   // Effort-weighted split of open work in the current filters, against the sustain share
   const segPts:any={new:0,sustain:0}
-  preSeg.filter(i=>!ITEM_TERMINAL.includes(i.status)).forEach(i=>{segPts[wtOf(i)]+=EFFORT_POINTS[i.effort]??2})
+  preSeg.filter(i=>!ITEM_TERMINAL.includes(i.status)).forEach(i=>{segPts[capacityShare(wtOf(i))]+=EFFORT_POINTS[i.effort]??2})
   const segTotal=segPts.new+segPts.sustain
   const segNewPct=segTotal?Math.round(segPts.new/segTotal*100):null
 
@@ -2526,7 +2519,7 @@ const sorted=items.filter(i=>!isItemDone(i)).sort((a,b)=>{
       'ID':i.item_id,'Item Name':i.name,'Description':i.description||'',
       'Priority':i.priority,'Rank':i.committed_priority??'',
       'Swimlane':i.swimlane||'','Status':i.status||'','Team':i.team||'',
-      'Effort':i.effort||'','Initiative':i.parent_project||'','Epic':epicOf(i)?.name||'','Work Type':wtOf(i)==='sustain'?'Sustain':'New initiative',
+      'Effort':i.effort||'','Initiative':i.parent_project||'','Epic':epicOf(i)?.name||'','Work Type':WT_LABEL[wtOf(i) as 'new'],
       'Request Type':i.request_type||'','Region':i.region||'','Vendor':i.vendor||'',
       'Vendor Date':i.vendor_delivery_date||'','WSJF':i.wsjf?parseFloat(i.wsjf):'',
       'RICE':rice(i)||'','Reach':i.reach||'','Impact':i.impact||'','Confidence':i.confidence??'',
@@ -2609,7 +2602,7 @@ const sorted=items.filter(i=>!isItemDone(i)).sort((a,b)=>{
     if(error){alert('Failed to add item: '+error.message);setSav(false);return}
     if(data) setItems([...items,data])
     setSav(false);setAi(false)
-    setNi({name:'',priority:'P3',swimlane:'POS',team:'Consumer Experience',effort:'M',status:'New',request_type:'Bug',region:'',vendor:'Deckers',description:''})
+    setNi({name:'',priority:'P3',swimlane:'POS',team:'Consumer Experience',effort:'M',status:'New',request_type:'Enhancement',region:'',vendor:'Deckers',description:''})
   }
   async function deleteItem(id) {
     if(!confirm('Delete this item?')) return
@@ -2746,13 +2739,13 @@ const sorted=items.filter(i=>!isItemDone(i)).sort((a,b)=>{
       {space==='work'&&<div style={{display:'flex',alignItems:'center',gap:4,padding:'8px 20px 0',background:'#162436',flexWrap:'wrap' as const}}>
         {[{key:'all',label:'All'},...WORK_TYPES].map(t=>(
           <button key={t.key} onClick={()=>setSeg(t.key)}
-            style={{background:seg===t.key?'#0D1B2A':'transparent',color:seg===t.key?'#F4F6F8':'#7A8FA6',border:'1px solid '+(seg===t.key?'#243447':'transparent'),borderBottom:seg===t.key?'2px solid '+(t.key==='sustain'?'#8FA6BC':'#C8973A'):'2px solid transparent',borderRadius:'6px 6px 0 0',padding:'6px 14px',fontSize:12,fontWeight:seg===t.key?700:400,cursor:'pointer'}}>
+            style={{background:seg===t.key?'#0D1B2A':'transparent',color:seg===t.key?'#F4F6F8':'#7A8FA6',border:'1px solid '+(seg===t.key?'#243447':'transparent'),borderBottom:seg===t.key?'2px solid '+(t.key==='sustain'?'#8FA6BC':t.key==='saas'?'#16A085':'#C8973A'):'2px solid transparent',borderRadius:'6px 6px 0 0',padding:'6px 14px',fontSize:12,fontWeight:seg===t.key?700:400,cursor:'pointer'}}>
             {t.label} <span style={{fontSize:10,color:'#7A8FA6',marginLeft:4}}>{segCount(t.key)}</span>
           </button>
         ))}
         <div style={{display:'flex',border:'1px solid #243447',borderRadius:6,overflow:'hidden',marginLeft:12,marginBottom:4}}>
-          {[['list','≡ List'],['plan','🗓 Quarter planning']].map(([k,l])=>(
-            <button key={k} onClick={()=>setBview(k)} title={k==='plan'?'Plan tech debt and OpEx for a quarter, then into monthly releases':'The full backlog'}
+          {[['list','≡ List'],['plan','🗓 Planning']].map(([k,l])=>(
+            <button key={k} onClick={()=>setBview(k)} title={k==='plan'?'Plan all work into quarters, then into monthly releases':'The full backlog'}
               style={{background:bview===k?'#C8973A':'#1E3048',color:bview===k?'#0D1B2A':'#C8C8D4',border:'none',fontSize:11,fontWeight:700,padding:'5px 10px',cursor:'pointer'}}>{l}</button>
           ))}
         </div>
@@ -2820,7 +2813,7 @@ const sorted=items.filter(i=>!isItemDone(i)).sort((a,b)=>{
 
       <div style={{display:'flex',flex:1,overflow:'hidden'}}>
         {bview==='plan'&&space==='work'?(
-          <QuarterPlanner items={items} setItems={setItems} projects={projects} setProjects={setProjects} releases={releases} setReleases={setReleases} milestones={milestones} setMilestones={setMilestones}
+          <QuarterPlanner workType={seg} items={items} setItems={setItems} projects={projects} setProjects={setProjects} releases={releases} setReleases={setReleases} milestones={milestones} setMilestones={setMilestones}
             epics={(epics as any[]).filter((e:any)=>spaceOf(e)===space)} setEpics={setEpics} epicWorkTypeOf={(e:any)=>epicWorkType(e,projects)}
             teams={TEAMS} workTypeOf={wtOf} onOpenItem={(i:any)=>{setSelEpicId(null);setSelected(i)}} onOpenEpic={(e:any)=>{setSelected(null);setSelEpicId(e.id)}}/>
         ):(
@@ -2942,9 +2935,7 @@ const sorted=items.filter(i=>!isItemDone(i)).sort((a,b)=>{
                       ?<span title={`Epic: ${ep.name}`} style={{display:'inline-flex',alignItems:'center',gap:4,fontSize:11,color:'#E07B2A',border:'1px solid rgba(224,123,42,0.45)',background:'rgba(224,123,42,0.1)',borderRadius:4,padding:'1px 6px',maxWidth:150,overflow:'hidden',whiteSpace:'nowrap' as const,textOverflow:'ellipsis'}}>◆ {ep.name}</span>
                       :<span style={{fontSize:11,color:'#3A4A5E'}}>—</span>}</InlineSelect>})()}</td>
                     <td style={TD}><InlineSelect value={item.work_type||''} title="Work type: automatic follows the initiative or request type"
-                      options={[{value:'',label:`Automatic (${wtOf({...item,work_type:null})==='sustain'?'Sustain':'New'})`},{value:'new',label:'New initiative'},{value:'sustain',label:'Sustain'}]} onChange={v=>upd(item.id,'work_type',v)}>{wtOf(item)==='sustain'
-                      ?<span title="Sustain: tech debt, stabilization & enhancements" style={{fontSize:10,fontWeight:700,color:'#C8D4E0',background:'#4A5D72',borderRadius:4,padding:'2px 7px',whiteSpace:'nowrap' as const}}>⟳ Sustain</span>
-                      :<span title="New initiative work" style={{fontSize:10,fontWeight:700,color:'#C8973A',border:'1px solid rgba(200,151,58,0.5)',borderRadius:4,padding:'1px 7px',whiteSpace:'nowrap' as const}}>✦ New</span>}</InlineSelect></td>
+                      options={[{value:'',label:`Automatic (${WT_LABEL[wtOf({...item,work_type:null}) as 'new']})`},...WORK_TYPE_KEYS.map(k=>({value:k,label:WT_LABEL[k]}))]} onChange={v=>upd(item.id,'work_type',v)}><WorkTag wt={wtOf(item)}/></InlineSelect></td>
                     <td style={TD}><InlineSelect value={item.release_month||''} options={releaseOptions(releases,item.release_month)} onChange={v=>upd(item.id,'release_month',v)}>{item.release_month?<span title={`${fmtMonthKey(item.release_month)} release · ${releaseText(releases,item.release_month)}`} style={{fontSize:10,fontWeight:700,color:releaseOf(releases,item.release_month)?.no_release?'#D4820A':'#5DADE2',border:'1px solid rgba(93,173,226,0.4)',borderRadius:4,padding:'1px 6px',whiteSpace:'nowrap' as const}}>📦 {fmtMonthKey(item.release_month)}</span>:<span style={{fontSize:11,color:'#3A4A5E'}}>—</span>}</InlineSelect></td>
                     <td style={TD}><InlineSelect value={item.priority} options={PRIORITIES} onChange={v=>v&&upd(item.id,'priority',v)}><span style={{background:pclr.bg,color:pclr.text,borderRadius:4,padding:'2px 8px',fontSize:10,fontWeight:700,whiteSpace:'nowrap' as const}}>{item.priority}</span></InlineSelect></td>
                     <td style={{...TD,textAlign:'center' as const,padding:'0 4px'}} onClick={e=>e.stopPropagation()}>
@@ -3047,15 +3038,16 @@ const sorted=items.filter(i=>!isItemDone(i)).sort((a,b)=>{
               {space==='work'&&(()=>{
                 const proj=projects.find((p:any)=>p.name===selected.parent_project)
                 const auto=proj?workTypeOfProject(proj):(SUSTAIN_REQUEST_TYPES.includes(selected.request_type)?'sustain':'new')
-                const name=(k:string)=>k==='sustain'?'Sustain (tech debt, stabilization & enhancements)':'New initiative'
+                const name=(k:string)=>k==='sustain'?'Sustain (tech debt, stabilization & enhancements)':(WT_LABEL as any)[k]||'New'
                 return(
                   <div>
                     <div style={{fontSize:11,color:'#7A8FA6',marginBottom:4,letterSpacing:0.5}}>WORK TYPE</div>
                     <select value={selected.work_type||''} onChange={e=>upd(selected.id,'work_type',e.target.value||null)}
                       style={{width:'100%',background:'#1E3048',color:'#F4F6F8',border:'1px solid #243447',borderRadius:6,padding:'7px 10px',fontSize:13,cursor:'pointer'}}>
                       <option value="">Automatic: {name(auto)}{proj?' (from initiative)':' (from request type)'}</option>
-                      <option value="new">New initiative</option>
+                      <option value="new">New</option>
                       <option value="sustain">Sustain (tech debt, stabilization & enhancements)</option>
+                      <option value="saas">SaaS deliverable</option>
                     </select>
                   </div>
                 )
@@ -3231,7 +3223,7 @@ function Roadmap({items,setItems,projects,setProjects,milestones,setMilestones,t
   const [qpMvDate,setQpMvDate]=useState('')
   const [qpQiName,setQpQiName]=useState('')
   const [qpQiPri,setQpQiPri]=useState('P3')
-  const [qpQiType,setQpQiType]=useState('Bug')
+  const [qpQiType,setQpQiType]=useState('Enhancement')
   const [qpMcId,setQpMcId]=useState<any>(null)
   const [qpMcStart,setQpMcStart]=useState('')
   const [qpMcEnd,setQpMcEnd]=useState('')
@@ -3260,7 +3252,7 @@ function Roadmap({items,setItems,projects,setProjects,milestones,setMilestones,t
       region:'',vendor:'Deckers',parent_project:quickProject.name,flagged:false,sort_order:items.length,space:spaceOf(quickProject),
     }).select().single()
     if(error){alert('Failed to add item: '+error.message);return}
-    if(data){setItems((prev:any[])=>[...prev,data]);setQpQiName('');setQpQiPri('P3');setQpQiType('Bug')}
+    if(data){setItems((prev:any[])=>[...prev,data]);setQpQiName('');setQpQiPri('P3');setQpQiType('Enhancement')}
   }
   async function qpCommitItem(i:any){
     if(!quickProject.start_date||!quickProject.end_date){
@@ -5574,7 +5566,7 @@ function Desk({items,setItems,projects,setProjects,milestones,setMilestones,task
   const [mcEnd,setMcEnd]=useState('')
   const [qiName,setQiName]=useState('')
   const [qiPri,setQiPri]=useState('P3')
-  const [qiType,setQiType]=useState('Bug')
+  const [qiType,setQiType]=useState('Enhancement')
   async function submitQuickItem(){
     if(!qiName.trim()||!projView)return
     const iid=nextItemId(items)
@@ -5584,7 +5576,7 @@ function Desk({items,setItems,projects,setProjects,milestones,setMilestones,task
       region:'',vendor:'Deckers',parent_project:projView.name,flagged:false,sort_order:items.length,space:spaceOf(projView),
     }).select().single()
     if(error){alert('Failed to add item: '+error.message);return}
-    if(data){setItems((prev:any[])=>[...prev,data]);setQiName('');setQiPri('P3');setQiType('Bug')}
+    if(data){setItems((prev:any[])=>[...prev,data]);setQiName('');setQiPri('P3');setQiType('Enhancement')}
   }
   async function submitModalTask(){
     if(!mvTitle.trim()||!projView)return
@@ -6227,10 +6219,8 @@ function Desk({items,setItems,projects,setProjects,milestones,setMilestones,task
                       style={{flex:1,background:'#0D1B2A',border:'1px solid #243447',borderRadius:4,color:'#F4F6F8',fontSize:11,padding:'3px 6px'}}/>
                     <input type="date" value={msEdit.date} onChange={e=>setMsEdit((p:any)=>({...p,date:e.target.value}))}
                       style={{background:'#0D1B2A',border:'1px solid #243447',borderRadius:4,color:'#F4F6F8',fontSize:11,padding:'3px 6px'}}/>
-                    <select value={msEdit.type} onChange={e=>setMsEdit((p:any)=>({...p,type:e.target.value}))}
-                      style={{background:'#0D1B2A',border:'1px solid #243447',borderRadius:4,color:'#F4F6F8',fontSize:11,padding:'3px 4px'}}>
-                      {MILESTONE_TYPES_G.map(t=><option key={t} value={t}>{t}</option>)}
-                    </select>
+                    <MilestoneTypeSelect value={msEdit.type} onChange={v=>setMsEdit((p:any)=>({...p,type:v}))}
+                      style={{background:'#0D1B2A',border:'1px solid #243447',borderRadius:4,color:'#F4F6F8',fontSize:11,padding:'3px 4px'}}/>
                     <button onClick={()=>setMsEditId(null)} style={{background:'none',border:'1px solid #243447',borderRadius:4,color:'#7A8FA6',fontSize:10,padding:'2px 7px',cursor:'pointer'}}>Cancel</button>
                     <button onClick={saveMsEdit} disabled={!msEdit.name.trim()||!msEdit.date} style={{background:'#C8973A',border:'none',borderRadius:4,color:'#0D1B2A',fontSize:10,fontWeight:700,padding:'2px 9px',cursor:'pointer',opacity:!msEdit.name.trim()||!msEdit.date?0.5:1}}>Save</button>
                   </div>
@@ -8541,7 +8531,7 @@ function Assistant({open,setOpen,seed,setSeed,items:itemsProp,setItems,projects:
         if(inp.end_date!==undefined)fields.end_date=inp.end_date||null
         if(inp.planning_state)fields.planning_state=inp.planning_state==='bau'?'planned':inp.planning_state
         const own:any={}
-        if(inp.work_type==='new'||inp.work_type==='sustain')own.work_type=inp.work_type
+        if(isWorkType(inp.work_type))own.work_type=inp.work_type
         if(fields.start_date&&fields.end_date&&fields.end_date<fields.start_date)return{error:'end_date is before start_date'}
         if(Object.keys(fields).length&&!st)return{error:'No strategy exists yet. Create one first.'}
         if(!pr){

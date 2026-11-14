@@ -51,7 +51,7 @@ function drawSlide(pptx:any,strategy:any,{projects,strategyItems,tracks,goals,de
   })
   const sTracks=(tracks as any[]).filter(t=>t.strategy_id===strategy.id).sort((a,b)=>a.sort_order-b.sort_order)
   const trackIds=new Set(sTracks.map(t=>t.id))
-  const sustain=(p:any)=>p.work_type==='sustain'||p.planning_state==='bau'
+  const sustain=(p:any)=>p.work_type==='sustain'||p.work_type==='saas'||p.planning_state==='bau'
 
   // Window: from the current quarter (or the strategy's start, if later) to its last FY
   const now=new Date(),curQ=Math.floor((now.getFullYear()*12+now.getMonth())/3)*3
@@ -314,7 +314,7 @@ function drawBudgetSlides(pptx:any,strategy:any,{projects,strategyItems,tracks,s
   {
     const slide=baseSlide(pptx,strategy,'Budget summary')
     const planned=costed.filter((x:any)=>x.state==='planned'),proposed=costed.filter((x:any)=>x.state==='proposed')
-    const nw=costed.filter((x:any)=>x.workType!=='sustain'),su=costed.filter((x:any)=>x.workType==='sustain')
+    const nw=costed.filter((x:any)=>x.workType==='new'),su=costed.filter((x:any)=>x.workType!=='new')
     const bau=Number(strategy.bau_pct)||0
     const cards:[string,string,string][]=[
       ['TOTAL BUDGET',fmtUSD(total),`${costed.length} costed initiative${costed.length!==1?'s':''}`],
@@ -398,7 +398,7 @@ function drawBudgetSlides(pptx:any,strategy:any,{projects,strategyItems,tracks,s
       body.push({h:0.28,cells:[band(g.team.toUpperCase(),cols+6)]})
       for(const x of g.list){
         const names=r.slotNames(x).map((n:any)=>n||'—').join(' · ')
-        const tag=(x.state==='proposed'?' (proposed)':'')+(x.workType==='sustain'?' · sustain':'')
+        const tag=(x.state==='proposed'?' (proposed)':'')+(x.workType==='sustain'?' · sustain':x.workType==='saas'?' · SaaS':'')
         const dates=x.s&&x.e?`${fmtMon(x.s)} – ${fmtMon(x.e)}`:'No dates'
         const costedRow=x.cost?.total>0
         body.push({h:costedRow?0.5:0.28,cells:[td(x.p.name+tag,{align:'left',bold:true}),td(dates,{align:'left',color:MUTED}),td(names,{align:'left',color:MUTED,fontSize:8}),

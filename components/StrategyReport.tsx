@@ -165,7 +165,7 @@ export function StrategyReport({strategy,entries,personMonth,people,roles,teams,
 
   const loadColor=(v:number)=>v<1?'transparent':v<60?'rgba(200,151,58,0.25)':v<99.5?'rgba(200,151,58,0.45)':'rgba(39,174,96,0.35)'
   const planned=costed.filter(x=>x.state==='planned'),proposed=costed.filter(x=>x.state==='proposed')
-  const nw=costed.filter(x=>x.workType!=='sustain'),su=costed.filter(x=>x.workType==='sustain')
+  const nw=costed.filter(x=>x.workType==='new'),su=costed.filter(x=>x.workType!=='new')
   const curFy=(()=>{const t=new Date();return t.getMonth()>=3?t.getFullYear()+1:t.getFullYear()})()
 
   return(
@@ -366,7 +366,7 @@ export function StrategyReport({strategy,entries,personMonth,people,roles,teams,
                     <td style={{...LTD,maxWidth:280,overflow:'hidden',textOverflow:'ellipsis'}}>
                       <span style={{color:'#F4F6F8',fontWeight:600}}>{x.p.name}</span>
                       {x.state==='proposed'&&<span style={{marginLeft:6,fontSize:9.5,fontWeight:700,color:PROPOSED,border:`1px solid ${PROPOSED}`,borderRadius:3,padding:'0 4px'}}>PROPOSED</span>}
-                      {x.workType==='sustain'&&<span style={{marginLeft:6,fontSize:9.5,color:'#7A8FA6',border:'1px solid #4A5D72',borderRadius:3,padding:'0 4px'}}>SUSTAIN</span>}
+                      {x.workType!=='new'&&<span style={{marginLeft:6,fontSize:9.5,color:'#7A8FA6',border:`1px solid ${x.workType==='saas'?'#16A085':'#4A5D72'}`,borderRadius:3,padding:'0 4px'}}>{x.workType==='saas'?'SAAS':'SUSTAIN'}</span>}
                       {!x.onTrack&&<span style={{marginLeft:6,fontSize:9.5,color:'#7A8FA6'}}>backlog</span>}
                     </td>
                     <td style={LTD}>{x.s&&x.e?`${fmtD(x.s)} – ${fmtD(x.e)} · ${monthsBetween(x.s,x.e)} mo`:<span style={{color:'#D4820A'}}>No dates</span>}</td>

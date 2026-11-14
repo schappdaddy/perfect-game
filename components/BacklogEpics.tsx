@@ -3,6 +3,7 @@ import { useState } from 'react'
 import { supabase } from '../lib/supabase'
 import { ReleaseSelect, releaseText, fmtMonthKey, releaseOptions } from './Releases'
 import { InlineSelect, InlineText, InlineDate } from './InlineEdit'
+import { WORK_TYPE_KEYS, WT_LABEL, WorkTag, isWorkType, workTypeOfProject } from './WorkTypes'
 
 // Epics in the Backlog: an epic row that sits in the same table as stories (styled apart),
 // the epic side panel, and converting a story into an epic or an epic back into a story.
@@ -17,9 +18,9 @@ const INPUT={width:'100%',boxSizing:'border-box' as const,background:'#1E3048',c
 
 export const epicProject=(epic:any,projects:any[])=>epic?.project_id?projects.find((p:any)=>p.id===epic.project_id)||null:null
 export function epicWorkType(epic:any,projects:any[]){
-  if(epic.work_type==='new'||epic.work_type==='sustain')return epic.work_type
+  if(isWorkType(epic.work_type))return epic.work_type
   const pr=epicProject(epic,projects)
-  return pr&&(pr.work_type==='sustain'||pr.planning_state==='bau')?'sustain':'new'
+  return pr?workTypeOfProject(pr):'new'
 }
 // Stories that belong to an epic: same project as the epic (an epic with no project takes any)
 export function epicStories(epic:any,items:any[],projects:any[]){
@@ -77,9 +78,7 @@ export function EpicRow({epic,projects,items,isSel,onSelect,ccCount=0,releases=[
           onChange={v=>setEpicProject(epic,v,{projects,items,setItems,setEpics})}>{pr?.name||'—'}</InlineSelect></td>
       <td style={dim}>—</td>
       <td style={TD}><InlineSelect value={epic.work_type||''} title="Work type: automatic follows the initiative"
-        options={[{value:'',label:`Automatic (${epicWorkType({...epic,work_type:null},projects)==='sustain'?'Sustain':'New'})`},{value:'new',label:'New initiative'},{value:'sustain',label:'Sustain'}]} onChange={v=>upd({work_type:v})}>{wt==='sustain'
-        ?<span style={{fontSize:10,fontWeight:700,color:'#C8D4E0',background:'#4A5D72',borderRadius:4,padding:'2px 7px',whiteSpace:'nowrap' as const}}>⟳ Sustain</span>
-        :<span style={{fontSize:10,fontWeight:700,color:'#C8973A',border:'1px solid rgba(200,151,58,0.5)',borderRadius:4,padding:'1px 7px',whiteSpace:'nowrap' as const}}>✦ New</span>}</InlineSelect></td>
+        options={[{value:'',label:`Automatic (${WT_LABEL[epicWorkType({...epic,work_type:null},projects) as 'new']})`},...WORK_TYPE_KEYS.map(k=>({value:k,label:WT_LABEL[k]}))]} onChange={v=>upd({work_type:v})}><WorkTag wt={wt}/></InlineSelect></td>
       <td style={TD}><InlineSelect value={epic.release_month||''} options={releaseOptions(releases,epic.release_month)} onChange={v=>upd({release_month:v})}>{epic.release_month?<span title={`${fmtMonthKey(epic.release_month)} release · ${releaseText(releases,epic.release_month)}`} style={{fontSize:10,fontWeight:700,color:'#5DADE2',border:'1px solid rgba(93,173,226,0.4)',borderRadius:4,padding:'1px 6px',whiteSpace:'nowrap' as const}}>📦 {fmtMonthKey(epic.release_month)}</span>:<span style={{fontSize:11,color:'#3A4A5E'}}>—</span>}</InlineSelect></td>
       <td style={TD}><InlineSelect value={epic.priority||'P3'} options={['P1','P2','P3','P4']} onChange={v=>v&&upd({priority:v})}><span style={{background:PRIORITY_BG[epic.priority]||'#1E3048',color:PRIORITY_BG[epic.priority]?'#fff':'#7A8FA6',borderRadius:4,padding:'2px 8px',fontSize:10,fontWeight:700}}>{epic.priority||'P3'}</span></InlineSelect></td>
       <td style={{...TD,textAlign:'center' as const,padding:'0 4px'}} onClick={e=>e.stopPropagation()}>
@@ -201,9 +200,10 @@ export function EpicPanel({epic,projects,items,setItems,setEpics,statusOpts,prio
           <ReleaseSelect value={epic.release_month} releases={releases} onChange={(v:any)=>upd({release_month:v})} style={{...INPUT,cursor:'pointer'}}/></div>
         <div><div style={LABEL}>WORK TYPE</div>
           <select value={epic.work_type||''} onChange={e=>upd({work_type:e.target.value||null})} style={{...INPUT,cursor:'pointer'}}>
-            <option value="">Automatic: {epicWorkType({...epic,work_type:null},projects)==='sustain'?'Sustain':'New initiative'}{pr?' (from initiative)':''}</option>
-            <option value="new">New initiative</option>
+            <option value="">Automatic: {WT_LABEL[epicWorkType({...epic,work_type:null},projects) as 'new']}{pr?' (from initiative)':''}</option>
+            <option value="new">New</option>
             <option value="sustain">Sustain (tech debt, stabilization & enhancements)</option>
+            <option value="saas">SaaS deliverable</option>
           </select></div>
         <div><div style={LABEL}>DATES (SHOWN ON THE STRATEGY ROADMAP)</div>
           <div style={{display:'flex',gap:6}}>
