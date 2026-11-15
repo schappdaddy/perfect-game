@@ -139,6 +139,8 @@ export function QuarterPlanner({items,setItems,projects,setProjects,epics=[],set
   const [mode,setModeS]=useState<'quarters'|'releases'>(()=>pref('pg_plan_mode','quarters'))
   const [hideNoRel,setHideNoRelS]=useState<boolean>(()=>pref('pg_plan_hide_norel2',false))
   const [noInitOnly,setNoInitOnly]=useState(false) // only work with no initiative
+  const [poolGroup,setPoolGroupS]=useState<boolean>(()=>pref('pg_plan_poolgroup',true)) // backlog by initiative, or in rank order
+  const setPoolGroup=(v:boolean)=>{setPoolGroupS(v);save('pg_plan_poolgroup',v)}
   const wtF:string=workType // the Backlog's work type tab: 'all' | 'new' | 'sustain' | 'saas'
   const [poolTeam,setPoolTeam]=useState(true)
   const [src,setSrcS]=useState<'td'|'init'>(()=>pref('pg_plan_src','td')) // what the left panel lists
@@ -419,7 +421,7 @@ export function QuarterPlanner({items,setItems,projects,setProjects,epics=[],set
   // Release choices for a card: the months from its quarter's start through the next quarter
   const releaseChoices=(qi:any)=>{const out:string[]=[];for(let n=0;n<6;n++)out.push(addMonths(qi.months[0],n));return out}
   // A plain render function (not a component), so cards aren't remounted mid-drag
-  const card=(en:Entry,o:{idx?:number,relPicker?:boolean,showQuarter?:boolean}={})=>{
+  const card=(en:Entry,o:{idx?:number,relPicker?:boolean,showQuarter?:boolean,grouped?:boolean}={})=>{
     const x=en.x,isEpic=en.kind==='epic'
     if(en.kind==='project')return initCard(en,o)
     const sts=isEpic?storiesOf(x):[],done=sts.filter(i=>!open(i)).length
@@ -444,8 +446,24 @@ export function QuarterPlanner({items,setItems,projects,setProjects,epics=[],set
       </div>
       <div style={{fontSize:12,color:'#F4F6F8',lineHeight:1.3,fontWeight:isEpic?700:400}}>{x.name}</div>
       {o.showQuarter&&qi&&<div style={{fontSize:10,color:'#C8D4E0'}}>🗓 Worked in <b>{qi.label}</b>{later?<span style={{color:'#5DADE2'}}> · ships after</span>:''}</div>}
-      {isEpic&&<div style={{fontSize:10,color:'#7A8FA6'}}>{sts.length} stor{sts.length===1?'y':'ies'}{sts.length?` · ${done} done`:''}</div>}
-      {home?<div style={{fontSize:10,color:'#C8973A',overflow:'hidden',textOverflow:'ellipsis',whiteSpace:'nowrap' as const}}>◈ {home.name}{ep?` › ${ep.name}`:''}</div>
+      {isEpic&&(()=>{
+        // The stories that travel with this epic (same quarter), listed inside it
+        const inside=sts.filter(st=>withItsEpic(st)),shownSt=inside.slice(0,6)
+        return <div style={{display:'flex',flexDirection:'column',gap:1}}>
+          <div style={{fontSize:10,color:'#7A8FA6'}}>{sts.length} stor{sts.length===1?'y':'ies'}{sts.length?` · ${done} done`:''}</div>
+          {shownSt.map(st=>(
+            <div key={st.id} onClick={e=>{e.stopPropagation();onOpenItem(st)}} title={`${st.item_id||''} ${st.name} · ${st.status}`}
+              style={{display:'flex',alignItems:'center',gap:5,fontSize:10.5,padding:'2px 5px',borderLeft:`2px solid ${KIND_CLR.story}`,background:'rgba(93,173,226,0.06)',borderRadius:3,cursor:'pointer',opacity:open(st)?1:0.55}}>
+              <span style={{color:KIND_CLR.story,fontWeight:800,fontSize:8.5}}>▪</span>
+              <span style={{color:'#7A8FA6',fontFamily:'monospace',fontSize:9.5,flexShrink:0}}>{st.item_id}</span>
+              <span style={{color:'#E1E7EE',flex:1,minWidth:0,overflow:'hidden',textOverflow:'ellipsis',whiteSpace:'nowrap' as const,textDecoration:open(st)?undefined:'line-through'}}>{st.name}</span>
+              <span style={{color:'#7A8FA6',fontSize:9,flexShrink:0}}>{st.status}</span>
+            </div>
+          ))}
+          {inside.length>shownSt.length&&<div style={{fontSize:9.5,color:'#7A8FA6',paddingLeft:7}}>+ {inside.length-shownSt.length} more</div>}
+        </div>
+      })()}
+      {o.grouped?(ep&&!isEpic?<div style={{fontSize:10,color:KIND_CLR.epic}}>◆ in epic {ep.name}</div>:null):home?<div style={{fontSize:10,color:'#C8973A',overflow:'hidden',textOverflow:'ellipsis',whiteSpace:'nowrap' as const}}>◈ {home.name}{ep?` › ${ep.name}`:''}</div>
         :bk?<div style={{fontSize:10,color:'#8FA6BC'}}>🔧 {bk.name}</div>
         :isTechDebt(en.kind,x)?<div title="Tech debt with no initiative: planning it into a quarter files it under that quarter's Tech Debt initiative" style={{fontSize:10,color:'#8FA6BC'}}>🔧 Tech debt · no initiative</div>:null}
       {o.relPicker&&qi&&(
@@ -462,6 +480,31 @@ export function QuarterPlanner({items,setItems,projects,setProjects,epics=[],set
       )}
     </div>
   )}
+  // Cards grouped by the initiative they belong to (then Tech debt, then no initiative):
+  // an initiative header, its epics (with their stories inside), then its other stories
+  const groupsOf=(list:Entry[])=>{
+    const m=new Map<string,{key:string,label:string,kind:'init'|'td'|'none',team:any,list:Entry[]}>()
+    for(const en of list){
+      const h=homeOf(en.kind,en.x),bk=!h&&bucketOf(en.kind,en.x)
+      const key=h?'p:'+h.id:bk||isTechDebt(en.kind,en.x)?'td':'none'
+      if(!m.has(key))m.set(key,{key,label:h?h.name:key==='td'?'Tech debt':'No initiative',kind:h?'init':key==='td'?'td':'none',team:h?.team||null,list:[]})
+      m.get(key)!.list.push(en)
+    }
+    const order=(g:any)=>g.kind==='init'?0:g.kind==='td'?1:2
+    return[...m.values()].sort((a,b)=>order(a)-order(b)||a.label.localeCompare(b.label)).map(g=>({...g,list:[...g.list.filter(e=>e.kind==='epic'),...g.list.filter(e=>e.kind!=='epic')]}))
+  }
+  const grouped=(list:Entry[],o:any={},idxOf?:(en:Entry)=>number)=>groupsOf(list).map(g=>(
+    <div key={g.key} style={{display:'flex',flexDirection:'column',gap:5,borderLeft:`2px solid ${g.kind==='init'?'rgba(200,151,58,0.55)':'#3A4A5E'}`,paddingLeft:6}}>
+      <div style={{display:'flex',alignItems:'center',gap:6,minWidth:0}}>
+        <span style={{fontSize:10.5,fontWeight:800,color:g.kind==='init'?KIND_CLR.initiative:'#8FA6BC',overflow:'hidden',textOverflow:'ellipsis',whiteSpace:'nowrap' as const,flex:1,minWidth:0}}
+          title={g.kind==='init'?`Initiative: ${g.label}`:g.kind==='td'?'Tech debt: in a quarterly Tech Debt initiative, or tech debt with no initiative':'Work with no initiative'}>
+          {g.kind==='init'?'◈ ':g.kind==='td'?'🔧 ':'○ '}{g.label}</span>
+        {g.team&&<TeamTag team={g.team}/>}
+        <span style={{fontSize:9.5,color:'#7A8FA6',flexShrink:0}}>{g.list.length}</span>
+      </div>
+      {g.list.map(en=>card(en,{...o,grouped:true,idx:idxOf?idxOf(en):o.idx}))}
+    </div>
+  ))
   // An initiative card: releasing the initiative means its go-live is in that release
   function initCard(en:Entry,o:any){
     const p=en.x,eps=(epics as any[]).filter(e=>e.project_id===p.id&&open(e)),sts=(items as any[]).filter(i=>i.parent_project===p.name&&open(i))
@@ -539,7 +582,7 @@ export function QuarterPlanner({items,setItems,projects,setProjects,epics=[],set
         <div onDragOver={e=>{e.preventDefault();if(over!=='pool')setOver(o=>o?.startsWith('pool:')?o:'pool')}} onDrop={e=>{e.preventDefault();dropOnPool(null)}}
           style={{width:280,flexShrink:0,borderRight:'1px solid #243447',display:'flex',flexDirection:'column',background:over==='pool'?'rgba(200,151,58,0.06)':'transparent'}}>
           {<div style={{display:'flex',borderBottom:'1px solid #243447'}}>
-            {([['td','Backlog'],['init','Initiatives']] as const).map(([k,l])=>(
+            {([['td','Backlog · not planned'],['init','Initiatives']] as const).map(([k,l])=>(
               <button key={k} onClick={()=>setSrc(k)} style={{flex:1,background:src===k?'#0F1C2B':'#162436',color:src===k?'#F4F6F8':'#7A8FA6',border:'none',borderBottom:`2px solid ${src===k?'#C8973A':'transparent'}`,fontSize:11,fontWeight:700,padding:'8px 0',cursor:'pointer'}}>{l}</button>
             ))}
           </div>}
@@ -556,14 +599,20 @@ export function QuarterPlanner({items,setItems,projects,setProjects,epics=[],set
             </div>
           </>):(<>
           <div style={{padding:'7px 12px',borderBottom:'1px solid #243447'}}>
-            <div style={{fontSize:11,fontWeight:800,color:'#8FA6BC',letterSpacing:1}}>BACKLOG{wtF!=='all'?` · ${(WT_LABEL as any)[wtF].toUpperCase()}`:''} · {(n=>`${n} epic${n!==1?'s':''}`)(pool.filter(en=>en.kind==='epic').length)} · {(n=>`${n} stor${n===1?'y':'ies'}`)(pool.filter(en=>en.kind==='item').length)}</div>
+            <div style={{fontSize:11,fontWeight:800,color:'#8FA6BC',letterSpacing:1}}>NOT PLANNED YET{wtF!=='all'?` · ${(WT_LABEL as any)[wtF].toUpperCase()}`:''} · {(n=>`${n} epic${n!==1?'s':''}`)(pool.filter(en=>en.kind==='epic').length)} · {(n=>`${n} stor${n===1?'y':'ies'}`)(pool.filter(en=>en.kind==='item').length)}</div>
             <div title="All open epics and stories with no quarter yet, in priority order. Drag to reorder, into a quarter, or straight into a release; drag back here to unplan. Planning never moves work out of its initiative. Tech debt with no initiative is filed under the quarter's Tech Debt initiative."
               style={{fontSize:10.5,color:'#7A8FA6',margin:'2px 0 4px',cursor:'help'}}>In priority order. Drag to reorder or plan. <span>ⓘ</span></div>
             {!ALL&&<label style={{display:'flex',gap:5,alignItems:'center',fontSize:10.5,color:'#7A8FA6',cursor:'pointer'}}><input type="checkbox" checked={poolTeam} onChange={e=>setPoolTeam(e.target.checked)} style={{accentColor:'#C8973A'}}/>Only {short} and unassigned</label>}
+            <div style={{display:'flex',border:'1px solid #243447',borderRadius:5,overflow:'hidden',margin:'2px 0 4px',width:'fit-content'}}>
+              {([[true,'By initiative'],[false,'Rank order']] as const).map(([v,l])=>(
+                <button key={l} onClick={()=>setPoolGroup(v)} title={v?'Grouped under the initiative each item belongs to':'One ranked list: drag to reorder priority'}
+                  style={{background:poolGroup===v?'#C8973A':'#1E3048',color:poolGroup===v?'#0D1B2A':'#C8C8D4',border:'none',fontSize:10.5,fontWeight:700,padding:'3px 9px',cursor:'pointer'}}>{l}</button>
+              ))}
+            </div>
             <label style={{display:'flex',gap:5,alignItems:'center',fontSize:10.5,color:'#7A8FA6',cursor:'pointer'}}><input type="checkbox" checked={noInitOnly} onChange={e=>setNoInitOnly(e.target.checked)} style={{accentColor:'#C8973A'}}/>Only work with no initiative</label>
           </div>
           <div style={colBody}>
-            {pool.map((en,ix)=>card(en,{idx:ix}))}
+            {poolGroup?grouped(pool,{},en=>pool.indexOf(en)):pool.map((en,ix)=>card(en,{idx:ix}))}
             {!pool.length&&empty('Nothing waiting to be planned.')}
           </div>
           </>)}
@@ -592,8 +641,8 @@ export function QuarterPlanner({items,setItems,projects,setProjects,epics=[],set
                   {msBlock('q:'+qi.qk,qi.qStart,qi.qEnd)}
                   <div style={colBody}>
                     {ini.map(en=>initCard(en,{goLive:qi.months.includes(en.x.release_month),relBadge:true}))}
-                    {list.length>0&&ini.length>0&&<div style={{fontSize:9.5,fontWeight:800,color:'#8FA6BC',letterSpacing:0.8,marginTop:2}}>PLANNED WORK</div>}
-                    {list.map(en=>card(en,{relPicker:true}))}
+                    {list.length>0&&ini.length>0&&<div style={{fontSize:9.5,fontWeight:800,color:'#8FA6BC',letterSpacing:0.8,marginTop:2}}>EPICS & STORIES, BY INITIATIVE</div>}
+                    {grouped(list,{relPicker:true})}
                     {!list.length&&!ini.length&&empty('Drag work here.')}
                   </div>
                 </div>
@@ -609,7 +658,7 @@ export function QuarterPlanner({items,setItems,projects,setProjects,epics=[],set
                   <div style={{fontSize:10.5,color:'#7A8FA6'}}>Planned in {quarters[0].label}–{quarters[3].label}</div>
                   <div style={{fontSize:10,color:'#7A8FA6',marginTop:2}}>{list.length} · {pts(list)} pts</div>
                 </div>
-                <div style={colBody}>{list.map(en=>card(en,{showQuarter:true}))}{!list.length&&empty('Everything planned has a release.')}</div>
+                <div style={colBody}>{grouped(list,{showQuarter:true})}{!list.length&&empty('Everything planned has a release.')}</div>
               </div>
             )})()}
             {relCols.map(k=>{
@@ -626,7 +675,7 @@ export function QuarterPlanner({items,setItems,projects,setProjects,epics=[],set
                     {!slim&&<div style={{fontSize:10,color:'#7A8FA6',marginTop:2}}>{ini.length?<span style={{color:'#C8973A'}}>{ini.length} go-live{ini.length!==1?'s':''} · </span>:''}{td.length} planned · {pts(list)} pts</div>}
                   </div>
                   {!slim&&msBlock('r:'+k,`${k}-01`,lastDay(k))}
-                  <div style={colBody}>{list.map(en=>en.kind==='project'?initCard(en,{goLive:true}):card(en,{showQuarter:true}))}{!list.length&&!slim&&empty('Drag planned work here.')}</div>
+                  <div style={colBody}>{ini.map(en=>initCard(en,{goLive:true}))}{grouped(td,{showQuarter:true})}{!list.length&&!slim&&empty('Drag planned work here.')}</div>
                 </div>
               )
             })}
