@@ -172,7 +172,7 @@ export function QuarterPlanner({items,setItems,projects,setProjects,epics=[],set
   // into the quarter's Tech Debt initiative, so it's costed with the team's OpEx.
   type Entry={kind:'item'|'epic'|'project',x:any,key:string,qk:string|null}
   const bucketOf=(kind:string,x:any)=>kind==='epic'?bucketById(x.project_id):kind==='item'?bucketByName(x.parent_project):null
-  const qkOf=(kind:string,x:any):string|null=>kind==='project'?null:(x.plan_quarter||bucketOf(kind,x)?.sustain_quarter||null)
+  const qkOf=(kind:string,x:any):string|null=>kind==='project'?(x.plan_quarter||null):(x.plan_quarter||bucketOf(kind,x)?.sustain_quarter||null)
   const ent=(kind:'item'|'epic'|'project',x:any):Entry=>({kind,x,key:`${kind}:${x.id}`,qk:qkOf(kind,x)})
   // The initiative work belongs to (a Tech Debt initiative doesn't count as one)
   const homeOf=(kind:string,x:any)=>{
@@ -227,11 +227,25 @@ export function QuarterPlanner({items,setItems,projects,setProjects,epics=[],set
     const{error}=await supabase.from('projects').update({...fields,updated_at:new Date().toISOString()}).eq('id',id)
     if(error)alert('Failed to save the initiative: '+error.message)
   }
-  // An initiative's go-live release
-  async function setRelease(en:Entry,month:string|null){
-    if(month&&isBlocked(month)){alert(`${fmtMonthKey(month)} has no release. Pick another month, or change it under 📦 Release dates.`);return}
-    if((en.x.release_month||null)===month)return
-    await updProject(en.x.id,{release_month:month})
+  // The first month with a release (not a code freeze) from a month on
+  const firstOpenFrom=(k:string)=>{for(let n=0;n<18;n++){const m=addMonths(k,n);if(!isBlocked(m))return m}return null}
+  // An initiative: the quarter it's worked in, and its go-live release. Planning it into a
+  // quarter keeps its release, unless the release is before that quarter: then it moves to
+  // the first open release from the quarter on. A release drop sets the go-live and, if it
+  // has no quarter yet (or a later one), the quarter of that release.
+  async function setInitPlan(en:Entry,{qi,release}:{qi?:any,release?:string|null}){
+    const x=en.x,f:any={}
+    if(qi===null){f.plan_quarter=null;f.release_month=null}
+    else if(qi){
+      f.plan_quarter=qi.qk
+      if(x.release_month&&x.release_month<qi.months[0])f.release_month=firstOpenFrom(qi.months[0])
+    }else if(release!==undefined){
+      if(release&&isBlocked(release)){alert(`${fmtMonthKey(release)} has no release. Pick another month, or change it under 📦 Release dates.`);return}
+      f.release_month=release
+      if(release){const rq=fyQuarterOf(release),rqi=qInfo(rq.fy,rq.q),pq=qFromKey(x.plan_quarter);if(!pq||pq.months[0]>release)f.plan_quarter=rqi.qk}
+    }
+    if(Object.keys(f).every(k=>(x[k]||null)===(f[k]||null)))return
+    await updProject(x.id,f)
   }
   async function createBucket(qi:any,t:string){
     const name=`${qi.label} Tech Debt (${shortOf(t)})`
@@ -259,9 +273,10 @@ export function QuarterPlanner({items,setItems,projects,setProjects,epics=[],set
       const rq=fyQuarterOf(release),nx=nextQ(fromQ.fy,fromQ.q,1),rk=quarterKey(rq.fy,rq.q)
       if(rk!==fromQ.qk&&rk!==quarterKey(nx.fy,nx.q))toQ=qInfo(rq.fy,rq.q)
     }
-    const rel=toQ===null?null:release===undefined?(x.release_month||null):release
+    let rel=toQ===null?null:release===undefined?(x.release_month||null):release
+    // A release before the quarter it's now worked in moves to the first open one from then on
+    if(rel&&toQ&&rel<toQ.months[0])rel=firstOpenFrom(toQ.months[0])
     if(rel&&isBlocked(rel)){alert(`${fmtMonthKey(rel)} has no release. Pick another month, or change it under 📦 Releases.`);return}
-    if(rel&&toQ&&rel<toQ.months[0]&&!confirm(`${fmtMonthKey(rel)} is before ${toQ.label} starts. Ship it then anyway?`))return
     const home=homeOf(kind,x),td=isTechDebt(kind,x)
     // Tech debt with no initiative goes in its team's Tech Debt initiative for the quarter
     let bucket:any=null
@@ -316,19 +331,13 @@ export function QuarterPlanner({items,setItems,projects,setProjects,epics=[],set
   const take=()=>{const en=findEntry(dragId);setDragId(null);setOver(null);return en}
   async function dropOnPool(beforeKey:string|null){
     const en=take();if(!en)return
-    if(en.kind==='project'){await setRelease(en,null);return}
+    if(en.kind==='project'){await setInitPlan(en,{qi:null});return}
     if(en.qk)await setPlan(en,{qi:null})
     await reorderPool({...en,qk:null},beforeKey)
   }
   async function dropOnQuarter(qi:any){
     const en=take();if(!en)return
-    if(en.kind==='project'){
-      // An initiative goes live in the quarter's first open release
-      if(en.x.release_month&&qi.months.includes(en.x.release_month))return
-      const m=qi.months.find((k:string)=>!isBlocked(k))
-      if(!m){alert(`${qi.label} has no release months open. Mark one under 📦 Release dates, or drop it in another quarter.`);return}
-      await setRelease(en,m);return
-    }
+    if(en.kind==='project'){await setInitPlan(en,{qi});return}
     if(en.qk!==qi.qk)await setPlan(en,{qi})
   }
   // Milestones of the initiatives in view, by date
@@ -396,7 +405,7 @@ export function QuarterPlanner({items,setItems,projects,setProjects,epics=[],set
   }
   async function dropOnRelease(month:string|null){
     const en=take();if(!en)return
-    if(en.kind==='project'){await setRelease(en,month);return}
+    if(en.kind==='project'){await setInitPlan(en,{release:month});return}
     if(!en.qk){
       // From the backlog straight to a release: it's worked in the quarter the release is in
       const{fy,q}=month?fyQuarterOf(month):fq
@@ -459,7 +468,7 @@ export function QuarterPlanner({items,setItems,projects,setProjects,epics=[],set
     const fmtD=(d:string)=>fmtMonthKey(d.slice(0,7))
     return(
       <div key={en.key} draggable onDragStart={e=>{setDragId(en.key);e.dataTransfer.effectAllowed='move'}} onDragEnd={()=>{setDragId(null);setOver(null)}}
-        title="Drag onto a release: the initiative goes live in it"
+        title="Drag onto a quarter to plan when it's worked, or onto a release for its go-live"
         style={{background:'rgba(200,151,58,0.10)',border:'1px solid rgba(200,151,58,0.5)',borderLeft:'3px solid #C8973A',borderRadius:6,padding:'6px 8px',cursor:'grab',opacity:dragId===en.key?0.4:1,display:'flex',flexDirection:'column',gap:3}}>
         <div style={{display:'flex',alignItems:'center',gap:6}}>
           <span style={{fontSize:9,fontWeight:800,color:KIND_CLR.initiative,letterSpacing:1,whiteSpace:'nowrap' as const}}>◈ INITIATIVE{o.goLive?' GO-LIVE':''}</span>
@@ -530,15 +539,15 @@ export function QuarterPlanner({items,setItems,projects,setProjects,epics=[],set
         <div onDragOver={e=>{e.preventDefault();if(over!=='pool')setOver(o=>o?.startsWith('pool:')?o:'pool')}} onDrop={e=>{e.preventDefault();dropOnPool(null)}}
           style={{width:280,flexShrink:0,borderRight:'1px solid #243447',display:'flex',flexDirection:'column',background:over==='pool'?'rgba(200,151,58,0.06)':'transparent'}}>
           {<div style={{display:'flex',borderBottom:'1px solid #243447'}}>
-            {([['td','Backlog'],['init','Initiative go-lives']] as const).map(([k,l])=>(
+            {([['td','Backlog'],['init','Initiatives']] as const).map(([k,l])=>(
               <button key={k} onClick={()=>setSrc(k)} style={{flex:1,background:src===k?'#0F1C2B':'#162436',color:src===k?'#F4F6F8':'#7A8FA6',border:'none',borderBottom:`2px solid ${src===k?'#C8973A':'transparent'}`,fontSize:11,fontWeight:700,padding:'8px 0',cursor:'pointer'}}>{l}</button>
             ))}
           </div>}
           {src==='init'?(<>
             <div style={{padding:'7px 12px',borderBottom:'1px solid #243447'}}>
-              <div title="Drag an initiative onto a release (or a quarter, for its first open release) to set its go-live. Its epics and stories are planned from the Backlog tab."
+              <div title="Drag an initiative onto a quarter to plan when it's worked (its go-live release stays, unless it's before that quarter), or onto a release to set its go-live. Its epics and stories are planned from the Backlog tab."
                 style={{fontSize:11,fontWeight:800,color:'#C8973A',letterSpacing:1,cursor:'help'}}>INITIATIVES · {inits.length} <span style={{color:'#7A8FA6'}}>ⓘ</span></div>
-              <div style={{fontSize:10.5,color:'#7A8FA6',margin:'2px 0 4px'}}>Drag onto a release to set its go-live.</div>
+              <div style={{fontSize:10.5,color:'#7A8FA6',margin:'2px 0 4px'}}>Drag onto a quarter, or a release for its go-live.</div>
               {!ALL&&<label style={{display:'flex',gap:5,alignItems:'center',fontSize:10.5,color:'#7A8FA6',cursor:'pointer'}}><input type="checkbox" checked={poolTeam} onChange={e=>setPoolTeam(e.target.checked)} style={{accentColor:'#C8973A'}}/>Only {short} and unassigned</label>}
             </div>
             <div style={colBody}>
@@ -566,7 +575,8 @@ export function QuarterPlanner({items,setItems,projects,setProjects,epics=[],set
               const list=planned.filter(en=>en.qk===qi.qk),noRel=list.filter(en=>!en.x.release_month).length
               const nTd=list.filter(en=>bucketOf(en.kind,en.x)).length
               // Initiatives going live in this quarter
-              const ini=initEntries.filter(en=>qi.months.includes(en.x.release_month))
+              // Initiatives worked in this quarter (or, with no quarter, going live in it)
+              const ini=initEntries.filter(en=>en.qk===qi.qk||(!en.qk&&qi.months.includes(en.x.release_month)))
               return(
                 <div key={qi.qk} onDragOver={e=>{e.preventDefault();setOver('q:'+qi.qk)}} onDragLeave={()=>setOver(o=>o==='q:'+qi.qk?null:o)} onDrop={e=>{e.preventDefault();dropOnQuarter(qi)}}
                   style={colBox('q:'+qi.qk,qi.qk===quarterKey(cur.fy,cur.q))}>
@@ -581,7 +591,7 @@ export function QuarterPlanner({items,setItems,projects,setProjects,epics=[],set
                   </div>
                   {msBlock('q:'+qi.qk,qi.qStart,qi.qEnd)}
                   <div style={colBody}>
-                    {ini.map(en=>initCard(en,{goLive:true,relBadge:true}))}
+                    {ini.map(en=>initCard(en,{goLive:qi.months.includes(en.x.release_month),relBadge:true}))}
                     {list.length>0&&ini.length>0&&<div style={{fontSize:9.5,fontWeight:800,color:'#8FA6BC',letterSpacing:0.8,marginTop:2}}>PLANNED WORK</div>}
                     {list.map(en=>card(en,{relPicker:true}))}
                     {!list.length&&!ini.length&&empty('Drag work here.')}

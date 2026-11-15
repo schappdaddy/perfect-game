@@ -40,7 +40,7 @@ export function planModel(inp:PlanInput){
   const work=(x:any)=>(x.space||'work')==='work'
   const epicById=(id:any)=>epics.find((e:any)=>e.id===id)
   const bucketOf=(kind:string,x:any)=>kind==='epic'?buckets.find((p:any)=>p.id===x.project_id)||null:kind==='item'?buckets.find((p:any)=>p.name===x.parent_project)||null:null
-  const qkOf=(kind:string,x:any):string|null=>kind==='project'?null:(x.plan_quarter||bucketOf(kind,x)?.sustain_quarter||null)
+  const qkOf=(kind:string,x:any):string|null=>kind==='project'?(x.plan_quarter||null):(x.plan_quarter||bucketOf(kind,x)?.sustain_quarter||null)
   const homeOf=(kind:string,x:any)=>{
     const p=kind==='epic'?projects.find((p:any)=>p.id===x.project_id):kind==='item'?projects.find((p:any)=>p.name===x.parent_project):null
     return p&&!p.sustain_quarter?p:null
@@ -81,7 +81,7 @@ export function planModel(inp:PlanInput){
   const shownTeams:string[]=ALL?teams:[team]
 
   const quarterCols:PlanColumn[]=quarters.map(qi=>{
-    const list=planned.filter(en=>en.qk===qi.qk),ini=inits.filter(en=>qi.months.includes(en.x.release_month))
+    const list=planned.filter(en=>en.qk===qi.qk),ini=inits.filter(en=>en.qk===qi.qk||(!en.qk&&qi.months.includes(en.x.release_month)))
     const bks=shownTeams.map(t=>bucketFor(qi.qk,t)).filter(Boolean).map((b:any)=>`Tech debt: ${b.name}`)
     return{title:qi.label,sub:`${fmtMonthKey(qi.months[0]).slice(0,3)}–${fmtMonthKey(qi.months[2])}`,now:qi.qk===quarterKey(cur.fy,cur.q),
       meta:[...bks,`${list.length} planned${ini.length?` · ${ini.length} go-live${ini.length!==1?'s':''}`:''} · ${pts(list)} pts`],
