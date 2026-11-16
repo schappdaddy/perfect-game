@@ -32,6 +32,7 @@ const TEAMS=['Consumer Experience','Operational Efficiency']
 const EFFORTS=['S','M','L','XL']
 const EFFORT_ALLOC:any={S:25,M:50,L:75,XL:100} // default per-person allocation % this project's size implies
 const SWIMLANES=['POS','Pricing','Tax','Loyalty','WFM','Inventory','Reporting','SafeSize','Product','Clienteling','Integrations']
+const MONTHS_SHORT=['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec']
 const PRIORITY_ORDER={P1:0,P2:1,P3:2,P4:3,Backlog:4}
 const RAG_COLORS={Green:'#27AE60',Amber:'#D4820A',Red:'#C0392B'}
 
@@ -3657,6 +3658,57 @@ function Roadmap({items,setItems,projects,setProjects,milestones,setMilestones,t
     return()=>{window.removeEventListener('mousemove',onMouseMove);window.removeEventListener('mouseup',onMouseUp);window.removeEventListener('keydown',onKey)}
   },[items,projects,epics,sprints,totalMs,TOTAL_W])
 
+  // ── Releases on the timeline ──
+  // Each row shows the release its work ships in: a 📦 marker at the release date, with a
+  // dashed line from where the work ends (red when it ships before the work ends). Each
+  // initiative's row shows how far its work ships ("ships through …"). Assign a release from
+  // the 📦 chip by the name on the left.
+  const relDateOf=(k:string)=>releaseOf(releases,k)?.release_date||(()=>{const[y,m]=k.split('-').map(Number);return `${k}-${String(new Date(y,m,0).getDate()).padStart(2,'0')}`})()
+  const inRange=(d:string)=>{const t=new Date(d+'T12:00:00');return t>=totalStart&&t<=totalEnd}
+  function relMarker(k:string|null|undefined,workEnd:string|null|undefined,top:number,o:{label?:string,muted?:boolean,earlyTop?:number}={}){
+    if(!k)return null
+    const d=relDateOf(k);if(!inRange(d))return null
+    const rx=pct(d),ex=workEnd&&inRange(workEnd)?pct(workEnd):null
+    const early=!!workEnd&&d<workEnd,clr=early?'#E74C3C':'#5DADE2'
+    const nm=MONTHS_SHORT[Number(k.split('-')[1])-1]
+    return(<>
+      {ex!=null&&rx>ex+2&&<div style={{position:'absolute',top,left:ex,width:rx-ex,borderTop:`1.5px dashed ${o.muted?'rgba(93,173,226,0.45)':'rgba(93,173,226,0.8)'}`,zIndex:3,pointerEvents:'none'}}/>}
+      <div title={`${o.label||'Ships in'} the ${fmtMonthKey(k)} release (${d})${early?' — before the work ends':''}`}
+        style={{position:'absolute',top:(early&&o.earlyTop!=null?o.earlyTop:top)-8,left:rx,transform:'translateX(-50%)',zIndex:6,background:early?'rgba(231,76,60,0.18)':'#0D1B2A',border:`1px solid ${clr}`,borderRadius:8,
+          padding:'0 5px',fontSize:9,fontWeight:800,color:clr,whiteSpace:'nowrap' as const,lineHeight:'15px',pointerEvents:'auto'}}>📦 {o.label?`${o.label} `:''}{nm}</div>
+    </>)
+  }
+  async function setReleaseOf(kind:'item'|'epic'|'project',x:any,month:string|null){
+    if(month&&releaseOf(releases,month)?.no_release){alert(`${fmtMonthKey(month)} has no release. Pick another month.`);return}
+    if((x.release_month||null)===month)return
+    const t=kind==='project'?'projects':kind==='epic'?'epics':'items'
+    const apply=(k:string,id:any,f:any)=>k==='project'?setProjects((p:any[])=>p.map(r=>r.id===id?{...r,...f}:r)):k==='epic'?setEpics?.((p:any[])=>p.map(r=>r.id===id?{...r,...f}:r)):setItems((p:any[])=>p.map(r=>r.id===id?{...r,...f}:r))
+    apply(kind,x.id,{release_month:month})
+    const{error}=await supabase.from(t).update({release_month:month}).eq('id',x.id)
+    if(error){alert('Failed to save the release: '+error.message);apply(kind,x.id,{release_month:x.release_month||null});return}
+    // An epic's open stories that shipped with it follow it
+    if(kind==='epic'){
+      const st=items.filter((i:any)=>i.epic_id===x.id&&!ITEM_TERMINAL.includes(i.status)&&(!i.release_month||i.release_month===x.release_month))
+      if(st.length){setItems((p:any[])=>p.map(r=>st.some((z:any)=>z.id===r.id)?{...r,release_month:month}:r));await supabase.from('items').update({release_month:month}).in('id',st.map((z:any)=>z.id))}
+    }
+  }
+  // The 📦 chip by a name: shows the release and changes it
+  const relChip=(kind:'item'|'epic'|'project',x:any)=>(
+    <span onClick={e=>e.stopPropagation()} style={{marginLeft:'auto',flexShrink:0}}>
+      <InlineSelect value={x.release_month||''} options={releaseOptions(releases,x.release_month)} onChange={(v:any)=>setReleaseOf(kind,x,v||null)}
+        title={x.release_month?`Ships in the ${fmtMonthKey(x.release_month)} release · click to change`:'Not in a release · click to assign one'}>
+        {x.release_month?<span style={{fontSize:9,fontWeight:800,color:'#5DADE2',border:'1px solid rgba(93,173,226,0.5)',borderRadius:8,padding:'0 5px',whiteSpace:'nowrap' as const}}>📦 {MONTHS_SHORT[Number(x.release_month.split('-')[1])-1]} {String(x.release_month).slice(2,4)}</span>
+          :<span style={{fontSize:9,color:'#3A4A5E',border:'1px dashed #3A4A5E',borderRadius:8,padding:'0 5px',whiteSpace:'nowrap' as const}}>📦 +</span>}
+      </InlineSelect>
+    </span>
+  )
+  // How far an initiative's work ships: the latest release of it and its open epics and stories
+  const shipsThrough=(g:any)=>{
+    const ks=[g.release_month,...(epics as any[]).filter((e:any)=>e.project_id===g.id&&!ITEM_TERMINAL.includes(e.status)).map((e:any)=>e.release_month),
+      ...items.filter((i:any)=>i.parent_project===g.name&&!ITEM_TERMINAL.includes(i.status)).map((i:any)=>i.release_month)].filter(Boolean).sort()
+    return ks.length?ks[ks.length-1]:null
+  }
+
   // Click a column on an undated row to place it there (that column's dates); then drag to adjust
   async function placeAt(kind:'item'|'project'|'epic',x:any,col:any){
     const fields={start_date:dateToStr(col.start),end_date:dateToStr(col.end)}
@@ -3914,6 +3966,7 @@ function Roadmap({items,setItems,projects,setProjects,milestones,setMilestones,t
                           <span onClick={()=>setQuickProject(group)} title="Click to edit this initiative" style={{fontSize:12,fontWeight:700,color:'#F4F6F8',overflow:'hidden',whiteSpace:'nowrap' as const,textOverflow:'ellipsis',minWidth:0,cursor:'pointer'}}>{group.name}{group.ongoing?' ∞':''}</span>
                           <span style={{fontSize:10,color:rc,fontWeight:700,flexShrink:0}}>{group.rag==='Green'?'🟢':group.rag==='Amber'?'🟡':group.rag==='Red'?'🔴':'⚪'}</span>
                           {group.violations.length>0&&<span style={{fontSize:9,color:'#E74C3C',flexShrink:0}}>⚠️</span>}
+                          {relChip('project',group)}
                         </div>
                         <div style={{fontSize:9,color:'#7A8FA6'}}>{childItems.length} committed · {group.status}</div>
                       </div>
@@ -3926,6 +3979,7 @@ function Roadmap({items,setItems,projects,setProjects,milestones,setMilestones,t
                             <div style={{fontSize:11,fontWeight:700,color:'#F4F6F8',overflow:'hidden',whiteSpace:'nowrap' as const,textOverflow:'ellipsis',maxWidth:150}}><span style={{color:'#E07B2A'}}>◆</span> {e.name}</div>
                             <div style={{fontSize:9,color:'#7A8FA6'}}>EPIC · {r.count} stor{r.count===1?'y':'ies'} · <span style={{color:sc(e.status),fontWeight:700}}>{e.status||'New'}</span></div>
                           </div>
+                          {relChip('epic',e)}
                         </div>
                       )}
                       const item=r.item
@@ -3940,6 +3994,7 @@ function Roadmap({items,setItems,projects,setProjects,milestones,setMilestones,t
                             <div style={{fontSize:11,color:isViolation?'#E74C3C':'#C8C8D4',overflow:'hidden',whiteSpace:'nowrap' as const,textOverflow:'ellipsis',maxWidth:130}}>{rt(item.request_type)} {item.name}{isViolation?' ⚠️':''}</div>
                             <div style={{fontSize:9,color:'#7A8FA6',overflow:'hidden',whiteSpace:'nowrap' as const,textOverflow:'ellipsis'}}><span style={{fontFamily:'monospace'}}>{item.item_id}</span> <span style={{color:sc(item.status),fontWeight:700}}>● {item.status}</span></div>
                           </div>
+                          {relChip('item',item)}
                         </div>
                       )
                     })}
@@ -4135,6 +4190,14 @@ function Roadmap({items,setItems,projects,setProjects,milestones,setMilestones,t
                           {setDeps&&!group.ongoing&&<DepHandle k={depKey('project',group.id)}/>}
                         </div>
                       )}
+                      {(()=>{
+                        // The initiative's own go-live, then how far its work ships
+                        const thr=shipsThrough(group),endD=group.ongoing?null:group.bar_end
+                        return<>
+                          {thr&&thr!==group.release_month&&relMarker(thr,endD,PARENT_H-9,{label:'ships through',muted:true})}
+                          {relMarker(group.release_month,endD,PARENT_H-9,{label:'go-live'})}
+                        </>
+                      })()}
                       {milestones.filter(m=>m.project_id===group.id&&m.date).map(m=>{
                         const mPx=pct(m.date)
                         const isPast=new Date(m.date+'T12:00:00')<today
@@ -4166,7 +4229,9 @@ function Roadmap({items,setItems,projects,setProjects,milestones,setMilestones,t
                               <div className="pg-rs" onMouseDown={ev=>startDrag(ev,'epic',e,'right',{s:x.s,e:x.e,derived:x.derived})} style={{position:'absolute',right:0,top:0,bottom:0,width:8,cursor:'ew-resize',zIndex:5,borderRadius:'0 9px 9px 0'}}/>
                               {setDeps&&draggingBar!==e.id&&<DepHandle k={depKey('epic',e.id)} size={8}/>}
                             </div>
-                          ):<>
+                          ):null}
+                          {relMarker(e.release_month,x?.e,ROW_H/2,{earlyTop:ROW_H-8})}
+                          {!x&&<>
                             {cols.map((col,ci)=><div key={col.key} className="pg-place" onClick={()=>placeAt('epic',e,col)} title={`Place "${e.name}" in ${col.label}`} style={{position:'absolute',top:0,bottom:0,left:ci*COL_W,width:COL_W,zIndex:2}}/>)}
                             <span style={{position:'sticky',left:8,display:'inline-block',marginTop:13,fontSize:10,color:'#7A8FA6',fontStyle:'italic',pointerEvents:'none',zIndex:3}}>◆ {e.name}: no dates — click a column in this row to place it</span>
                           </>}
@@ -4189,6 +4254,7 @@ function Roadmap({items,setItems,projects,setProjects,milestones,setMilestones,t
                               className={!item.start_date||!item.end_date?'pg-place':undefined}/>
                           ))}
                           <GanttBar item={item} groupColor={ragColor(group.rag)} isViolation={isViolation}/>
+                          {relMarker(item.release_month,item.end_date,ROW_H/2,{earlyTop:ROW_H-5})}
                         </div>
                       )
                     })}
@@ -4221,6 +4287,7 @@ function Roadmap({items,setItems,projects,setProjects,milestones,setMilestones,t
                           onDrop={e=>handleGanttDrop(e,'',col)}/>
                       ))}
                       <GanttBar item={item} groupColor='#7A8FA6' isViolation={false}/>
+                      {relMarker(item.release_month,item.end_date,ROW_H/2,{earlyTop:ROW_H-5})}
                     </div>
                   ))}
                 </div>
