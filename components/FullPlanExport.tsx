@@ -25,12 +25,13 @@ export function FullPlanButton(props:any){
   </>)
 }
 
-function FullPlanDialog({onClose,strategies=[],projects,items,epics,releases,milestones,sprints,strategyItems,tracks,goals,deps,strategyRoles,projectRoles,people,roles,teams,workTypeOf,epicWorkTypeOf}:any){
+// lockTeam: a team's own plan (the Teams page); startN0: which four quarters to start on
+export function FullPlanDialog({onClose,strategies=[],projects,items,epics,releases,milestones,sprints,strategyItems,tracks,goals,deps,strategyRoles,projectRoles,people,roles,teams,workTypeOf,epicWorkTypeOf,lockTeam,startN0=0}:any){
   const mTypes=useMilestoneTypes()
   const cur=fyQuarterOf(monthKeyOf(new Date()))
   const [stratId,setStratId]=useState<string>(()=>{let v:any=null;try{v=localStorage.getItem('pg_strategy')}catch{};return strategies.some((s:any)=>s.id===v)?v:(strategies[0]?.id||'')})
-  const [startN,setStartN]=useState(0)
-  const [team,setTeam]=useState('__all')
+  const [startN,setStartN]=useState(startN0)
+  const [team,setTeam]=useState(lockTeam||'__all')
   const [wt,setWt]=useState('all')
   const [sec,setSec]=useState<any>({roadmap:true,budget:true,quarters:true,releases:true,calendar:true,sprints:true,unplanned:true})
   const [busy,setBusy]=useState(false)
@@ -43,7 +44,7 @@ function FullPlanDialog({onClose,strategies=[],projects,items,epics,releases,mil
       const{exportFullPlanPptx}=await import('./PlanDeck')
       await exportFullPlanPptx({strategy,strategyCtx:{projects,strategyItems,tracks,goals,deps,strategyRoles,projectRoles,people,roles,teams},
         plan:{items,epics,projects,releases,milestones,mTypes,sprints,start,team,wt,teams,workTypeOf,epicWorkTypeOf},sections:sec,
-        fileName:`Full plan ${quarterLabel(start.fy,start.q)} - ${quarterLabel(end.fy,end.q)}`})
+        fileName:`${team!=='__all'?`${team} plan`:'Full plan'} ${quarterLabel(start.fy,start.q)} - ${quarterLabel(end.fy,end.q)}`})
       onClose()
     }catch(e:any){alert('Failed to build the PowerPoint: '+(e?.message||e))}
     setBusy(false)
@@ -54,10 +55,10 @@ function FullPlanDialog({onClose,strategies=[],projects,items,epics,releases,mil
     <div onClick={onClose} style={{position:'fixed',inset:0,background:'rgba(5,10,18,0.65)',zIndex:3000,display:'flex',alignItems:'center',justifyContent:'center'}}>
       <div onClick={e=>e.stopPropagation()} style={{width:520,maxWidth:'calc(100vw - 32px)',background:'#162436',border:'1px solid #243447',borderRadius:12,padding:'18px 20px',boxShadow:'0 20px 50px rgba(0,0,0,0.5)'}}>
         <div style={{display:'flex',alignItems:'center',marginBottom:4}}>
-          <span style={{fontSize:16,fontWeight:800,color:'#F4F6F8',flex:1}}>⬇ Full plan PowerPoint</span>
+          <span style={{fontSize:16,fontWeight:800,color:'#F4F6F8',flex:1}}>⬇ {lockTeam?`${lockTeam} plan`:'Full plan'} PowerPoint</span>
           <button onClick={onClose} style={{background:'none',border:'none',color:'#7A8FA6',fontSize:18,cursor:'pointer'}}>×</button>
         </div>
-        <div style={{fontSize:11.5,color:'#7A8FA6',marginBottom:14}}>Strategy → quarters → releases → sprints → what&apos;s not planned yet, in one deck.</div>
+        <div style={{fontSize:11.5,color:'#7A8FA6',marginBottom:14}}>Strategy → quarters → releases → sprints → what&apos;s not planned yet, in one deck.{team!=='__all'?` Only ${team}: its initiatives, people, work and sprints.`:''}</div>
         <div style={{display:'grid',gridTemplateColumns:'1fr 1fr',gap:10,marginBottom:14}}>
           <div style={{gridColumn:'1 / -1'}}><div style={lab}>STRATEGY</div>
             <select value={stratId} onChange={e=>setStratId(e.target.value)} style={inp}>
@@ -69,7 +70,7 @@ function FullPlanDialog({onClose,strategies=[],projects,items,epics,releases,mil
               {[-1,0,1,2].map(n=>{const a=nextQ(cur.fy,cur.q,n),b=nextQ(a.fy,a.q,3);return <option key={n} value={n}>{quarterLabel(a.fy,a.q)} – {quarterLabel(b.fy,b.q)}{n===0?' (from now)':''}</option>})}
             </select></div>
           <div><div style={lab}>TEAM</div>
-            <select value={team} onChange={e=>setTeam(e.target.value)} style={inp}><option value="__all">All teams</option>{teams.map((t:string)=><option key={t} value={t}>{t}</option>)}</select></div>
+            <select value={team} disabled={!!lockTeam} onChange={e=>setTeam(e.target.value)} style={{...inp,opacity:lockTeam?0.7:1}}><option value="__all">All teams</option>{teams.map((t:string)=><option key={t} value={t}>{t}</option>)}</select></div>
           <div><div style={lab}>WORK TYPE</div>
             <select value={wt} onChange={e=>setWt(e.target.value)} style={inp}><option value="all">All work</option><option value="new">New</option><option value="sustain">Sustain</option><option value="saas">SaaS deliverable</option></select></div>
         </div>
