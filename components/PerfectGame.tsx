@@ -7,7 +7,7 @@ import { EpicsSection } from './Epics'
 import { DependencyLayer, DepHandle, createDependency, deleteDependency, depKey } from './DependencyLayer'
 import { InlineSelect, InlineText, InlineDate, InlineEditStyles } from './InlineEdit'
 import { MilestoneTypeSelect } from './MilestoneTypes'
-import { WORK_TYPE_KEYS, WT_LABEL, WT_COLOR, WorkTag, isWorkType, workTypeOfProject, capacityShare, REQUEST_TYPES } from './WorkTypes'
+import { WORK_TYPE_KEYS, WT_LABEL, WT_COLOR, WorkTag, isWorkType, workTypeOfProject, capacityShare, REQUEST_TYPES, isBug, SEVERITIES, sevOf, BugTag } from './WorkTypes'
 import { QuarterPlanner, ReleaseCalendar, ReleaseSelect, QuarterSelect, ReleasesManager, releaseOptions, releaseOf, releaseText, fmtMonthKey } from './Releases'
 import { EpicRow, EpicPanel, epicProject, epicWorkType, convertStoryToEpic, convertEpicToStory } from './BacklogEpics'
 import { FullPlanButton } from './FullPlanExport'
@@ -51,7 +51,7 @@ const isItemDone=(i:any)=>ITEM_TERMINAL.includes(i?.status)
 // enhancements to existing things). A project carries its work type; an item follows its
 // project unless overridden, and items with no project fall back to their request type.
 const WORK_TYPES=WORK_TYPE_KEYS.map(k=>({key:k,label:WT_LABEL[k]}))
-const SUSTAIN_REQUEST_TYPES=['Tech Debt','Enhancement']
+const SUSTAIN_REQUEST_TYPES=['Tech Debt','Enhancement','Bug']
 function workTypeOfItem(item:any,projects:any[]){
   if(isWorkType(item.work_type))return item.work_type
   const pr=item.parent_project&&projects.find((p:any)=>p.name===item.parent_project)
@@ -2108,6 +2108,7 @@ function Backlog({mode='list',items,setItems,projects,setProjects,space,ccrs=[],
   const [frg,setFrg]=useState('All')
   const [fvn,setFvn]=useState('All')
   const [fef,setFef]=useState('All')
+  const [fsev,setFsev]=useState('All') // bug severity filter
   const [srch,setSrch]=useState('')
   const [sf,setSf]=useState(false)
   const [sortCol,setSortCol]=useState('priority')
@@ -2161,7 +2162,7 @@ function Backlog({mode='list',items,setItems,projects,setProjects,space,ccrs=[],
   const normType=(t:string)=>{
     const exact=REQUEST_TYPES.find(x=>x.toLowerCase()===t.trim().toLowerCase())
     if(exact)return exact
-    return /bug|defect|debt|test/i.test(t)?'Tech Debt':/epic|initiative|story|task|improvement|enhancement|request|feature/i.test(t)?'Enhancement':null
+    return /bug|defect/i.test(t)?'Bug':/debt|test/i.test(t)?'Tech Debt':/epic|initiative|story|task|improvement|enhancement|request|feature/i.test(t)?'Enhancement':null
   }
   const normStatus=(st:string):string|null=>{
     const exact=statusesFor(space).find(x=>x.toLowerCase()===st.trim().toLowerCase())
@@ -2419,6 +2420,7 @@ const sorted=items.filter(i=>!isItemDone(i)).sort((a,b)=>{
     if(fvn!=='All'&&item.vendor!==fvn) return false
     if(frl!=='All'&&(frl==='__none'?!!item.release_month:item.release_month!==frl)) return false
     if(fef!=='All'&&item.effort!==fef) return false
+    if(fsev!=='All'&&!(isBug(item)&&(fsev==='__none'?!item.severity:item.severity===fsev))) return false
     if(sf&&!item.flagged) return false
     if(srch&&!item.name?.toLowerCase().includes(srch.toLowerCase())&&!item.item_id?.toLowerCase().includes(srch.toLowerCase())) return false
     return true
@@ -2611,7 +2613,7 @@ const sorted=items.filter(i=>!isItemDone(i)).sort((a,b)=>{
     if(!ni.name.trim()) return
     setSav(true)
     const iid=nextItemId(items)
-    const{data,error}=await supabase.from('items').insert({item_id:iid,name:ni.name,description:ni.description,priority:ni.priority,swimlane:ni.swimlane,team:ni.team,effort:ni.effort,status:ni.status,request_type:ni.request_type,region:ni.region,vendor:ni.vendor,flagged:false,sort_order:items.length,space}).select().single()
+    const{data,error}=await supabase.from('items').insert({item_id:iid,name:ni.name,description:ni.description,priority:ni.priority,swimlane:ni.swimlane,team:ni.team,effort:ni.effort,status:ni.status,request_type:ni.request_type,severity:isBug(ni)?((ni as any).severity||null):null,region:ni.region,vendor:ni.vendor,flagged:false,sort_order:items.length,space}).select().single()
     if(error){alert('Failed to add item: '+error.message);setSav(false);return}
     if(data) setItems([...items,data])
     setSav(false);setAi(false)
@@ -2762,7 +2764,8 @@ const sorted=items.filter(i=>!isItemDone(i)).sort((a,b)=>{
           <button onClick={()=>{setJrOpen(true);setJrRows([]);setJrErr('');setJrDone('')}} title="Import CSV — Jira exports or hand-built files; matches by RTL ID or Jira Key to update, inserts the rest" style={{...sel,color:'#5DADE2',border:'1px solid rgba(93,173,226,0.4)'}}>⬆ Import CSV</button>
           <button onClick={()=>setSac(true)} style={{...sel,color:'#7A8FA6'}}>+ Column</button></>}
           {setEpics&&<button onClick={addEpic} title={fpp!=='All'?`New epic in ${fpp}`:'New epic (set its initiative in the panel)'} style={{...sel,color:'#E07B2A',border:'1px solid rgba(224,123,42,0.5)',fontWeight:700}}>+ Epic</button>}
-          <button onClick={()=>setAi(true)} style={{background:'#C8973A',color:'#0D1B2A',border:'none',borderRadius:6,padding:'5px 14px',fontSize:12,fontWeight:700,cursor:'pointer'}}>+ Add Item</button>
+          <button onClick={()=>{setNi((p:any)=>({...p,request_type:'Bug'}));setAi(true)}} title="Log a bug: tracked like a story, with a severity" style={{background:'none',color:'#E74C3C',border:'1px solid rgba(231,76,60,0.6)',borderRadius:6,padding:'5px 12px',fontSize:12,fontWeight:700,cursor:'pointer'}}>🐞 + Bug</button>
+          <button onClick={()=>{setNi((p:any)=>({...p,request_type:p.request_type==='Bug'?'Enhancement':p.request_type}));setAi(true)}} style={{background:'#C8973A',color:'#0D1B2A',border:'none',borderRadius:6,padding:'5px 14px',fontSize:12,fontWeight:700,cursor:'pointer'}}>+ Add Item</button>
         </div>
       </div>
       {!planning&&<div style={{display:'flex',flexDirection:'column',gap:6,padding:'8px 20px',borderBottom:'1px solid #243447',background:'#162436'}}>
@@ -2782,7 +2785,7 @@ const sorted=items.filter(i=>!isItemDone(i)).sort((a,b)=>{
         <button onClick={()=>setSf(f=>!f)} style={{...sel,background:sf?'#7D2D00':'#1E3048',color:sf?'#FF8C42':'#7A8FA6',border:`1px solid ${sf?'#FF8C42':'#243447'}`}}>
           🚩{fc>0&&<span style={{background:'#C8973A',color:'#0D1B2A',borderRadius:10,padding:'0 5px',fontSize:10,fontWeight:700,marginLeft:3}}>{fc}</span>}
         </button>
-        {(()=>{const n=[fs,frt,frg,fvn,frl,fef].filter(v=>v!=='All').length+(groupBy!=='none'?1:0)+(kind!=='all'?1:0);return(
+        {(()=>{const n=[fs,frt,frg,fvn,frl,fef,fsev].filter(v=>v!=='All').length+(groupBy!=='none'?1:0)+(kind!=='all'?1:0);return(
           <button onClick={()=>setMoreF(!moreF)} title="Swimlane, type, region, vendor, release, effort, grouping" style={{...sel,color:n?'#E07B2A':'#C8C8D4',border:`1px solid ${n?'#E07B2A':'#243447'}`,fontWeight:700}}>
             {moreF?'▴':'▾'} More filters{n?` · ${n}`:''}</button>)})()}
         {!planning&&segNewPct!=null&&(()=>{
@@ -2812,6 +2815,7 @@ const sorted=items.filter(i=>!isItemDone(i)).sort((a,b)=>{
           {[...new Set([...items.map((i:any)=>i.release_month),...(releases as any[]).filter((r:any)=>!r.no_release).map((r:any)=>r.month)].filter(Boolean))].sort().map((k:any)=><option key={k} value={k}>📦 {fmtMonthKey(k)} · {releaseText(releases,k)}</option>)}
         </select>
         <select value={fef} onChange={e=>setFef(e.target.value)} style={sel}><option value="All">All Efforts</option>{EFFORTS.map(e=><option key={e}>{e}</option>)}</select>
+        <select value={fsev} onChange={e=>setFsev(e.target.value)} title="Bugs by severity" style={{...sel,color:fsev==='All'?undefined:'#E74C3C'}}><option value="All">All Severities</option>{SEVERITIES.map(sv=><option key={sv.key} value={sv.key}>🐞 {sv.label}</option>)}<option value="__none">🐞 No severity set</option></select>
         <select value={groupBy} onChange={e=>setGroupBy(e.target.value)} title="Group the list by initiative, or by initiative and epic" style={{...sel,color:groupBy==='none'?'#7A8FA6':'#E07B2A',border:`1px solid ${groupBy==='none'?'#243447':'#E07B2A'}`}}>
           <option value="none">No grouping</option>
           <option value="project">Group by initiative</option>
@@ -2964,7 +2968,12 @@ const sorted=items.filter(i=>!isItemDone(i)).sort((a,b)=>{
                     <td style={TD}><InlineSelect value={item.status} options={statusOpts} onChange={v=>v&&upd(item.id,'status',v)}><span style={{color:sc(item.status),fontSize:11,fontWeight:600}}>{item.status}</span></InlineSelect></td>
                     <td style={{...TD,fontSize:10,color:'#7A8FA6'}}><InlineSelect value={item.team||''} options={[{value:'',label:'—'},...TEAMS.map(t=>({value:t,label:t}))]} onChange={v=>upd(item.id,'team',v)}>{item.team==='Consumer Experience'?'CE':item.team==='Operational Efficiency'?'OE':'—'}</InlineSelect></td>
                     <td style={{...TD,textAlign:'center' as const,fontSize:11}}><InlineSelect value={item.effort||''} options={[{value:'',label:'—'},...EFFORTS.map(o=>({value:o,label:o}))]} onChange={v=>upd(item.id,'effort',v)}>{item.effort||'—'}</InlineSelect></td>
-                    <td style={{...TD,fontSize:11,color:'#7A8FA6'}}><InlineSelect value={item.request_type||''} options={[{value:'',label:'—'},...rtOpts.map((o:string)=>({value:o,label:o}))]} onChange={v=>upd(item.id,'request_type',v)}>{item.request_type||'—'}</InlineSelect></td>
+                    <td style={{...TD,fontSize:11,color:'#7A8FA6'}}><span style={{display:'inline-flex',alignItems:'center',gap:5}}>
+                      <InlineSelect value={item.request_type||''} options={[{value:'',label:'—'},...rtOpts.map((o:string)=>({value:o,label:o}))]} onChange={v=>upd(item.id,'request_type',v)}>{isBug(item)?<BugTag item={{request_type:'Bug'}}/>:(item.request_type||'—')}</InlineSelect>
+                      {isBug(item)&&<InlineSelect value={item.severity||''} title="Severity" options={[{value:'',label:'No severity'},...SEVERITIES.map(sv=>({value:sv.key,label:sv.label}))]} onChange={v=>upd(item.id,'severity',v)}>
+                        {sevOf(item.severity)?<span style={{fontSize:10,fontWeight:800,color:sevOf(item.severity)!.color,border:`1px solid ${sevOf(item.severity)!.color}`,borderRadius:4,padding:'0 5px'}}>{sevOf(item.severity)!.label}</span>:<span style={{fontSize:10,color:'#E74C3C',border:'1px dashed #E74C3C',borderRadius:4,padding:'0 5px'}}>+ severity</span>}
+                      </InlineSelect>}
+                    </span></td>
                     <td style={{...TD,fontSize:11,color:'#7A8FA6'}}><InlineSelect value={item.region||''} options={[{value:'',label:'—'},...regionOpts.map((o:string)=>({value:o,label:o}))]} onChange={v=>upd(item.id,'region',v)}>{item.region||'—'}</InlineSelect></td>
                     <td style={{...TD,fontSize:11,color:'#7A8FA6'}}><InlineSelect value={item.vendor||''} options={[{value:'',label:'—'},...vendors.map((o:string)=>({value:o,label:o}))]} onChange={v=>upd(item.id,'vendor',v)}>{item.vendor||'—'}</InlineSelect></td>
                     <td style={{...TD,fontSize:11,color:'#7A8FA6'}}><InlineDate value={item.vendor_delivery_date} onSave={v=>upd(item.id,'vendor_delivery_date',v)}/></td>
@@ -3026,6 +3035,13 @@ const sorted=items.filter(i=>!isItemDone(i)).sort((a,b)=>{
               <EditableDropdown field="status" value={selected.status} options={statusOpts} setOptions={setStatusOpts} label="Status"/>
               <EditableDropdown field="effort" value={selected.effort} options={EFFORTS} setOptions={null} label="Effort"/>
               <EditableDropdown field="request_type" value={selected.request_type} options={rtOpts} setOptions={setRtOpts} label="Request Type"/>
+              {isBug(selected)&&<div>
+                <div style={{fontSize:11,color:'#E74C3C',marginBottom:4,letterSpacing:0.5,fontWeight:700}}>🐞 SEVERITY</div>
+                <select value={selected.severity||''} onChange={e=>upd(selected.id,'severity',e.target.value||null)}
+                  style={{width:'100%',background:'#1E3048',color:sevOf(selected.severity)?.color||'#F4F6F8',border:`1px solid ${sevOf(selected.severity)?.color||'#243447'}`,borderRadius:6,padding:'7px 10px',fontSize:13,fontWeight:700,cursor:'pointer'}}>
+                  <option value="">Not set</option>{SEVERITIES.map(sv=><option key={sv.key} value={sv.key}>{sv.label}</option>)}
+                </select>
+              </div>}
               <EditableDropdown field="region" value={selected.region} options={regionOpts} setOptions={setRegionOpts} label="Region"/>
               <EditableDropdown field="vendor" value={selected.vendor} options={vendors} setOptions={setVendors} label="Vendor"/>
               <EditableDropdown field="parent_project" value={selected.parent_project} options={parentOpts} setOptions={null} label="Parent Initiative"/>
@@ -3169,7 +3185,7 @@ const sorted=items.filter(i=>!isItemDone(i)).sort((a,b)=>{
       {ai&&(
         <div style={{position:'fixed',inset:0,background:'rgba(0,0,0,0.6)',zIndex:100,display:'flex',alignItems:'center',justifyContent:'center'}}>
           <div style={{background:'#162436',border:'1px solid #243447',borderRadius:12,padding:28,width:480,maxHeight:'80vh',overflowY:'auto'}}>
-            <div style={{fontSize:16,fontWeight:700,color:'#F4F6F8',marginBottom:20}}>New Backlog Item</div>
+            <div style={{fontSize:16,fontWeight:700,color:isBug(ni)?'#E74C3C':'#F4F6F8',marginBottom:20}}>{isBug(ni)?'🐞 New Bug':'New Backlog Item'}</div>
             {[['Item Name','name'],['Description','description']].map(([label,field])=>(
               <div key={field} style={{marginBottom:12}}>
                 <div style={{fontSize:11,color:'#7A8FA6',marginBottom:4}}>{label}</div>
@@ -3184,6 +3200,12 @@ const sorted=items.filter(i=>!isItemDone(i)).sort((a,b)=>{
                 </div>
               ))}
             </div>
+            {isBug(ni)&&<div style={{marginBottom:12}}>
+              <div style={{fontSize:11,color:'#E74C3C',marginBottom:4,fontWeight:700}}>🐞 Severity</div>
+              <div style={{display:'flex',gap:6}}>{SEVERITIES.map(sv=>(
+                <button key={sv.key} onClick={()=>setNi((p:any)=>({...p,severity:p.severity===sv.key?'':sv.key}))}
+                  style={{flex:1,background:(ni as any).severity===sv.key?sv.color:'transparent',color:(ni as any).severity===sv.key?'#0D1B2A':sv.color,border:`1px solid ${sv.color}`,borderRadius:6,padding:'6px 0',fontSize:11,fontWeight:800,cursor:'pointer'}}>{sv.label}</button>))}</div>
+            </div>}
             <div style={{display:'flex',gap:8,justifyContent:'flex-end',marginTop:8}}>
               <button onClick={()=>setAi(false)} style={sel}>Cancel</button>
               <button onClick={addIt} disabled={sav} style={{background:'#C8973A',color:'#0D1B2A',border:'none',borderRadius:6,padding:'8px 20px',fontWeight:700,cursor:'pointer',fontSize:13}}>{sav?'Saving...':'Add Item'}</button>
@@ -3817,7 +3839,7 @@ function Roadmap({items,setItems,projects,setProjects,milestones,setMilestones,t
             const ord=sprints.filter((s:any)=>s.team===sp.team).sort((a:any,b:any)=>a.start_date<b.start_date?-1:1).findIndex((s:any)=>s.id===sp.id)+1
             return<span style={{background:'rgba(0,0,0,0.35)',borderRadius:3,padding:'0 4px',marginRight:5,fontSize:9,flexShrink:0}}>S{ord}</span>
           })()}
-          {item.name}
+          {isBug(item)&&<span style={{marginRight:5,flexShrink:0}}><BugTag item={item} compact/></span>}{item.name}
         </div>
         <div className="pg-rs" onMouseDown={e=>startBarDrag(e,item,'right')} style={{position:'absolute',right:0,top:0,bottom:0,width:8,cursor:'ew-resize',zIndex:5,borderRadius:'0 4px 4px 0'}}/>
         {setDeps&&!isDragging&&<DepHandle k={depKey('item',item.id)}/>}

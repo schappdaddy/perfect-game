@@ -70,7 +70,7 @@ export function planModel(inp:PlanInput){
     const x=en.x
     if(en.kind==='project')return{kind:'initiative',name:x.name,team:shortOf(x.team),release:o.release&&x.release_month?fmtMonthKey(x.release_month):null}
     const home=homeOf(en.kind,x),bk=bucketOf(en.kind,x)
-    return{kind:en.kind==='epic'?'epic':'story',name:x.name,ref:en.kind==='item'?x.item_id:undefined,team:shortOf(teamOf(en.kind,x)),wt:WTS[wtOf(en.kind,x)],priority:x.priority||null,
+    return{kind:en.kind==='epic'?'epic':x.request_type==='Bug'?'bug':'story',name:x.name,ref:en.kind==='item'?x.item_id:undefined,team:shortOf(teamOf(en.kind,x)),wt:WTS[wtOf(en.kind,x)],priority:[x.priority,x.request_type==='Bug'?x.severity:null].filter(Boolean).join(' · ')||null,
       home:home?`◈ ${home.name}`:bk?`Tech debt · ${bk.name}`:null,release:o.release&&x.release_month?fmtMonthKey(x.release_month):null,quarter:o.quarter&&en.qk?en.qk.replace('-',' '):null}
   }
   // Release view range: the months of the quarters shown through the quarter after
@@ -141,7 +141,7 @@ export function planModel(inp:PlanInput){
     ...items.filter((i:any)=>open(i)&&!qkOf('item',i)&&!withItsEpic(i)&&shown('item',i)).map((i:any)=>ent('item',i))]
   const groupName=(en:Entry)=>homeOf(en.kind,en.x)?.name||'No initiative'
   unplannedWork.sort((a,b)=>{const ga=groupName(a),gb=groupName(b);return(ga==='No initiative'?1:0)-(gb==='No initiative'?1:0)||ga.localeCompare(gb)||(PRI[a.x.priority]||9)-(PRI[b.x.priority]||9)||(a.kind==='epic'?0:1)-(b.kind==='epic'?0:1)})
-  const unplannedRows=unplannedWork.map(en=>({group:groupName(en),kind:en.kind==='epic'?'Epic':'Story',ref:en.kind==='item'?en.x.item_id||'':'',name:en.x.name,team:shortOf(teamOf(en.kind,en.x))||'',wt:WTS[wtOf(en.kind,en.x)]||'',priority:en.x.priority||'',status:en.x.status||'',stories:en.kind==='epic'?storiesOf(en.x).filter(open).length:null}))
+  const unplannedRows=unplannedWork.map(en=>({group:groupName(en),kind:en.kind==='epic'?'Epic':en.x.request_type==='Bug'?'Bug':'Story',ref:en.kind==='item'?en.x.item_id||'':'',name:en.x.name,team:shortOf(teamOf(en.kind,en.x))||'',wt:WTS[wtOf(en.kind,en.x)]||'',priority:en.x.priority||'',status:en.x.status||'',stories:en.kind==='epic'?storiesOf(en.x).filter(open).length:null}))
 
   // The release calendar: for each month of a fiscal year, what ships, by initiative (as on
   // the Roadmap's Release calendar)

@@ -23,7 +23,20 @@ export const workTypeOfProject=(p:any):WorkType=>p?.work_type==='saas'?'saas':p?
 export const capacityShare=(wt:WorkType|string):'new'|'sustain'=>wt==='new'?'new':'sustain'
 
 // Request types for work items
-export const REQUEST_TYPES=['Enhancement','Tech Debt']
+export const REQUEST_TYPES=['Enhancement','Tech Debt','Bug']
+
+// Bugs: work items with request type 'Bug', tracked like stories, with a severity
+export const isBug=(i:any)=>i?.request_type==='Bug'
+export const SEVERITIES=[{key:'S1',label:'S1 Critical',color:'#E74C3C'},{key:'S2',label:'S2 Major',color:'#E67E22'},{key:'S3',label:'S3 Minor',color:'#E8B95A'},{key:'S4',label:'S4 Trivial',color:'#8FA6BC'}]
+export const sevOf=(k:any)=>SEVERITIES.find(s=>s.key===k)||null
+export const BUG_CLR='#E74C3C'
+// The red 🐞 BUG label, with its severity when it has one
+export function BugTag({item,compact}:{item:any,compact?:boolean}){
+  const sv=sevOf(item?.severity)
+  return <span title={`Bug${sv?` · ${sv.label}`:''}`} style={{display:'inline-flex',alignItems:'center',gap:3,fontSize:9,fontWeight:800,color:'#fff',background:BUG_CLR,borderRadius:3,padding:'0 4px',letterSpacing:0.5,whiteSpace:'nowrap' as const,flexShrink:0}}>
+    🐞{compact?'':' BUG'}{sv&&<span style={{background:'rgba(0,0,0,0.25)',borderRadius:2,padding:'0 3px',color:'#fff'}}>{sv.key}</span>}
+  </span>
+}
 
 // A small tag showing an item's work type
 const WT_ICON:any={new:'✦',sustain:'⟳',saas:'☁'}

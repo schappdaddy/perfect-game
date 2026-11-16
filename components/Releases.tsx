@@ -2,7 +2,7 @@
 import { useState } from 'react'
 import { supabase } from '../lib/supabase'
 import { MilestoneTypeSelect, useMilestoneTypes, typeColor } from './MilestoneTypes'
-import { WT_LABEL, WorkTag, workTypeOfProject } from './WorkTypes'
+import { WT_LABEL, WorkTag, workTypeOfProject, isBug, BugTag } from './WorkTypes'
 
 // Monthly releases and quarterly planning of all work (New, Sustain and SaaS deliverable).
 // A release is a month ('2026-11'). Each month can have a release date, or be marked as
@@ -24,7 +24,7 @@ function TeamTag({team}:{team?:string|null}){
   const c=TEAM_TAG[team]||{bg:'#3A4A5E',fg:'#F4F6F8'}
   return <span title={team} style={{fontSize:9.5,fontWeight:800,color:c.fg,background:c.bg,borderRadius:10,padding:'1px 7px',flexShrink:0,letterSpacing:0.3}}>{TEAM_SHORT[team]||team}</span>
 }
-const RT_ICON:any={'Tech Debt':'🔧','Enhancement':'✨'}
+const RT_ICON:any={'Tech Debt':'🔧','Enhancement':'✨','Bug':'🐞'}
 const pad=(n:number)=>String(n).padStart(2,'0')
 
 export const monthKeyOf=(d:Date)=>`${d.getFullYear()}-${pad(d.getMonth()+1)}`
@@ -435,10 +435,11 @@ export function QuarterPlanner({items,setItems,projects,setProjects,epics=[],set
       onDragOver={o.idx!=null?e=>{e.preventDefault();e.stopPropagation();setOver('pool:'+en.key)}:undefined}
       onDrop={o.idx!=null?e=>{e.preventDefault();e.stopPropagation();dropOnPool(en.key)}:undefined}
       onClick={()=>isEpic?onOpenEpic?.(x):onOpenItem(x)}
-      style={{background:isEpic?'rgba(224,123,42,0.10)':'rgba(93,173,226,0.07)',border:`1px solid ${isEpic?'rgba(224,123,42,0.45)':'rgba(93,173,226,0.35)'}`,borderLeft:`3px solid ${clr}`,borderTop:over==='pool:'+en.key?'2px solid #C8973A':undefined,borderRadius:6,padding:'6px 8px',cursor:'grab',opacity:dragId===en.key?0.4:1,display:'flex',flexDirection:'column',gap:3}}>
+      style={{background:isEpic?'rgba(224,123,42,0.10)':isBug(x)?'rgba(231,76,60,0.08)':'rgba(93,173,226,0.07)',border:`1px solid ${isEpic?'rgba(224,123,42,0.45)':isBug(x)?'rgba(231,76,60,0.45)':'rgba(93,173,226,0.35)'}`,borderLeft:`3px solid ${isBug(x)?'#E74C3C':clr}`,borderTop:over==='pool:'+en.key?'2px solid #C8973A':undefined,borderRadius:6,padding:'6px 8px',cursor:'grab',opacity:dragId===en.key?0.4:1,display:'flex',flexDirection:'column',gap:3}}>
       <div style={{display:'flex',alignItems:'center',gap:6,flexWrap:'wrap' as const,whiteSpace:'nowrap' as const}}>
         {o.idx!=null&&<span style={{fontSize:10,fontWeight:800,color:'#C8973A',minWidth:16}}>{o.idx+1}</span>}
         {isEpic?<span style={{fontSize:9,fontWeight:800,color:KIND_CLR.epic,letterSpacing:1}}>◆ EPIC</span>
+          :isBug(x)?<><BugTag item={x}/><span style={{fontSize:10,color:'#7A8FA6',fontFamily:'monospace'}}>{x.item_id}</span></>
           :<><span style={{fontSize:9,fontWeight:800,color:KIND_CLR.story,letterSpacing:1}}>▪ STORY</span><span style={{fontSize:10,color:'#7A8FA6',fontFamily:'monospace'}}>{x.item_id}</span><span title={x.request_type} style={{fontSize:11}}>{RT_ICON[x.request_type]||''}</span></>}
         <span style={{marginLeft:'auto',display:'flex',gap:4,alignItems:'center'}}>{wtF==='all'&&<WorkTag compact wt={wtOf(en.kind,x)}/>}<TeamTag team={teamOf(en.kind,x)}/></span>
         <span style={{fontSize:10,fontWeight:700,color:x.priority==='P1'?'#E74C3C':x.priority==='P2'?'#D4820A':'#7A8FA6'}}>{x.priority}</span>
@@ -454,7 +455,7 @@ export function QuarterPlanner({items,setItems,projects,setProjects,epics=[],set
           {shownSt.map(st=>(
             <div key={st.id} onClick={e=>{e.stopPropagation();onOpenItem(st)}} title={`${st.item_id||''} ${st.name} · ${st.status}`}
               style={{display:'flex',alignItems:'center',gap:5,fontSize:10.5,padding:'2px 5px',borderLeft:`2px solid ${KIND_CLR.story}`,background:'rgba(93,173,226,0.06)',borderRadius:3,cursor:'pointer',opacity:open(st)?1:0.55}}>
-              <span style={{color:KIND_CLR.story,fontWeight:800,fontSize:8.5}}>▪</span>
+              <span style={{color:isBug(st)?'#E74C3C':KIND_CLR.story,fontWeight:800,fontSize:isBug(st)?9:8.5}}>{isBug(st)?'🐞':'▪'}</span>
               <span style={{color:'#7A8FA6',fontFamily:'monospace',fontSize:9.5,flexShrink:0}}>{st.item_id}</span>
               <span style={{color:'#E1E7EE',flex:1,minWidth:0,overflow:'hidden',textOverflow:'ellipsis',whiteSpace:'nowrap' as const,textDecoration:open(st)?undefined:'line-through'}}>{st.name}</span>
               <span style={{color:'#7A8FA6',fontSize:9,flexShrink:0}}>{st.status}</span>
@@ -571,7 +572,7 @@ export function QuarterPlanner({items,setItems,projects,setProjects,epics=[],set
         </label>}
         <span style={{display:'flex',gap:10,alignItems:'center',fontSize:10.5,fontWeight:700,marginLeft:mode==='releases'?0:'auto'}}>
           <span style={{color:KIND_CLR.initiative}}>◈ Initiative</span><span style={{color:KIND_CLR.epic}}>◆ Epic</span>
-          <span style={{color:KIND_CLR.story}}>▪ Story</span><span style={{color:KIND_CLR.milestone}}>◇ Milestone</span>
+          <span style={{color:KIND_CLR.story}}>▪ Story</span><span style={{color:'#E74C3C'}}>🐞 Bug</span><span style={{color:KIND_CLR.milestone}}>◇ Milestone</span>
         </span>
         <button onClick={()=>setMgr(true)} style={btn}>📦 Release dates</button>
         <button onClick={exportPpt} disabled={exporting} title="Download both views (quarters and releases) as PowerPoint, as shown: same team, work type and quarters"
