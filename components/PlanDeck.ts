@@ -68,9 +68,9 @@ export function planModel(inp:PlanInput){
   const toMs=(m:any)=>{const p=projects.find((x:any)=>x.id===m.project_id);return{date:fmtDay(m.date),name:m.name+(p?` · ${p.name}`:''),type:typeName(mTypes,m.type),color:typeColor(mTypes,m.type),team:shortOf(p?.team),done:!!m.completed}}
   const toCard=(en:Entry,o:{quarter?:boolean,release?:boolean}={}):PlanCard=>{
     const x=en.x
-    if(en.kind==='project')return{kind:'initiative',name:x.name,team:shortOf(x.team),release:o.release&&x.release_month?fmtMonthKey(x.release_month):null}
+    if(en.kind==='project')return{kind:'initiative',name:x.name,team:shortOf(x.team),release:o.release&&x.release_month?fmtMonthKey(x.release_month):null,prd:x.prd_status||null,design:x.design_status||null}
     const home=homeOf(en.kind,x),bk=bucketOf(en.kind,x)
-    return{kind:en.kind==='epic'?'epic':x.request_type==='Bug'?'bug':'story',name:x.name,ref:en.kind==='item'?x.item_id:undefined,team:shortOf(teamOf(en.kind,x)),wt:WTS[wtOf(en.kind,x)],priority:[x.priority,x.request_type==='Bug'?x.severity:null].filter(Boolean).join(' · ')||null,
+    return{prd:x.prd_status||null,design:x.design_status||null,kind:en.kind==='epic'?'epic':x.request_type==='Bug'?'bug':'story',name:x.name,ref:en.kind==='item'?x.item_id:undefined,team:shortOf(teamOf(en.kind,x)),wt:WTS[wtOf(en.kind,x)],priority:[x.priority,x.request_type==='Bug'?x.severity:null].filter(Boolean).join(' · ')||null,
       home:home?`◈ ${home.name}`:bk?`Tech debt · ${bk.name}`:null,release:o.release&&x.release_month?fmtMonthKey(x.release_month):null,quarter:o.quarter&&en.qk?en.qk.replace('-',' '):null}
   }
   // Release view range: the months of the quarters shown through the quarter after
@@ -158,12 +158,17 @@ export function planModel(inp:PlanInput){
     return[...groups.values()].sort((a,b)=>(Number(b.goLive)-Number(a.goLive))||(Number(!!a.p?.sustain_quarter)-Number(!!b.p?.sustain_quarter))||(Number(!a.p)-Number(!b.p))||(a.p?.name||'').localeCompare(b.p?.name||''))
   }
   const calendarFys=[...new Set(quarters.map(q=>q.fy))]
-  return{quarters,quarterCols,releaseSlides,sprintSlides,undatedInits,unplannedRows,ALL,calendarMonth,calendarFys,isBlocked,storiesOf}
+  // PRD and Design readiness of the work planned in the quarters shown: initiatives worked or
+  // going live in each quarter, and open epics, stories and bugs planned there
+  const readiness=quarters.map(qi=>({qi,rows:[
+    ...inits.filter(en=>en.qk===qi.qk||(!en.qk&&qi.months.includes(en.x.release_month))).map(en=>({kind:'Initiative',x:en.x,home:'',team:shortOf(en.x.team)})),
+    ...planned.filter(en=>en.qk===qi.qk&&open(en.x)).map(en=>({kind:en.kind==='epic'?'Epic':en.x.request_type==='Bug'?'Bug':'Story',x:en.x,home:homeOf(en.kind,en.x)?.name||bucketOf(en.kind,en.x)?.name||'No initiative',team:shortOf(teamOf(en.kind,en.x))}))]}))
+  return{quarters,quarterCols,releaseSlides,sprintSlides,undatedInits,unplannedRows,ALL,calendarMonth,calendarFys,isBlocked,storiesOf,readiness}
 }
 
 // ── The full-plan deck ───────────────────────────────────────────────────────
 const INK='1F2A3C',MUTED='6B7280',CREAM='FDFBF0',ORANGE='E07B2A',HEAD='1F2A3C',SUB='EEF1F5',LINE='D9DEE5'
-export type FullPlanSections={roadmap:boolean,budget:boolean,quarters:boolean,releases:boolean,calendar?:boolean,sprints:boolean,unplanned:boolean}
+export type FullPlanSections={roadmap:boolean,budget:boolean,quarters:boolean,releases:boolean,calendar?:boolean,sprints:boolean,unplanned:boolean,readiness?:boolean}
 
 function titleSlide(pptx:any,title:string,lines:string[]){
   const s=pptx.addSlide();s.background={color:'1F2A3C'}
@@ -264,7 +269,7 @@ export async function exportFullPlanPptx({strategy,strategyCtx,plan,sections,fil
   const sub=`${who} · ${wtl} · ${stamp}`
   const parts:string[]=[]
   if(strategy&&(sections.roadmap||sections.budget))parts.push('Strategy')
-  if(sections.quarters)parts.push('Quarter plan');if(sections.releases)parts.push('Release plan');if(sections.calendar)parts.push('Release calendar');if(sections.sprints)parts.push('Sprints');if(sections.unplanned)parts.push('Not planned yet')
+  if(sections.quarters)parts.push('Quarter plan');if(sections.releases)parts.push('Release plan');if(sections.calendar)parts.push('Release calendar');if(sections.sprints)parts.push('Sprints');if(sections.unplanned)parts.push('Not planned yet');if(sections.readiness)parts.push('Readiness')
   titleSlide(pptx,m.ALL?'The plan':`${plan.team} plan`,[strategy?`Strategy: ${strategy.name}`:'',`Planning ${range} · ${who} · ${wtl}`,parts.join('  →  '),`Exported ${stamp}`].filter(Boolean))
   let n=0
   if(strategy&&(sections.roadmap||sections.budget)){
@@ -295,6 +300,20 @@ export async function exportFullPlanPptx({strategy,strategyCtx,plan,sections,fil
       m.undatedInits.map((p:any)=>({cells:[p.name,shortOf(p.team)||'',WTS[workTypeOfProject(p)]||'',p.status||'',p.priority||'',String(plan.epics.filter((e:any)=>e.project_id===p.id&&!TERMINAL.includes(e.status)).length),String(plan.items.filter((i:any)=>i.parent_project===p.name&&!TERMINAL.includes(i.status)).length)]})))
     tableSlides(pptx,'Work with no quarter',`Epics and stories not planned yet, by initiative and priority · ${sub}`,['Kind','ID','Name','Team','Work type','Priority','Status'],[0.8,1.0,5.6,0.8,1.2,0.9,1.6],
       m.unplannedRows.map(r=>({group:r.group,cells:[r.kind,r.ref,r.name+(r.stories?` (${r.stories} open stor${r.stories===1?"y":"ies"})`:""),r.team,r.wt,r.priority,r.status]})),2)
+  }
+  if(sections.readiness){
+    const ready=(st:any)=>st==='approved'||st==='na'
+    const SL:any={'':'Not started',draft:'Draft',review:'In review',approved:'Approved',na:'Not needed'}
+    const all=m.readiness.flatMap((r:any)=>r.rows)
+    const both=all.filter((r:any)=>ready(r.x.prd_status)&&ready(r.x.design_status)).length
+    sectionSlide(pptx,++n,'Readiness',`PRD and Design approvals of the planned work: ${both} of ${all.length} ready (${all.length?Math.round(both/all.length*100):100}%). Approved or not needed counts as ready.`)
+    const pctS=(a:number,b:number)=>b?`${Math.round(a/b*100)}%`:'—'
+    tableSlides(pptx,'Readiness by quarter',`PRD and Design approved · ${sub}`,['Quarter','Planned','PRD ready','Design ready','Both ready','Not ready'],[2.2,1.6,2,2,2,2],
+      m.readiness.map((r:any)=>{const t=r.rows.length,p=r.rows.filter((z:any)=>ready(z.x.prd_status)).length,d=r.rows.filter((z:any)=>ready(z.x.design_status)).length,b=r.rows.filter((z:any)=>ready(z.x.prd_status)&&ready(z.x.design_status)).length
+        return{cells:[r.qi.label,String(t),`${p} · ${pctS(p,t)}`,`${d} · ${pctS(d,t)}`,`${b} · ${pctS(b,t)}`,String(t-b)]}}),0)
+    tableSlides(pptx,'Not ready yet',`Planned work whose PRD or Design isn't approved, by quarter · ${sub}`,['Kind','Name','Initiative','Team','PRD','Design'],[0.9,4.6,2.6,0.7,1.25,1.25],
+      m.readiness.flatMap((r:any)=>r.rows.filter((z:any)=>!ready(z.x.prd_status)||!ready(z.x.design_status)).map((z:any)=>({group:r.qi.label,
+        cells:[z.kind,`${z.x.item_id?z.x.item_id+' ':''}${z.x.name}`,z.home,z.team||'',SL[z.x.prd_status||''],SL[z.x.design_status||'']]}))),1)
   }
   await pptx.writeFile({fileName:fileName+'.pptx'})
 }

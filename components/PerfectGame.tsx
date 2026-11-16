@@ -12,6 +12,7 @@ import { QuarterPlanner, ReleaseCalendar, ReleaseSelect, QuarterSelect, Releases
 import { EpicRow, EpicPanel, epicProject, epicWorkType, convertStoryToEpic, convertEpicToStory } from './BacklogEpics'
 import { FullPlanButton } from './FullPlanExport'
 import TeamPrep from './TeamPrep'
+import { ReadinessPips } from './Readiness'
 
 const T = {
   navy:'#0D1B2A',navyMid:'#162436',navyLt:'#1E3048',
@@ -2918,7 +2919,8 @@ const sorted=items.filter(i=>!isItemDone(i)).sort((a,b)=>{
                     <td style={{...TD,color:'#7A8FA6',fontFamily:'monospace',fontSize:10}}>{item.item_id}</td>
                     <td style={{...TD,minWidth:240,paddingLeft:item.__indent?30:12,borderLeft:item.__indent?'2px solid rgba(224,123,42,0.35)':undefined}}>
                       <div style={{display:'flex',alignItems:'center',gap:6}}>
-                        <div style={{fontSize:12,color:'#F4F6F8',fontWeight:isSel?700:400}}>{rt(item.request_type)} <InlineText value={item.name} width={220} onSave={v=>v&&upd(item.id,'name',v)}>{item.name}</InlineText></div>
+                        <div style={{fontSize:12,color:'#F4F6F8',fontWeight:isSel?700:400,display:'flex',alignItems:'center',gap:5}}><span>{rt(item.request_type)} <InlineText value={item.name} width={220} onSave={v=>v&&upd(item.id,'name',v)}>{item.name}</InlineText></span>
+                          <ReadinessPips kind="item" x={item} apply={f=>setItems((p:any[])=>p.map(r=>r.id===item.id?{...r,...f}:r))} size={12}/></div>
                         {item.start_date&&item.end_date
                           ?<span onClick={e=>{e.stopPropagation();uncommitBacklogItem(item)}} title={`Committed: ${item.start_date} → ${item.end_date} — click to uncommit`}
                               style={{background:'rgba(39,174,96,0.15)',color:'#27AE60',border:'1px solid rgba(39,174,96,0.4)',borderRadius:4,padding:'1px 6px',fontSize:9,fontWeight:700,flexShrink:0,cursor:'pointer'}}>
@@ -4012,7 +4014,7 @@ function Roadmap({items,setItems,projects,setProjects,milestones,setMilestones,t
                           <span onClick={()=>setQuickProject(group)} title="Click to edit this initiative" style={{fontSize:12,fontWeight:700,color:'#F4F6F8',overflow:'hidden',whiteSpace:'nowrap' as const,textOverflow:'ellipsis',minWidth:0,cursor:'pointer'}}>{group.name}{group.ongoing?' ∞':''}</span>
                           <span style={{fontSize:10,color:rc,fontWeight:700,flexShrink:0}}>{group.rag==='Green'?'🟢':group.rag==='Amber'?'🟡':group.rag==='Red'?'🔴':'⚪'}</span>
                           {group.violations.length>0&&<span style={{fontSize:9,color:'#E74C3C',flexShrink:0}}>⚠️</span>}
-                          {relChip('project',group)}
+                          {relChip('project',group)}<ReadinessPips kind="project" x={group} apply={f=>setProjects((p:any[])=>p.map(r=>r.id===group.id?{...r,...f}:r))} size={11}/>
                         </div>
                         <div style={{fontSize:9,color:'#7A8FA6'}}>{childItems.length} committed · {group.status}</div>
                       </div>
@@ -4025,7 +4027,7 @@ function Roadmap({items,setItems,projects,setProjects,milestones,setMilestones,t
                             <div style={{fontSize:11,fontWeight:700,color:'#F4F6F8',overflow:'hidden',whiteSpace:'nowrap' as const,textOverflow:'ellipsis',maxWidth:150}}><span style={{color:'#E07B2A'}}>◆</span> {e.name}</div>
                             <div style={{fontSize:9,color:'#7A8FA6'}}>EPIC · {r.count} stor{r.count===1?'y':'ies'} · <span style={{color:sc(e.status),fontWeight:700}}>{e.status||'New'}</span></div>
                           </div>
-                          {relChip('epic',e)}
+                          {relChip('epic',e)}<ReadinessPips kind="epic" x={e} apply={f=>setEpics?.((p:any[])=>p.map(r=>r.id===e.id?{...r,...f}:r))} size={11}/>
                         </div>
                       )}
                       const item=r.item
@@ -4040,7 +4042,7 @@ function Roadmap({items,setItems,projects,setProjects,milestones,setMilestones,t
                             <div style={{fontSize:11,color:isViolation?'#E74C3C':'#C8C8D4',overflow:'hidden',whiteSpace:'nowrap' as const,textOverflow:'ellipsis',maxWidth:130}}>{rt(item.request_type)} {item.name}{isViolation?' ⚠️':''}</div>
                             <div style={{fontSize:9,color:'#7A8FA6',overflow:'hidden',whiteSpace:'nowrap' as const,textOverflow:'ellipsis'}}><span style={{fontFamily:'monospace'}}>{item.item_id}</span> <span style={{color:sc(item.status),fontWeight:700}}>● {item.status}</span></div>
                           </div>
-                          {relChip('item',item)}
+                          {relChip('item',item)}<ReadinessPips kind="item" x={item} apply={f=>setItems((p:any[])=>p.map(r=>r.id===item.id?{...r,...f}:r))} size={11}/>
                         </div>
                       )
                     })}

@@ -3,6 +3,7 @@ import { useState } from 'react'
 import { supabase } from '../lib/supabase'
 import { MilestoneTypeSelect, useMilestoneTypes, typeColor } from './MilestoneTypes'
 import { WT_LABEL, WorkTag, workTypeOfProject, isBug, BugTag } from './WorkTypes'
+import { ReadinessPips, ReadinessAudit } from './Readiness'
 
 // Monthly releases and quarterly planning of all work (New, Sustain and SaaS deliverable).
 // A release is a month ('2026-11'). Each month can have a release date, or be marked as
@@ -150,6 +151,9 @@ export function QuarterPlanner({items,setItems,projects,setProjects,epics=[],set
   const [dragId,setDragId]=useState<string|null>(null) // 'item:<id>' | 'epic:<id>'
   const [over,setOver]=useState<string|null>(null)
   const [mgr,setMgr]=useState(false)
+  const [audit,setAudit]=useState(false)
+  // Merge saved readiness fields into local state (ReadinessPips saves them)
+  const applyLocal=(kind:string,id:any,f:any)=>kind==='project'?setProjects((p:any[])=>p.map(r=>r.id===id?{...r,...f}:r)):kind==='epic'?setEpics((p:any[])=>p.map(r=>r.id===id?{...r,...f}:r)):setItems((p:any[])=>p.map(r=>r.id===id?{...r,...f}:r))
   const setFq=(v:any)=>{setFqS(v);save('pg_plan_q',v)}
   const setTeam=(v:string)=>{setTeamS(v);save('pg_plan_team2',v)}
   const setMode=(v:any)=>{setModeS(v);save('pg_plan_mode',v)}
@@ -441,7 +445,7 @@ export function QuarterPlanner({items,setItems,projects,setProjects,epics=[],set
         {isEpic?<span style={{fontSize:9,fontWeight:800,color:KIND_CLR.epic,letterSpacing:1}}>◆ EPIC</span>
           :isBug(x)?<><BugTag item={x}/><span style={{fontSize:10,color:'#7A8FA6',fontFamily:'monospace'}}>{x.item_id}</span></>
           :<><span style={{fontSize:9,fontWeight:800,color:KIND_CLR.story,letterSpacing:1}}>▪ STORY</span><span style={{fontSize:10,color:'#7A8FA6',fontFamily:'monospace'}}>{x.item_id}</span><span title={x.request_type} style={{fontSize:11}}>{RT_ICON[x.request_type]||''}</span></>}
-        <span style={{marginLeft:'auto',display:'flex',gap:4,alignItems:'center'}}>{wtF==='all'&&<WorkTag compact wt={wtOf(en.kind,x)}/>}<TeamTag team={teamOf(en.kind,x)}/></span>
+        <span style={{marginLeft:'auto',display:'flex',gap:4,alignItems:'center'}}><ReadinessPips kind={en.kind==='epic'?'epic':'item'} x={x} apply={f=>applyLocal(en.kind==='epic'?'epic':'item',x.id,f)} size={12}/>{wtF==='all'&&<WorkTag compact wt={wtOf(en.kind,x)}/>}<TeamTag team={teamOf(en.kind,x)}/></span>
         <span style={{fontSize:10,fontWeight:700,color:x.priority==='P1'?'#E74C3C':x.priority==='P2'?'#D4820A':'#7A8FA6'}}>{x.priority}</span>
         {(isEpic?ptsOf(en)>0:!!x.effort)&&<span title={isEpic&&!x.effort?'Effort points of its open stories':undefined} style={{fontSize:10,color:'#7A8FA6',border:'1px solid #3A4A5E',borderRadius:3,padding:'0 4px'}}>{isEpic&&!x.effort?ptsOf(en)+' pts':x.effort}</span>}
       </div>
@@ -518,6 +522,7 @@ export function QuarterPlanner({items,setItems,projects,setProjects,epics=[],set
           <span style={{fontSize:9,fontWeight:800,color:KIND_CLR.initiative,letterSpacing:1,whiteSpace:'nowrap' as const}}>◈ INITIATIVE{o.goLive?' GO-LIVE':''}</span>
           {workTypeOfProject(p)!=='new'&&<WorkTag compact wt={workTypeOfProject(p)}/>}
           <span style={{marginLeft:'auto',display:'flex',gap:5,alignItems:'center'}}>
+            <ReadinessPips kind="project" x={p} apply={f=>applyLocal('project',p.id,f)} size={12}/>
             {p.release_month&&(!o.goLive||o.relBadge)&&<span style={{fontSize:9.5,fontWeight:700,color:'#5DADE2'}}>📦 {fmtMonthKey(p.release_month)}</span>}
             <TeamTag team={p.team}/>
           </span>
@@ -574,6 +579,7 @@ export function QuarterPlanner({items,setItems,projects,setProjects,epics=[],set
           <span style={{color:KIND_CLR.initiative}}>◈ Initiative</span><span style={{color:KIND_CLR.epic}}>◆ Epic</span>
           <span style={{color:KIND_CLR.story}}>▪ Story</span><span style={{color:'#E74C3C'}}>🐞 Bug</span><span style={{color:KIND_CLR.milestone}}>◇ Milestone</span>
         </span>
+        <button onClick={()=>setAudit(true)} title="PRD and Design approvals of the work planned in view: the gaps, and every change" style={{...btn,color:'#27AE60',border:'1px solid rgba(39,174,96,0.5)',fontWeight:700}}>✓ Readiness</button>
         <button onClick={()=>setMgr(true)} style={btn}>📦 Release dates</button>
         <button onClick={exportPpt} disabled={exporting} title="Download both views (quarters and releases) as PowerPoint, as shown: same team, work type and quarters"
           style={{...btn,color:'#E07B2A',border:'1px solid rgba(224,123,42,0.5)',fontWeight:700,opacity:exporting?0.6:1}}>{exporting?'Exporting…':'⬇ PPT'}</button>
@@ -683,6 +689,10 @@ export function QuarterPlanner({items,setItems,projects,setProjects,epics=[],set
           </div>
         )}
       </div>
+      {audit&&<ReadinessAudit onClose={()=>setAudit(false)}
+        onOpen={(k:any,x:any)=>{setAudit(false);if(k==='epic')onOpenEpic?.(x);else if(k==='item')onOpenItem(x)}}
+        rows={[...quarters.flatMap(qi=>initEntries.filter(en=>en.qk===qi.qk||(!en.qk&&qi.months.includes(en.x.release_month))).map(en=>({kind:'project' as const,x:en.x,where:qi.label,team:en.x.team}))),
+          ...planned.filter(en=>shownQks.has(en.qk as string)&&open(en.x)).map(en=>({kind:(en.kind==='epic'?'epic':'item') as any,x:en.x,where:`${qFromKey(en.qk)?.label}${homeOf(en.kind,en.x)?` · ${homeOf(en.kind,en.x).name}`:''}`,team:teamOf(en.kind,en.x)}))]}/>}
       {mgr&&<ReleasesManager releases={releases} setReleases={setReleases} onClose={()=>setMgr(false)}
         counts={(k:string)=>[...items,...projects,...epics].filter((x:any)=>x.release_month===k).length}/>}
     </div>

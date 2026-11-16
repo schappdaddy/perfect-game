@@ -28,9 +28,20 @@ const trunc=(text:string,w:number,fs:number,bold=false)=>{
 // Width of a short all-caps label at a size (Calibri capitals run wider)
 const capsW=(t:string,fs:number)=>t.length*fs*0.66/72+0.08
 
-export type PlanCard={kind:'initiative'|'epic'|'story'|'bug',name:string,ref?:string,team?:string|null,wt?:string,home?:string|null,release?:string|null,quarter?:string|null,priority?:string|null,status?:string|null,flag?:string|null}
+export type PlanCard={kind:'initiative'|'epic'|'story'|'bug',name:string,ref?:string,team?:string|null,wt?:string,home?:string|null,release?:string|null,quarter?:string|null,priority?:string|null,status?:string|null,flag?:string|null,prd?:string|null,design?:string|null}
 export type PlanMilestone={date:string,name:string,type:string,color?:string|null,team?:string|null,done?:boolean}
 export type PlanColumn={title:string,sub?:string,meta?:string[],milestones:PlanMilestone[],cards:PlanCard[],blocked?:boolean,now?:boolean,slimmable?:boolean}
+
+// PRD and Design readiness: two small dots, P and D (green = approved, amber = draft / in
+// review, outline = not started, dashed = not needed)
+function readinessPips(pptx:any,slide:any,x:number,y:number,cd:PlanCard,d=0.13){
+  ;([['P',cd.prd],['D',cd.design]] as [string,any][]).forEach(([l,st],i)=>{
+    const ok=st==='approved',wip=st==='draft'||st==='review',na=st==='na'
+    slide.addShape(pptx.ShapeType.ellipse,{x:x+i*(d+0.03),y,w:d,h:d,fill:ok?{color:'27AE60'}:wip?{color:'F6E3B4'}:{color:'FFFFFF',transparency:100},line:{color:ok?'27AE60':wip?'D4A017':'9AA3AF',width:0.75,dashType:na?'dash':'solid'}})
+    slide.addText(ok?'✓':l,{x:x+i*(d+0.03),y,w:d,h:d,fontSize:5.5,bold:true,color:ok?'FFFFFF':wip?'8A6512':'9AA3AF',align:'center',valign:'middle',margin:0})
+  })
+}
+const PIPS_W=0.32
 
 export async function exportPlanningPptx({title,subtitle,quarters,releaseSlides,fileName}:{title:string,subtitle:string,quarters:PlanColumn[],releaseSlides:{label:string,cols:PlanColumn[]}[],fileName:string}){
   const PptxGenJS=(await import('pptxgenjs')).default
@@ -57,8 +68,9 @@ export function drawBoard(pptx:any,title:string,subtitle:string,cols:PlanColumn[
     lx+=0.36+bw+0.3
   }
   slide.addShape(pptx.ShapeType.diamond,{x:lx,y:7.12,w:0.16,h:0.16,fill:{color:MS},line:{color:MS,width:0}})
-  slide.addText('Milestone (colour = type; crossed out = done)',{x:lx+0.22,y:7.06,w:3.2,h:0.28,fontSize:9,color:INK,margin:0});lx+=3.4
-  slide.addText('CX Consumer Experience · OE Operational Efficiency · RP Retail Program',{x:lx,y:7.06,w:13.08-lx,h:0.28,fontSize:9,color:MUTED,margin:0,align:'right'})
+  slide.addText('Milestone (colour = type; crossed out = done)',{x:lx+0.22,y:7.06,w:2.85,h:0.28,fontSize:9,color:INK,margin:0});lx+=3.05
+  readinessPips(pptx,slide,lx,7.135,{kind:'story',name:'',prd:'approved',design:'review'})
+  slide.addText('PRD / Design: ✓ approved · amber in progress · outline not started',{x:lx+0.36,y:7.06,w:13.08-lx-0.36,h:0.28,fontSize:9,color:MUTED,margin:0})
 
   if(!cols.length){slide.addText('Nothing in view.',{x:0.75,y:3.5,w:12,h:0.4,fontSize:14,color:MUTED});return}
   // Months with nothing in them (no release, or nothing planned yet) are slim strips
@@ -149,7 +161,8 @@ function drawColumn(pptx:any,slide:any,c:PlanColumn,x:number,w:number,top:number
       const bfs=6.5,bw=capsW(K.label,bfs)
       slide.addText(K.label,{x:tx,y:cy+0.04,w:bw,h:0.15,fontSize:bfs,bold:true,color:K.badgeInk,fill:{color:K.badge},align:'center',valign:'middle',margin:0})
       const tags=[cd.ref,cd.team,cd.wt,cd.priority,cd.status,cd.release?`Release ${cd.release}`:null,cd.quarter].filter(Boolean).join(' · ')
-      if(tags)slide.addText(trunc(tags,tw-bw-0.06,7),{x:tx+bw+0.06,y:cy+0.03,w:tw-bw-0.06,h:0.17,fontSize:7,bold:true,color:K.meta,margin:0,valign:'middle'})
+      if(tags)slide.addText(trunc(tags,tw-bw-0.06-PIPS_W,7),{x:tx+bw+0.06,y:cy+0.03,w:tw-bw-0.06-PIPS_W,h:0.17,fontSize:7,bold:true,color:K.meta,margin:0,valign:'middle'})
+      readinessPips(pptx,slide,cx+cw-PIPS_W,cy+0.045,cd)
       // Line 2: the name; line 3: the initiative it belongs to
       slide.addText(trunc(cd.name,tw,nameFs,true),{x:tx,y:cy+0.2,w:tw,h:0.2,fontSize:nameFs,bold:true,color:K.name,margin:0,valign:'middle'})
       if(cd.flag)slide.addText(trunc(cd.flag,tw,7,true),{x:tx,y:cy+0.39,w:tw,h:0.14,fontSize:7,bold:true,color:'C0392B',margin:0})
@@ -157,7 +170,8 @@ function drawColumn(pptx:any,slide:any,c:PlanColumn,x:number,w:number,top:number
     }else{
       const bfs=6,bw=capsW(K.short,bfs)
       slide.addText(K.short,{x:tx,y:cy+(ch-0.14)/2,w:bw,h:0.14,fontSize:bfs,bold:true,color:K.badgeInk,fill:{color:K.badge},align:'center',valign:'middle',margin:0})
-      const nw=tw-bw-0.06,team=(cd.team?`  ${cd.team}`:'')+(cd.flag?`  ⚠ ${cd.flag}`:'')
+      const nw=tw-bw-0.06-PIPS_W,team=(cd.team?`  ${cd.team}`:'')+(cd.flag?`  ⚠ ${cd.flag}`:'')
+      readinessPips(pptx,slide,cx+cw-PIPS_W,cy+(ch-0.13)/2,cd)
       slide.addText([{text:trunc(cd.name,nw-0.3,nameFs,true),options:{bold:true,color:K.name}},{text:team,options:{color:K.meta,fontSize:nameFs-1.5}}],
         {x:tx+bw+0.06,y:cy,w:nw,h:ch,fontSize:nameFs,valign:'middle',margin:0})
     }
