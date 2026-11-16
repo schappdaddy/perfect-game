@@ -691,7 +691,16 @@ export function QuarterPlanner({items,setItems,projects,setProjects,epics=[],set
 // ── Release calendar (Roadmap) ───────────────────────────────────────────────
 // A fiscal year as quarter rows of monthly releases, each listing what ships in it, grouped
 // by initiative: go-lives, epics and stories (tech debt initiatives shown as such).
-export function ReleaseCalendar({releases,projects,epics=[],items,team='All',onOpenProject,onSetDates}:any){
+export function ReleaseCalendar({releases,projects,epics=[],items,team='All',onOpenProject,onSetDates,onSetRelease}:any){
+  // Move work to another release: drag a go-live, epic or story onto another month, or use ↔
+  const [drag,setDrag]=useState<any>(null),[over,setOver]=useState<string|null>(null)
+  const movable=!!onSetRelease
+  const dragProps=(kind:string,x:any)=>movable?{draggable:true,onDragStart:(e:any)=>{e.stopPropagation();setDrag({kind,x});e.dataTransfer.effectAllowed='move'},onDragEnd:()=>{setDrag(null);setOver(null)}}:{}
+  const mover=(kind:string,x:any)=>movable?(
+    <span onClick={e=>e.stopPropagation()} title="Move to another release" style={{position:'relative',display:'inline-flex',marginLeft:4,color:'#5B6B7E',fontSize:10,cursor:'pointer'}}>↔
+      <select value={x.release_month||''} onChange={e=>onSetRelease(kind,x,e.target.value||null)} style={{position:'absolute',inset:0,opacity:0,cursor:'pointer',width:'100%'}}>
+        {releaseOptions(releases,x.release_month).map((o:any)=><option key={o.value} value={o.value} disabled={o.disabled}>{o.label}</option>)}
+      </select></span>):null
   const cur=fyQuarterOf(monthKeyOf(new Date()))
   const now=monthKeyOf(new Date())
   const [fy,setFyS]=useState<number>(()=>{try{return Number(localStorage.getItem('pg_rc_fy'))||cur.fy}catch{return cur.fy}})
@@ -739,6 +748,7 @@ export function ReleaseCalendar({releases,projects,epics=[],items,team='All',onO
         <span><b style={{color:'#E07B2A'}}>◆</b> epic</span>
         <span><b style={{color:'#8FA6BC'}}>⟳ Tech debt</b> quarterly tech debt initiative</span>
         <span>Stories going out with their epic are counted under it.</span>
+        {movable&&<span style={{color:'#5DADE2'}}>Drag a go-live, epic or story to another month (or use ↔) to change its release.</span>}
       </div>
       {[1,2,3,4].map(q=>{
         const months=quarterMonths(fy,q).filter(k=>!(hideNoRel&&releaseOf(releases,k)?.no_release))
@@ -751,7 +761,9 @@ export function ReleaseCalendar({releases,projects,epics=[],items,team='All',onO
                 const r=releaseOf(releases,k),blocked=!!r?.no_release,plan=blocked?[]:monthPlan(k)
                 const nIni=plan.filter(x=>x.goLive).length,nEp=plan.reduce((s,x)=>s+x.epics.length,0),nSt=plan.reduce((s,x)=>s+x.stories.length,0)
                 return(
-                  <div key={k} style={{background:blocked?'repeating-linear-gradient(135deg,#0F1C2B,#0F1C2B 8px,#132234 8px,#132234 16px)':'#0F1C2B',border:`1px solid ${k===now?'#C8973A':'#243447'}`,borderRadius:8,display:'flex',flexDirection:'column',minHeight:150}}>
+                  <div key={k} onDragOver={e=>{if(drag&&!blocked){e.preventDefault();setOver(k)}}} onDragLeave={()=>setOver(o=>o===k?null:o)}
+                    onDrop={e=>{e.preventDefault();const d=drag;setDrag(null);setOver(null);if(d&&!blocked&&d.x.release_month!==k)onSetRelease(d.kind,d.x,k)}}
+                    style={{background:blocked?'repeating-linear-gradient(135deg,#0F1C2B,#0F1C2B 8px,#132234 8px,#132234 16px)':over===k?'rgba(93,173,226,0.08)':'#0F1C2B',border:`1px solid ${over===k?'#5DADE2':k===now?'#C8973A':'#243447'}`,borderRadius:8,display:'flex',flexDirection:'column',minHeight:150}}>
                     <div style={{padding:'9px 12px',borderBottom:'1px solid #243447',display:'flex',alignItems:'baseline',gap:8}}>
                       <span style={{fontSize:14,fontWeight:800,color:blocked?'#7A8FA6':'#F4F6F8'}}>{fmtMonthKey(k)}</span>
                       {k===now&&<span style={{fontSize:9,fontWeight:800,color:'#C8973A'}}>NOW</span>}
@@ -766,17 +778,18 @@ export function ReleaseCalendar({releases,projects,epics=[],items,team='All',onO
                           const td=!!x.p?.sustain_quarter
                           return(
                             <div key={x.p?.id||'__none'} style={{borderLeft:`3px solid ${x.goLive?'#C8973A':td?'#4A5D72':x.p?'#3A4A5E':'#243447'}`,paddingLeft:8,display:'flex',flexDirection:'column',gap:2}}>
-                              <div style={{display:'flex',alignItems:'center',gap:6}}>
+                              <div style={{display:'flex',alignItems:'center',gap:6,cursor:movable&&x.goLive&&x.p?'grab':undefined}} {...(x.goLive&&x.p?dragProps('project',x.p):{})}>
                                 {x.goLive&&<span style={{fontSize:9,fontWeight:800,color:'#0D1B2A',background:'#C8973A',borderRadius:3,padding:'0 5px'}}>◈ GO-LIVE</span>}
                                 {td&&<span style={{fontSize:9,fontWeight:800,color:'#C8D4E0',background:'#4A5D72',borderRadius:3,padding:'0 5px'}}>⟳ TECH DEBT</span>}
                                 <span onClick={()=>x.p&&onOpenProject?.(x.p)} title={x.p?'Open this initiative':undefined}
                                   style={{fontSize:12,fontWeight:700,color:x.p?'#F4F6F8':'#7A8FA6',cursor:x.p&&onOpenProject?'pointer':'default'}}>{x.p?.name||'No initiative'}</span>
+                                {x.goLive&&x.p&&mover('project',x.p)}
                               </div>
                               {x.epics.map((e:any)=>{const n=storiesOf(e).length;return(
-                                <div key={e.id} style={{fontSize:11,color:'#C8C8D4'}}><span style={{color:'#E07B2A'}}>◆</span> {e.name}{n?<span style={{color:'#7A8FA6'}}> · {n} stor{n===1?'y':'ies'}</span>:''}</div>
+                                <div key={e.id} {...dragProps('epic',e)} style={{fontSize:11,color:'#C8C8D4',cursor:movable?'grab':undefined}}><span style={{color:'#E07B2A'}}>◆</span> {e.name}{n?<span style={{color:'#7A8FA6'}}> · {n} stor{n===1?'y':'ies'}</span>:''}{mover('epic',e)}</div>
                               )})}
                               {x.stories.map((i:any)=>(
-                                <div key={i.id} style={{fontSize:11,color:'#A9B8C9'}}><span style={{color:'#7A8FA6',fontFamily:'monospace',fontSize:10}}>{i.item_id}</span> {i.name}</div>
+                                <div key={i.id} {...dragProps('item',i)} style={{fontSize:11,color:'#A9B8C9',cursor:movable?'grab':undefined}}><span style={{color:'#7A8FA6',fontFamily:'monospace',fontSize:10}}>{i.item_id}</span> {i.name}{mover('item',i)}</div>
                               ))}
                             </div>
                           )

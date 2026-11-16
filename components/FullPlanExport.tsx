@@ -11,6 +11,7 @@ const SECTIONS:[string,string,string][]=[
   ['budget','Budget & capacity','Summary, by team, by initiative, by person'],
   ['quarters','Quarter plan','Four quarters on one slide'],
   ['releases','Release plan','One slide per quarter'],
+  ['calendar','Release calendar','The fiscal year month by month: what ships in each release'],
   ['sprints','Sprints','One slide per release: each team\'s sprints'],
   ['unplanned','Not planned yet','Initiatives with no dates; work with no quarter'],
 ]
@@ -31,7 +32,7 @@ function FullPlanDialog({onClose,strategies=[],projects,items,epics,releases,mil
   const [startN,setStartN]=useState(0)
   const [team,setTeam]=useState('__all')
   const [wt,setWt]=useState('all')
-  const [sec,setSec]=useState<any>({roadmap:true,budget:true,quarters:true,releases:true,sprints:true,unplanned:true})
+  const [sec,setSec]=useState<any>({roadmap:true,budget:true,quarters:true,releases:true,calendar:true,sprints:true,unplanned:true})
   const [busy,setBusy]=useState(false)
   const strategy=strategies.find((s:any)=>s.id===stratId)||null
   const start=nextQ(cur.fy,cur.q,startN),end=nextQ(start.fy,start.q,3)

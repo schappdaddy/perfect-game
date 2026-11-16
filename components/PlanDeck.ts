@@ -143,12 +143,27 @@ export function planModel(inp:PlanInput){
   unplannedWork.sort((a,b)=>{const ga=groupName(a),gb=groupName(b);return(ga==='No initiative'?1:0)-(gb==='No initiative'?1:0)||ga.localeCompare(gb)||(PRI[a.x.priority]||9)-(PRI[b.x.priority]||9)||(a.kind==='epic'?0:1)-(b.kind==='epic'?0:1)})
   const unplannedRows=unplannedWork.map(en=>({group:groupName(en),kind:en.kind==='epic'?'Epic':'Story',ref:en.kind==='item'?en.x.item_id||'':'',name:en.x.name,team:shortOf(teamOf(en.kind,en.x))||'',wt:WTS[wtOf(en.kind,en.x)]||'',priority:en.x.priority||'',status:en.x.status||'',stories:en.kind==='epic'?storiesOf(en.x).filter(open).length:null}))
 
-  return{quarters,quarterCols,releaseSlides,sprintSlides,undatedInits,unplannedRows,ALL}
+  // The release calendar: for each month of a fiscal year, what ships, by initiative (as on
+  // the Roadmap's Release calendar)
+  const calendarMonth=(k:string)=>{
+    const groups=new Map<string,{p:any,goLive:boolean,epics:any[],stories:any[]}>()
+    const g=(p:any)=>{const key=p?.id||'__none';if(!groups.has(key))groups.set(key,{p:p||null,goLive:false,epics:[],stories:[]});return groups.get(key)!}
+    for(const p of projects)if(p.release_month===k&&work(p)&&(ALL||!p.team||p.team===team)&&wtOk('project',p))g(p).goLive=true
+    for(const e of epics)if(e.release_month===k&&work(e)&&shown('epic',e))g(projects.find((p:any)=>p.id===e.project_id)).epics.push(e)
+    for(const i of items){
+      if(i.release_month!==k||!work(i)||!shown('item',i))continue
+      const ep=i.epic_id&&epicById(i.epic_id);if(ep&&ep.release_month===k)continue
+      g(projects.find((p:any)=>p.name===i.parent_project)).stories.push(i)
+    }
+    return[...groups.values()].sort((a,b)=>(Number(b.goLive)-Number(a.goLive))||(Number(!!a.p?.sustain_quarter)-Number(!!b.p?.sustain_quarter))||(Number(!a.p)-Number(!b.p))||(a.p?.name||'').localeCompare(b.p?.name||''))
+  }
+  const calendarFys=[...new Set(quarters.map(q=>q.fy))]
+  return{quarters,quarterCols,releaseSlides,sprintSlides,undatedInits,unplannedRows,ALL,calendarMonth,calendarFys,isBlocked,storiesOf}
 }
 
 // ── The full-plan deck ───────────────────────────────────────────────────────
 const INK='1F2A3C',MUTED='6B7280',CREAM='FDFBF0',ORANGE='E07B2A',HEAD='1F2A3C',SUB='EEF1F5',LINE='D9DEE5'
-export type FullPlanSections={roadmap:boolean,budget:boolean,quarters:boolean,releases:boolean,sprints:boolean,unplanned:boolean}
+export type FullPlanSections={roadmap:boolean,budget:boolean,quarters:boolean,releases:boolean,calendar?:boolean,sprints:boolean,unplanned:boolean}
 
 function titleSlide(pptx:any,title:string,lines:string[]){
   const s=pptx.addSlide();s.background={color:'1F2A3C'}
@@ -187,6 +202,52 @@ function tableSlides(pptx:any,title:string,subtitle:string,header:string[],colW:
   }
 }
 
+// A fiscal year as a 4 × 3 calendar of monthly releases, each listing what ships
+function calendarSlide(pptx:any,m:any,fy:number,releases:any[],sub:string){
+  const s=pptx.addSlide();s.background={color:CREAM}
+  s.addShape(pptx.ShapeType.rect,{x:0.25,y:0,w:0.28,h:7.5,fill:{color:'2F3742'},line:{color:'2F3742'}})
+  s.addText(`Release calendar · FY${String(fy).slice(-2)}`,{x:0.75,y:0.2,w:12.2,h:0.55,fontSize:26,bold:true,color:INK,margin:0})
+  s.addText(`Apr ${fy-1} – Mar ${fy} · ${sub}`,{x:0.75,y:0.75,w:12.2,h:0.28,fontSize:12,bold:true,color:ORANGE,margin:0})
+  const X0=1.15,TOP=1.15,GAP=0.08,W=(13.08-X0-GAP*2)/3,H=(7.05-TOP-GAP*3)/4
+  const now=monthKeyOf(new Date())
+  for(let q=1;q<=4;q++){
+    const y=TOP+(q-1)*(H+GAP)
+    s.addShape(pptx.ShapeType.rect,{x:0.75,y,w:0.34,h:H,fill:{color:'2F3742'},line:{color:'2F3742',width:0}})
+    s.addText(`Q${q}`,{x:0.75,y,w:0.34,h:H,fontSize:11,bold:true,color:'FFFFFF',align:'center',valign:'middle',margin:0})
+    quarterMonths(fy,q).forEach((k:string,i:number)=>{
+      const x=X0+i*(W+GAP),r=releaseOf(releases,k),blocked=!!r?.no_release
+      s.addShape(pptx.ShapeType.rect,{x,y,w:W,h:H,fill:{color:blocked?'ECEDEF':'FFFFFF'},line:{color:k===now?'C8973A':LINE,width:k===now?1.5:0.75}})
+      s.addShape(pptx.ShapeType.rect,{x,y,w:W,h:0.26,fill:{color:blocked?'8A94A3':'2F3742'},line:{color:blocked?'8A94A3':'2F3742',width:0}})
+      s.addText([{text:fmtMonthKey(k),options:{bold:true,color:'FFFFFF'}},{text:`   ${blocked?'No release'+(r?.notes?' · '+r.notes:''):r?.release_date?'Release '+releaseText(releases,k):'Date not set'}`,options:{color:blocked?'F4E3C8':'E8B95A',fontSize:8.5}}],
+        {x:x+0.06,y,w:W-0.1,h:0.26,fontSize:10.5,valign:'middle',margin:0})
+      if(blocked)return
+      // Lines: initiative (GO-LIVE when it goes live), then its epics and stories
+      const lines:any[]=[]
+      for(const g of m.calendarMonth(k)){
+        const name=g.p?.name||'No initiative',td=!!g.p?.sustain_quarter
+        lines.push({t:name,kind:g.goLive?'golive':td?'td':'init'})
+        for(const e of g.epics){const n=m.storiesOf(e).length;lines.push({t:`◆ ${e.name}${n?` · ${n} stor${n===1?'y':'ies'}`:''}`,kind:'epic'})}
+        for(const it of g.stories)lines.push({t:`▪ ${it.item_id?it.item_id+' ':''}${it.name}`,kind:'story'})
+      }
+      const LH=0.155,maxL=Math.floor((H-0.32)/LH)
+      if(!lines.length){s.addText('Nothing tagged to this release yet.',{x:x+0.08,y:y+0.3,w:W-0.15,h:0.2,fontSize:8,italic:true,color:'9AA3AF',margin:0});return}
+      const shownL=lines.length>maxL?lines.slice(0,maxL-1):lines
+      const maxCh=Math.floor((W-0.2)*72/(7.5*0.5))
+      const tr=(t:string,n:number)=>t.length>n?t.slice(0,n-1)+'…':t
+      s.addText(shownL.map((l:any,ix:number)=>{
+        const last=ix===shownL.length-1&&shownL.length===lines.length
+        const opt:any=l.kind==='golive'?{bold:true,color:'8A6512'}:l.kind==='td'?{bold:true,color:'4A5D72'}:l.kind==='init'?{bold:true,color:INK}:l.kind==='epic'?{color:'A04000'}:{color:'1B4F72'}
+        const text=(l.kind==='golive'?'◈ GO-LIVE  ':l.kind==='td'?'⟳ ':'')+l.t
+        return{text:tr(text,l.kind==='epic'||l.kind==='story'?maxCh-2:maxCh),options:{...opt,indentLevel:l.kind==='epic'||l.kind==='story'?1:0,breakLine:!last}}
+      }).concat(lines.length>shownL.length?[{text:`+ ${lines.length-shownL.length} more`,options:{italic:true,color:MUTED}}]:[]),
+        {x:x+0.08,y:y+0.3,w:W-0.15,h:H-0.34,fontSize:7.5,valign:'top',margin:0,paraSpaceAfter:0,lineSpacing:10.5})
+    })
+  }
+  // Legend
+  s.addText([{text:'◈ GO-LIVE',options:{bold:true,color:'8A6512'}},{text:' initiative goes live   '},{text:'◆',options:{color:'A04000'}},{text:' epic   '},{text:'▪',options:{color:'1B4F72'}},{text:' story   '},{text:'⟳',options:{bold:true,color:'4A5D72'}},{text:' tech debt initiative   Stories going out with their epic are counted under it.'}],
+    {x:0.75,y:7.1,w:12.3,h:0.25,fontSize:8.5,color:MUTED,margin:0})
+}
+
 export async function exportFullPlanPptx({strategy,strategyCtx,plan,sections,fileName}:{strategy:any,strategyCtx:any,plan:PlanInput,sections:FullPlanSections,fileName:string}){
   const PptxGenJS=(await import('pptxgenjs')).default
   const pptx=new PptxGenJS()
@@ -198,7 +259,7 @@ export async function exportFullPlanPptx({strategy,strategyCtx,plan,sections,fil
   const sub=`${who} · ${wtl} · ${stamp}`
   const parts:string[]=[]
   if(strategy&&(sections.roadmap||sections.budget))parts.push('Strategy')
-  if(sections.quarters)parts.push('Quarter plan');if(sections.releases)parts.push('Release plan');if(sections.sprints)parts.push('Sprints');if(sections.unplanned)parts.push('Not planned yet')
+  if(sections.quarters)parts.push('Quarter plan');if(sections.releases)parts.push('Release plan');if(sections.calendar)parts.push('Release calendar');if(sections.sprints)parts.push('Sprints');if(sections.unplanned)parts.push('Not planned yet')
   titleSlide(pptx,'The plan',[strategy?`Strategy: ${strategy.name}`:'',`Planning ${range} · ${who} · ${wtl}`,parts.join('  →  '),`Exported ${stamp}`].filter(Boolean))
   let n=0
   if(strategy&&(sections.roadmap||sections.budget)){
@@ -213,6 +274,10 @@ export async function exportFullPlanPptx({strategy,strategyCtx,plan,sections,fil
     sectionSlide(pptx,++n,'Release plan','What ships in each monthly release, one slide per quarter, and what is planned but not in a release yet.')
     if(m.releaseSlides.length)m.releaseSlides.forEach(r=>drawBoard(pptx,'Release plan',`${r.label} · ${sub}`,r.cols))
     else drawBoard(pptx,'Release plan',sub,[])
+  }
+  if(sections.calendar){
+    sectionSlide(pptx,++n,'Release calendar','Each month\'s release across the fiscal year: initiatives going live, and the epics and stories shipping in it.')
+    for(const fy of m.calendarFys)calendarSlide(pptx,m,fy,plan.releases,sub)
   }
   if(sections.sprints){
     sectionSlide(pptx,++n,'Sprints','For each release, each team\'s sprints and what\'s in them, and what\'s planned for the release but not in a sprint yet. Work in a sprint that isn\'t planned for that release is flagged.')
