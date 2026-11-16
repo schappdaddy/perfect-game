@@ -253,6 +253,11 @@ export async function exportFullPlanPptx({strategy,strategyCtx,plan,sections,fil
   const pptx=new PptxGenJS()
   pptx.layout='LAYOUT_WIDE'
   const m=planModel(plan)
+  // A team's plan: the strategy and budget slides cover only its initiatives and people
+  if(!m.ALL){
+    const t=plan.team
+    strategyCtx={...strategyCtx,projects:(strategyCtx.projects||[]).filter((p:any)=>p.team===t),teams:[t],people:(strategyCtx.people||[]).filter((p:any)=>p.team===t)}
+  }
   const range=`${m.quarters[0].label} – ${m.quarters[3].label}`
   const who=m.ALL?'All teams':plan.team,wtl=plan.wt==='all'?'All work':WTS[plan.wt]||plan.wt
   const stamp=new Date().toLocaleDateString('en-US',{month:'short',day:'numeric',year:'numeric'})
@@ -260,7 +265,7 @@ export async function exportFullPlanPptx({strategy,strategyCtx,plan,sections,fil
   const parts:string[]=[]
   if(strategy&&(sections.roadmap||sections.budget))parts.push('Strategy')
   if(sections.quarters)parts.push('Quarter plan');if(sections.releases)parts.push('Release plan');if(sections.calendar)parts.push('Release calendar');if(sections.sprints)parts.push('Sprints');if(sections.unplanned)parts.push('Not planned yet')
-  titleSlide(pptx,'The plan',[strategy?`Strategy: ${strategy.name}`:'',`Planning ${range} · ${who} · ${wtl}`,parts.join('  →  '),`Exported ${stamp}`].filter(Boolean))
+  titleSlide(pptx,m.ALL?'The plan':`${plan.team} plan`,[strategy?`Strategy: ${strategy.name}`:'',`Planning ${range} · ${who} · ${wtl}`,parts.join('  →  '),`Exported ${stamp}`].filter(Boolean))
   let n=0
   if(strategy&&(sections.roadmap||sections.budget)){
     sectionSlide(pptx,++n,'Strategy',`${strategy.name}: ${[sections.roadmap?'the roadmap by track and by team':'',sections.budget?'the budget and capacity':''].filter(Boolean).join(', and ')}.`)
