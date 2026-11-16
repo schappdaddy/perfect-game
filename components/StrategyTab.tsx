@@ -650,6 +650,10 @@ export default function StrategyTab({projects:mainProjects,setProjects,strategie
     e.stopPropagation()
     e.currentTarget.setPointerCapture(e.pointerId)
     setDrag({id:p.id,mode,unit:view.snap,x0:e.clientX,dxm:0,moved:false})
+    // Escape cancels the drag: nothing is saved until the bar is let go
+    const k=(ev:KeyboardEvent)=>{if(ev.key==='Escape')setDrag(null)}
+    const done=()=>{window.removeEventListener('keydown',k);window.removeEventListener('pointerup',done)}
+    window.addEventListener('keydown',k);window.addEventListener('pointerup',done)
   }
   function onBarMove(e:any){
     if(!drag)return

@@ -3194,7 +3194,7 @@ const sorted=items.filter(i=>!isItemDone(i)).sort((a,b)=>{
 }
 
 // ── ROADMAP ───────────────────────────────────────────────────────────────
-function Roadmap({items,setItems,projects,setProjects,milestones,setMilestones,tasks=[],setTasks,sprints=[],itemAssignments=[],projectRoles=[],people=[],roles=[],onOpenProject,deps=[],setDeps,releases=[],setReleases,epics=[]}:{items:any[],projects:any[],setItems:any,setProjects:any,milestones:any[],setMilestones?:any,tasks?:any[],setTasks?:any,sprints?:any[],itemAssignments?:any[],projectRoles?:any[],people?:any[],roles?:any[],onOpenProject?:(p:any)=>void,deps?:any[],setDeps?:any,releases?:any[],setReleases?:any,epics?:any[]}) {
+function Roadmap({items,setItems,projects,setProjects,milestones,setMilestones,tasks=[],setTasks,sprints=[],itemAssignments=[],projectRoles=[],people=[],roles=[],onOpenProject,deps=[],setDeps,releases=[],setReleases,epics=[],setEpics}:{items:any[],projects:any[],setItems:any,setProjects:any,milestones:any[],setMilestones?:any,tasks?:any[],setTasks?:any,sprints?:any[],itemAssignments?:any[],projectRoles?:any[],people?:any[],roles?:any[],onOpenProject?:(p:any)=>void,deps?:any[],setDeps?:any,releases?:any[],setReleases?:any,epics?:any[],setEpics?:any}) {
   const [showSprints,setShowSprints]=useState(false)
   const [showReleases,setShowReleasesState]=useState<boolean>(()=>{try{return localStorage.getItem('pg_rm_releases')!=='0'}catch{return true}})
   const setShowReleases=(v:boolean)=>{setShowReleasesState(v);try{localStorage.setItem('pg_rm_releases',v?'1':'0')}catch{}}
@@ -3202,6 +3202,9 @@ function Roadmap({items,setItems,projects,setProjects,milestones,setMilestones,t
   // Epics as rows under their initiative, each with its stories
   const [showEpicsRm,setShowEpicsRmState]=useState<boolean>(()=>{try{return localStorage.getItem('pg_rm_epics')!=='0'}catch{return true}})
   const setShowEpicsRm=(v:boolean)=>{setShowEpicsRmState(v);try{localStorage.setItem('pg_rm_epics',v?'1':'0')}catch{}}
+  // Undated initiatives, epics and stories as rows to click a date onto
+  const [showUndated,setShowUndatedState]=useState<boolean>(()=>{try{return localStorage.getItem('pg_rm_undated')!=='0'}catch{return true}})
+  const setShowUndated=(v:boolean)=>{setShowUndatedState(v);try{localStorage.setItem('pg_rm_undated',v?'1':'0')}catch{}}
   // Timeline (the Gantt) or the monthly release calendar
   const [rmView,setRmViewState]=useState<string>(()=>{try{return localStorage.getItem('pg_rm_view')||'timeline'}catch{return 'timeline'}})
   const setRmView=(v:string)=>{setRmViewState(v);try{localStorage.setItem('pg_rm_view',v)}catch{}}
@@ -3372,14 +3375,15 @@ function Roadmap({items,setItems,projects,setProjects,milestones,setMilestones,t
   function ragBg(rag){return rag==='Red'?'rgba(192,57,43,0.14)':rag==='Amber'?'rgba(212,130,10,0.14)':'rgba(39,174,96,0.08)'}
   function ragBorder(rag){return rag==='Red'?'rgba(192,57,43,0.6)':rag==='Amber'?'rgba(212,130,10,0.6)':'rgba(39,174,96,0.4)'}
 
+  const undatedOpen=(i:any)=>(!i.start_date||!i.end_date)&&!ITEM_TERMINAL.includes(i.status)
   const groups=filteredProjects.map(project=>{
-    const children=withDates.filter(i=>i.parent_project===project.name)
+    const children=[...withDates.filter(i=>i.parent_project===project.name),...(showUndated?noDates.filter(i=>i.parent_project===project.name&&undatedOpen(i)):[])]
     const violations=children.filter(i=>{
-      if(!project.start_date||!project.end_date) return false
+      if(!project.start_date||!project.end_date||!i.start_date||!i.end_date) return false
       return new Date(i.start_date+'T12:00:00')<new Date(project.start_date+'T12:00:00')||new Date(i.end_date+'T12:00:00')>new Date(project.end_date+'T12:00:00')
     })
     return{...project,items:children,violations,bar_start:project.start_date,bar_end:project.ongoing?(project.end_date||'9999-12-31'):project.end_date}
-  }).filter((g:any)=>g.items.length>0||(g.bar_start&&g.bar_end)).sort((a:any,b:any)=>{
+  }).filter((g:any)=>g.items.length>0||(g.bar_start&&g.bar_end)||(showUndated&&!PROJECT_TERMINAL.includes(g.status)&&!g.sustain_quarter)).sort((a:any,b:any)=>{
     // Ongoing (∞) projects always pin to the bottom regardless of sort
     if(!!a.ongoing!==!!b.ongoing) return a.ongoing?1:-1
     let av,bv
@@ -3402,7 +3406,7 @@ function Roadmap({items,setItems,projects,setProjects,milestones,setMilestones,t
     const storiesOf=(e:any)=>childItems.filter(i=>i.epic_id===e.id)
     const extent=(e:any)=>{
       if(e.start_date&&e.end_date)return{s:e.start_date,e:e.end_date,derived:false}
-      const st=storiesOf(e);if(!st.length)return null
+      const st=storiesOf(e).filter((i:any)=>i.start_date&&i.end_date);if(!st.length)return null
       return{s:st.map(i=>i.start_date).sort()[0],e:st.map(i=>i.end_date).sort().slice(-1)[0],derived:true}
     }
     const shown=gEpics.filter((e:any)=>!ITEM_TERMINAL.includes(e.status)||storiesOf(e).length).map((e:any)=>({e,ext:extent(e)}))
@@ -3552,7 +3556,8 @@ function Roadmap({items,setItems,projects,setProjects,milestones,setMilestones,t
     }
     const itemId=e.dataTransfer.getData('itemId')
     if(!itemId){setDragOverProject(null);setDragOverCol(null);return}
-    const updates={start_date:dateToStr(col.start),end_date:dateToStr(col.end),parent_project:projectName}
+    // Dates only: the initiative a story belongs to is never changed by where it's dropped
+    const updates={start_date:dateToStr(col.start),end_date:dateToStr(col.end)}
     setItems(items.map(i=>i.id===itemId?{...i,...updates}:i))
     await supabase.from('items').update(updates).eq('id',itemId)
     setDragOverProject(null);setDragOverCol(null)
@@ -3565,76 +3570,102 @@ function Roadmap({items,setItems,projects,setProjects,milestones,setMilestones,t
   // swallowing it. A plain ref has no such timing ambiguity — always accurate the
   // instant it's read, regardless of React's render/commit schedule.
   const justDraggedRef=useRef(false)
-  function startBarDrag(e,item,type){
+  // Dragging a bar: the middle moves it, the ends change its start or end. Days snap to whole
+  // days; Escape cancels and puts everything back. Nothing is saved until the mouse is let go,
+  // and only if something actually moved.
+  // - A story or initiative moves on its own (Shift-drag an initiative to move its epics and
+  //   stories with it).
+  // - An epic moves with its dated stories. An epic dated by its stories (dashed) moves them;
+  //   stretching it gives the epic dates of its own.
+  const DAY_MS=86400000
+  const shiftISO=(iso:string,days:number)=>dateToStr(new Date(new Date(iso+'T12:00:00').getTime()+days*DAY_MS))
+  function startDrag(e:any,kind:'item'|'project'|'epic',x:any,type:string,o:{s?:string,e?:string,derived?:boolean}={}){
     e.preventDefault();e.stopPropagation()
-    const gantt=ganttRef.current as any;if(!gantt) return
+    if(!ganttRef.current)return
     justDraggedRef.current=false
-    barDragState.current={item,type,startX:e.clientX,origStart:item.start_date,origEnd:item.end_date,containerWidth:TOTAL_W}
-    setDraggingBar(item.id);if(type!=='move') setDraggingEdge(type)
+    const s0=o.s||x.start_date,e0=o.e||x.end_date
+    if(!s0||!e0)return
+    // What moves along with it
+    let followers:any[]=[]
+    if(type==='move'&&kind==='epic')followers=items.filter((i:any)=>i.epic_id===x.id&&i.start_date&&i.end_date).map((i:any)=>({kind:'item',id:i.id,s:i.start_date,e:i.end_date}))
+    if(type==='move'&&kind==='project'&&e.shiftKey)followers=[
+      ...items.filter((i:any)=>i.parent_project===x.name&&i.start_date&&i.end_date).map((i:any)=>({kind:'item',id:i.id,s:i.start_date,e:i.end_date})),
+      ...(epics as any[]).filter((ep:any)=>ep.project_id===x.id&&ep.start_date&&ep.end_date).map((ep:any)=>({kind:'epic',id:ep.id,s:ep.start_date,e:ep.end_date}))]
+    barDragState.current={kind,id:x.id,item:x,type,startX:e.clientX,origStart:s0,origEnd:e0,derived:!!o.derived,followers,delta:0,ns:s0,ne:e0,containerWidth:TOTAL_W,
+      orig:{start_date:x.start_date??null,end_date:x.end_date??null}}
+    setDraggingBar(x.id);if(type!=='move')setDraggingEdge(type)
   }
-  function startProjectBarDrag(e,project,type){
-    e.preventDefault();e.stopPropagation()
-    justDraggedRef.current=false
-    barDragState.current={item:project,type,startX:e.clientX,origStart:project.start_date,origEnd:project.end_date,containerWidth:TOTAL_W,isProject:true}
-    setDraggingBar(project.id);if(type!=='move') setDraggingEdge(type)
-  }
+  const startBarDrag=(e:any,item:any,type:string)=>startDrag(e,'item',item,type)
+  const startProjectBarDrag=(e:any,project:any,type:string)=>startDrag(e,'project',project,type)
 
   useEffect(()=>{
-    function onMouseMove(e){
-      const state=barDragState.current;if(!state) return
-      const dx=e.clientX-state.startX
-      if(Math.abs(dx)>3)justDraggedRef.current=true
-      const daysTotal=totalMs/(1000*60*60*24)
-      const pxPerDay=state.containerWidth/daysTotal
-      const daysDelta=Math.round(dx/pxPerDay)
-      const origStartMs=new Date(state.origStart+'T12:00:00').getTime()
-      const origEndMs=new Date(state.origEnd+'T12:00:00').getTime()
-      const DAY=1000*60*60*24
-      let newStart=state.origStart,newEnd=state.origEnd
-      if(state.type==='move'){newStart=dateToStr(new Date(origStartMs+daysDelta*DAY));newEnd=dateToStr(new Date(origEndMs+daysDelta*DAY))}
-      else if(state.type==='left'){const ns=new Date(origStartMs+daysDelta*DAY);if(ns<new Date(state.origEnd+'T12:00:00'))newStart=dateToStr(ns)}
-      else if(state.type==='right'){const ne=new Date(origEndMs+daysDelta*DAY);if(ne>new Date(state.origStart+'T12:00:00'))newEnd=dateToStr(ne)}
-      if(state.isProject){setProjects((prev:any[])=>prev.map(p=>p.id===state.item.id?{...p,start_date:newStart,end_date:newEnd}:p))}
-      else{setItems((prev:any[])=>prev.map(i=>i.id===state.item.id?{...i,start_date:newStart,end_date:newEnd}:i))}
-      setDragTooltip({x:e.clientX,y:e.clientY,start:newStart,end:newEnd})
-      const el=document.elementFromPoint(e.clientX,e.clientY)
-      setBacklogHover(!!el?.closest('[data-backlog-panel]'))
+    const apply=(kind:string,id:any,fields:any)=>{
+      if(kind==='project')setProjects((prev:any[])=>prev.map(p=>p.id===id?{...p,...fields}:p))
+      else if(kind==='epic')setEpics?.((prev:any[])=>prev.map(p=>p.id===id?{...p,...fields}:p))
+      else setItems((prev:any[])=>prev.map(p=>p.id===id?{...p,...fields}:p))
     }
-    async function onMouseUp(e){
-      const state=barDragState.current;if(!state) return
-      const el=document.elementFromPoint(e.clientX,e.clientY)
-      const overBacklog=el?.closest('[data-backlog-panel]')
-      if(state.isProject){
-        if(overBacklog){
-          setProjects((prev:any[])=>prev.map(p=>p.id===state.item.id?{...p,start_date:null,end_date:null}:p))
-          await supabase.from('projects').update({start_date:null,end_date:null}).eq('id',state.item.id)
-        }else{
-          const cp=projects.find(p=>p.id===state.item.id)
-          if(cp) await supabase.from('projects').update({start_date:cp.start_date,end_date:cp.end_date}).eq('id',state.item.id)
+    const tableOf=(kind:string)=>kind==='project'?'projects':kind==='epic'?'epics':'items'
+    function end(){barDragState.current=null;setDraggingBar(null);setDraggingEdge(null);setDragTooltip(null)}
+    function restore(st:any){
+      apply(st.kind,st.id,st.orig)
+      for(const f of st.followers)apply(f.kind,f.id,{start_date:f.s,end_date:f.e})
+    }
+    function onMouseMove(e:any){
+      const st:any=barDragState.current;if(!st)return
+      const dx=e.clientX-st.startX
+      if(Math.abs(dx)>3)justDraggedRef.current=true
+      const pxPerDay=st.containerWidth/(totalMs/DAY_MS)
+      const d=Math.round(dx/pxPerDay)
+      let ns=st.origStart,ne=st.origEnd
+      if(st.type==='move'){ns=shiftISO(st.origStart,d);ne=shiftISO(st.origEnd,d)}
+      else if(st.type==='left'){const c=shiftISO(st.origStart,d);if(c<=st.origEnd)ns=c}
+      else if(st.type==='right'){const c=shiftISO(st.origEnd,d);if(c>=st.origStart)ne=c}
+      st.delta=st.type==='move'?d:0;st.ns=ns;st.ne=ne
+      // An epic dated by its stories that's only moved stays dated by them
+      if(!(st.kind==='epic'&&st.derived&&st.type==='move'))apply(st.kind,st.id,{start_date:ns,end_date:ne})
+      for(const f of st.followers)apply(f.kind,f.id,{start_date:shiftISO(f.s,st.delta),end_date:shiftISO(f.e,st.delta)})
+      setDragTooltip({x:e.clientX,y:e.clientY,start:ns,end:ne,count:st.followers.length})
+    }
+    async function onMouseUp(){
+      const st:any=barDragState.current;if(!st)return
+      if(!justDraggedRef.current||(st.ns===st.origStart&&st.ne===st.origEnd)){end();return}
+      // A story moved out of its sprint's dates: take it out of the sprint, or put it back
+      if(st.kind==='item'&&st.item.sprint_id){
+        const sp=sprints.find((x:any)=>x.id===st.item.sprint_id)
+        if(sp&&(st.ns>sp.end_date||st.ne<sp.start_date)){
+          if(!confirm(`"${st.item.name}" is now outside its sprint (${sp.start_date} – ${sp.end_date}). Take it out of the sprint?`)){restore(st);end();return}
+          apply('item',st.id,{sprint_id:null})
+          const{error}=await supabase.from('items').update({sprint_id:null}).eq('id',st.id)
+          if(error){alert('Failed to save: '+error.message);restore(st);end();return}
         }
-        barDragState.current=null;setDraggingBar(null);setDraggingEdge(null);setDragTooltip(null);setBacklogHover(false);return
       }
-      const currentItem=items.find(i=>i.id===state.item.id)
-      if(!currentItem){barDragState.current=null;setDraggingBar(null);setDraggingEdge(null);setDragTooltip(null);setBacklogHover(false);return}
-      if(overBacklog){
-        setItems((prev:any[])=>prev.map(i=>i.id===state.item.id?{...i,start_date:null,end_date:null}:i))
-        await supabase.from('items').update({start_date:null,end_date:null}).eq('id',state.item.id)
-        barDragState.current=null;setDraggingBar(null);setDraggingEdge(null);setDragTooltip(null);setBacklogHover(false);return
-      }
-      const projectRow=el?.closest('[data-project-name]')
-      const newProjectName=projectRow?.getAttribute('data-project-name')
-      const updates:any={start_date:currentItem.start_date,end_date:currentItem.end_date}
-      if(newProjectName&&newProjectName!==currentItem.parent_project){
-        updates.parent_project=newProjectName
-        setItems((prev:any[])=>prev.map(i=>i.id===state.item.id?{...i,parent_project:newProjectName}:i))
-      }
-      await supabase.from('items').update(updates).eq('id',state.item.id)
-      barDragState.current=null;setDraggingBar(null);setDraggingEdge(null);setDragTooltip(null);setBacklogHover(false)
+      const writes:any[]=[]
+      if(!(st.kind==='epic'&&st.derived&&st.type==='move'))writes.push([st.kind,st.id,{start_date:st.ns,end_date:st.ne}])
+      for(const f of st.followers)if(st.delta)writes.push([f.kind,f.id,{start_date:shiftISO(f.s,st.delta),end_date:shiftISO(f.e,st.delta)}])
+      end()
+      const results=await Promise.all(writes.map(([k,id,fields])=>supabase.from(tableOf(k)).update(k==='epic'?fields:{...fields,updated_at:new Date().toISOString()}).eq('id',id)))
+      const bad=results.find(r=>r.error)
+      if(bad){alert('Failed to save the new dates: '+bad.error!.message);restore(st)}
+    }
+    function onKey(e:KeyboardEvent){
+      const st:any=barDragState.current
+      if(e.key==='Escape'&&st){restore(st);end()}
     }
     window.addEventListener('mousemove',onMouseMove)
     window.addEventListener('mouseup',onMouseUp)
-    return()=>{window.removeEventListener('mousemove',onMouseMove);window.removeEventListener('mouseup',onMouseUp)}
-  },[items,projects,totalMs,TOTAL_W])
+    window.addEventListener('keydown',onKey)
+    return()=>{window.removeEventListener('mousemove',onMouseMove);window.removeEventListener('mouseup',onMouseUp);window.removeEventListener('keydown',onKey)}
+  },[items,projects,epics,sprints,totalMs,TOTAL_W])
+
+  // Click a column on an undated row to place it there (that column's dates); then drag to adjust
+  async function placeAt(kind:'item'|'project'|'epic',x:any,col:any){
+    const fields={start_date:dateToStr(col.start),end_date:dateToStr(col.end)}
+    if(kind==='project')setProjects((prev:any[])=>prev.map(p=>p.id===x.id?{...p,...fields}:p))
+    else if(kind==='epic')setEpics?.((prev:any[])=>prev.map(p=>p.id===x.id?{...p,...fields}:p))
+    else setItems((prev:any[])=>prev.map(p=>p.id===x.id?{...p,...fields}:p))
+    const{error}=await supabase.from(kind==='project'?'projects':kind==='epic'?'epics':'items').update(fields).eq('id',x.id)
+    if(error)alert('Failed to save the dates: '+error.message)
+  }
 
   async function saveEdit(){
     if(!editing) return;setSaving(true)
@@ -3691,6 +3722,7 @@ function Roadmap({items,setItems,projects,setProjects,milestones,setMilestones,t
   }
 
   function GanttBar({item,groupColor,isViolation}:{item:any,groupColor:string,isViolation:boolean}){
+    if(!item.start_date||!item.end_date)return <span style={{position:'sticky',left:8,display:'inline-block',marginTop:12,fontSize:10,color:'#7A8FA6',fontStyle:'italic',pointerEvents:'none',zIndex:3}}>▪ {item.name}: no dates — click a column in this row to place it</span>
     const isDragging=draggingBar===item.id
     const isTerminal=ITEM_TERMINAL.includes(item.status)
     const itemColor=colorBy==='status'?sc(item.status):(item.roadmap_color||groupColor)
@@ -3759,6 +3791,9 @@ function Roadmap({items,setItems,projects,setProjects,milestones,setMilestones,t
         </div>}
         <label style={{display:'flex',alignItems:'center',gap:5,fontSize:11,color:'#7A8FA6',cursor:'pointer',whiteSpace:'nowrap' as const}} title="Remove Complete/Cancelled initiatives from the board">
           <input type="checkbox" checked={hideDone} onChange={e=>setHideDone(e.target.checked)} style={{accentColor:'#C8973A'}}/>Hide completed
+        </label>
+        <label style={{display:'flex',alignItems:'center',gap:5,fontSize:11,color:'#7A8FA6',cursor:'pointer',whiteSpace:'nowrap' as const}} title="Show initiatives, epics and stories with no dates yet: click a column in their row to place them, then drag to adjust">
+          <input type="checkbox" checked={showUndated} onChange={e=>setShowUndated(e.target.checked)} style={{accentColor:'#C8973A'}}/>Undated
         </label>
         <label style={{display:'flex',alignItems:'center',gap:5,fontSize:11,color:'#7A8FA6',cursor:'pointer',whiteSpace:'nowrap' as const}} title="Overlay sprint windows on the timeline">
           <input type="checkbox" checked={showSprints} onChange={e=>setShowSprints(e.target.checked)} style={{accentColor:'#C8973A'}}/>Sprints
@@ -3990,7 +4025,7 @@ function Roadmap({items,setItems,projects,setProjects,milestones,setMilestones,t
               </div>
             )}
             <div ref={depRef} style={{minWidth:TOTAL_W,position:'relative'}}>
-              <style>{'.pg-rs{transition:background .1s}.pg-rs:hover{background:rgba(255,255,255,0.28)}'}</style>
+              <style>{'.pg-rs{transition:background .1s}.pg-rs:hover{background:rgba(255,255,255,0.28)}.pg-place{cursor:copy}.pg-place:hover{background:rgba(200,151,58,0.14)!important}'}</style>
               {setDeps&&<DependencyLayer containerRef={depRef} deps={roadmapDeps} isBad={depBad} label={depName}
                 onCreate={(a:string,b:string)=>createDependency(a,b,deps as any[],setDeps)}
                 onDelete={(d:any)=>{if(confirm(`Remove the dependency ${depName(depKey(d.blocker_type,d.blocker_id))} → ${depName(depKey(d.blocked_type,d.blocked_id))}?`))deleteDependency(d,setDeps)}}/>}
@@ -4078,12 +4113,15 @@ function Roadmap({items,setItems,projects,setProjects,milestones,setMilestones,t
                       <div style={{position:'absolute',top:0,bottom:0,left:todayPx(),width:2,background:'#E74C3C',opacity:0.5,zIndex:1,pointerEvents:'none'}}/>
                       <CfShading/>
                       {cols.map((col,ci)=>(
-                        <div key={col.key}
-                          style={{position:'absolute',top:0,bottom:0,left:ci*COL_W,width:COL_W,zIndex:2,background:dragOverProject===group.name&&dragOverCol===col.key?'rgba(200,151,58,0.2)':'transparent'}}
+                        <div key={col.key} className={!group.bar_start?'pg-place':undefined}
+                          style={{position:'absolute',top:0,bottom:0,left:ci*COL_W,width:COL_W,zIndex:2,background:dragOverProject===group.name&&dragOverCol===col.key?'rgba(200,151,58,0.2)':undefined}}
                           onDragOver={e=>handleGanttDragOver(e,group.name,col)}
                           onDragLeave={handleGanttDragLeave}
-                          onDrop={e=>handleGanttDrop(e,group.name,col)}/>
+                          onDrop={e=>handleGanttDrop(e,group.name,col)}
+                          onClick={!group.bar_start?()=>placeAt('project',group,col):undefined}
+                          title={!group.bar_start?`Place "${group.name}" in ${col.label}`:undefined}/>
                       ))}
+                      {!group.bar_start&&<span style={{position:'sticky',left:8,display:'inline-block',marginTop:18,fontSize:10.5,color:'#7A8FA6',fontStyle:'italic',pointerEvents:'none',zIndex:3}}>◈ No dates yet — click a column in this row to place it, then drag its ends</span>}
                       {group.bar_start&&group.bar_end&&(
                         <div data-dep-key={depKey('project',group.id)} style={{position:'absolute',top:10,height:32,left:pct(group.bar_start),width:group.ongoing?Math.max(cols.length*COL_W-pct(group.bar_start),8):barPx(group.bar_start,group.bar_end),zIndex:3,minWidth:8}}>
                           <div className="pg-rs" onMouseDown={e=>startProjectBarDrag(e,group,'left')} style={{position:'absolute',left:0,top:0,bottom:0,width:10,cursor:'ew-resize',zIndex:5,borderRadius:'4px 0 0 4px'}}/>
@@ -4118,14 +4156,20 @@ function Roadmap({items,setItems,projects,setProjects,milestones,setMilestones,t
                           <div style={{position:'absolute',top:0,bottom:0,left:todayPx(),width:2,background:'#E74C3C',opacity:0.3,zIndex:1,pointerEvents:'none'}}/>
                           <CfShading/>
                           {x?(
-                            <div data-dep-key={depKey('epic',e.id)} title={`◆ ${e.name}\n${x.s} → ${x.e}${x.derived?'\nDates from its stories':''}`}
+                            <div data-dep-key={depKey('epic',e.id)} title={`◆ ${e.name}\n${x.s} → ${x.e}${x.derived?'\nDates from its stories: dragging moves them; stretching gives the epic its own dates':'\nDrag to move it with its stories; drag an end to change its dates'}`}
                               style={{position:'absolute',top:11,height:18,left:pct(x.s),width:barPx(x.s,x.e),minWidth:8,zIndex:3,boxSizing:'border-box' as const,borderRadius:9,
                                 background:x.derived?'rgba(224,123,42,0.12)':'rgba(224,123,42,0.7)',border:x.derived?'1.5px dashed #E07B2A':'none',
-                                display:'flex',alignItems:'center',padding:'0 10px',fontSize:10,fontWeight:700,color:x.derived?'#E07B2A':'#fff',overflow:'visible',whiteSpace:'nowrap' as const,opacity:ITEM_TERMINAL.includes(e.status)?0.5:1}}>
-                              <span style={{overflow:'hidden',textOverflow:'ellipsis'}}>◆ {e.name}</span>
-                              {setDeps&&<DepHandle k={depKey('epic',e.id)} size={8}/>}
+                                display:'flex',alignItems:'center',padding:'0 10px',fontSize:10,fontWeight:700,color:x.derived?'#E07B2A':'#fff',overflow:'visible',whiteSpace:'nowrap' as const,opacity:draggingBar===e.id?0.6:ITEM_TERMINAL.includes(e.status)?0.5:1}}>
+                              <div className="pg-rs" onMouseDown={ev=>startDrag(ev,'epic',e,'left',{s:x.s,e:x.e,derived:x.derived})} style={{position:'absolute',left:0,top:0,bottom:0,width:8,cursor:'ew-resize',zIndex:5,borderRadius:'9px 0 0 9px'}}/>
+                              <div onMouseDown={ev=>startDrag(ev,'epic',e,'move',{s:x.s,e:x.e,derived:x.derived})} style={{position:'absolute',left:8,right:8,top:0,bottom:0,cursor:draggingBar===e.id?'grabbing':'grab',zIndex:4}}/>
+                              <span style={{overflow:'hidden',textOverflow:'ellipsis',pointerEvents:'none'}}>◆ {e.name}</span>
+                              <div className="pg-rs" onMouseDown={ev=>startDrag(ev,'epic',e,'right',{s:x.s,e:x.e,derived:x.derived})} style={{position:'absolute',right:0,top:0,bottom:0,width:8,cursor:'ew-resize',zIndex:5,borderRadius:'0 9px 9px 0'}}/>
+                              {setDeps&&draggingBar!==e.id&&<DepHandle k={depKey('epic',e.id)} size={8}/>}
                             </div>
-                          ):<span style={{position:'absolute',left:Math.max(8,todayPx()+8),top:13,fontSize:10,color:'#3A4A5E',fontStyle:'italic'}}>◆ {e.name}: no dates yet (set them on the epic, or date its stories)</span>}
+                          ):<>
+                            {cols.map((col,ci)=><div key={col.key} className="pg-place" onClick={()=>placeAt('epic',e,col)} title={`Place "${e.name}" in ${col.label}`} style={{position:'absolute',top:0,bottom:0,left:ci*COL_W,width:COL_W,zIndex:2}}/>)}
+                            <span style={{position:'sticky',left:8,display:'inline-block',marginTop:13,fontSize:10,color:'#7A8FA6',fontStyle:'italic',pointerEvents:'none',zIndex:3}}>◆ {e.name}: no dates — click a column in this row to place it</span>
+                          </>}
                         </div>
                       )}
                       const item=r.item
@@ -4139,7 +4183,10 @@ function Roadmap({items,setItems,projects,setProjects,milestones,setMilestones,t
                               style={{position:'absolute',top:0,bottom:0,left:ci*COL_W,width:COL_W,borderRight:'1px solid rgba(36,52,71,0.4)',background:dragOverProject===group.name&&dragOverCol===col.key?'rgba(200,151,58,0.1)':'transparent'}}
                               onDragOver={e=>handleGanttDragOver(e,group.name,col)}
                               onDragLeave={handleGanttDragLeave}
-                              onDrop={e=>handleGanttDrop(e,group.name,col)}/>
+                              onDrop={e=>handleGanttDrop(e,group.name,col)}
+                              onClick={!item.start_date||!item.end_date?()=>placeAt('item',item,col):undefined}
+                              title={!item.start_date||!item.end_date?`Place "${item.name}" in ${col.label}`:undefined}
+                              className={!item.start_date||!item.end_date?'pg-place':undefined}/>
                           ))}
                           <GanttBar item={item} groupColor={ragColor(group.rag)} isViolation={isViolation}/>
                         </div>
@@ -4200,6 +4247,8 @@ function Roadmap({items,setItems,projects,setProjects,milestones,setMilestones,t
             <span style={{color:'#7A8FA6'}}>→</span>
             <span style={{color:'#C8973A',fontWeight:700}}>{fmtD(dragTooltip.end)}</span>
             <span style={{color:'#7A8FA6',fontSize:10,marginLeft:4}}>{Math.round((new Date(dragTooltip.end+'T12:00:00').getTime()-new Date(dragTooltip.start+'T12:00:00').getTime())/(1000*60*60*24))}d</span>
+            {dragTooltip.count>0&&<span style={{color:'#E07B2A',fontSize:10}}>+ {dragTooltip.count} moving with it</span>}
+            <span style={{color:'#3A4A5E',fontSize:10}}>Esc to cancel</span>
           </div>
         </div>
       )}
@@ -8843,7 +8892,7 @@ useEffect(()=>{
           onOpenProject={(p:any)=>{setSelectedProject(p);setActiveTab('projects')}} openAssistant={(t:string)=>{setAsstSeed(t);setAsstOpen(true)}}
           items={items.filter(inSpace)} epics={epics} setEpics={setEpics}/>}
         {activeTab==='projects'&&<Projects items={sItems} setItems={setSItems} projects={sProjects} setProjects={setSProjects} milestones={sMilestones} setMilestones={setSMilestones} tasks={tasks} setTasks={setTasks} space={space} ccrs={ccrs} ccrItems={ccrItems} roles={roles} people={people} projectRoles={projectRoles} setProjectRoles={setProjectRoles} itemAssignments={itemAssignments} setItemAssignments={setItemAssignments} sprints={sprints} selectedProject={selectedProject} setSelectedProject={setSelectedProject} epics={epics} setEpics={setEpics} releases={releases}/>}
-{activeTab==='roadmap'&&<Roadmap releases={releases} setReleases={setReleases} epics={epics} deps={projectDeps.filter((d:any)=>!d.strategy_id)} setDeps={setProjectDeps} items={sItems} setItems={setSItems} projects={sProjects} setProjects={setSProjects} milestones={sMilestones} setMilestones={setSMilestones} tasks={tasks} setTasks={setTasks} sprints={sprints} itemAssignments={itemAssignments} projectRoles={projectRoles} people={people} roles={roles} onOpenProject={(p:any)=>{setSelectedProject(p);setActiveTab('projects')}}/>}
+{activeTab==='roadmap'&&<Roadmap releases={releases} setReleases={setReleases} epics={epics} setEpics={setEpics} deps={projectDeps.filter((d:any)=>!d.strategy_id)} setDeps={setProjectDeps} items={sItems} setItems={setSItems} projects={sProjects} setProjects={setSProjects} milestones={sMilestones} setMilestones={setSMilestones} tasks={tasks} setTasks={setTasks} sprints={sprints} itemAssignments={itemAssignments} projectRoles={projectRoles} people={people} roles={roles} onOpenProject={(p:any)=>{setSelectedProject(p);setActiveTab('projects')}}/>}
         {activeTab==='teams'&&<Teams items={sItems} projects={sProjects} milestones={sMilestones} ccrs={ccrs} ccrItems={ccrItems}/>}
         {activeTab==='desk'&&<Desk items={items} setItems={setItems} projects={projects} setProjects={setProjects} milestones={milestones} setMilestones={setMilestones} tasks={tasks} setTasks={setTasks} ccrs={ccrs} setCcrs={setCcrs} ccrItems={ccrItems} setCcrItems={setCcrItems} space={space} openAssistant={(t:string)=>{setAsstSeed(t);setAsstOpen(true)}}/>}
         <Assistant open={asstOpen} setOpen={setAsstOpen} seed={asstSeed} setSeed={setAsstSeed} items={items} setItems={setItems} projects={projects} setProjects={setProjects} milestones={milestones} tasks={tasks} setTasks={setTasks} ccrs={ccrs} setCcrs={setCcrs} ccrItems={ccrItems} setCcrItems={setCcrItems} space={space}
