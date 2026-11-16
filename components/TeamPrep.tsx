@@ -13,7 +13,7 @@ import { workTypeOfProject, WT_LABEL } from './WorkTypes'
 
 const MONTHS=['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec']
 const INIT_DONE=['Complete','Cancelled','Done']
-const KIND:any={initiative:{c:'#C8973A',bg:'rgba(200,151,58,0.12)',l:'INITIATIVE'},epic:{c:'#E07B2A',bg:'rgba(224,123,42,0.10)',l:'EPIC'},story:{c:'#5DADE2',bg:'rgba(93,173,226,0.08)',l:'STORY'}}
+const KIND:any={initiative:{c:'#C8973A',bg:'rgba(200,151,58,0.12)',l:'INITIATIVE'},epic:{c:'#E07B2A',bg:'rgba(224,123,42,0.10)',l:'EPIC'},story:{c:'#5DADE2',bg:'rgba(93,173,226,0.08)',l:'STORY'},bug:{c:'#E74C3C',bg:'rgba(231,76,60,0.09)',l:'🐞 BUG'}}
 const nextQ=(fy:number,q:number,n:number)=>{q+=n;while(q>4){q-=4;fy++}while(q<1){q+=4;fy--}return{fy,q}}
 const pad=(n:number)=>String(n).padStart(2,'0')
 const fmtDay=(iso:string)=>{const[,m,d]=iso.split('-').map(Number);return `${MONTHS[m-1]} ${d}`}
@@ -207,7 +207,7 @@ export default function TeamPrep(props:any){
             <div key={i}>
               {head&&<div style={{fontSize:10.5,fontWeight:800,color:r.group==='No initiative'?'#8FA6BC':'#C8973A',margin:'8px 0 3px'}}>{r.group==='No initiative'?'○':'◈'} {r.group}</div>}
               <div style={{display:'grid',gridTemplateColumns:'54px 80px 1fr 70px 40px 120px',gap:8,alignItems:'center',fontSize:11.5,padding:'4px 0 4px 10px',borderBottom:'1px solid #1C2C3F'}}>
-                <span style={{fontSize:9,fontWeight:800,color:r.kind==='Epic'?'#E07B2A':'#5DADE2'}}>{r.kind.toUpperCase()}</span>
+                <span style={{fontSize:9,fontWeight:800,color:r.kind==='Epic'?'#E07B2A':r.kind==='Bug'?'#E74C3C':'#5DADE2'}}>{r.kind==='Bug'?'🐞 BUG':r.kind.toUpperCase()}</span>
                 <span style={{color:'#7A8FA6',fontFamily:'monospace',fontSize:10.5}}>{r.ref}</span>
                 <span style={{color:'#F4F6F8'}}>{r.name}{r.stories?<span style={{color:'#7A8FA6'}}> · {r.stories} open stor{r.stories===1?'y':'ies'}</span>:''}</span>
                 <span style={{color:'#7A8FA6'}}>{r.wt}</span>

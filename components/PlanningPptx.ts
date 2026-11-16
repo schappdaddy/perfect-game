@@ -12,6 +12,7 @@ const KIND:any={
   initiative:{label:'INITIATIVE',short:'INIT',bar:'C8973A',fill:NAVY,line:NAVY,badge:'C8973A',badgeInk:NAVY,name:'FFFFFF',meta:'C9D3DF',home:'E8B95A'},
   epic:{label:'EPIC',short:'EPIC',bar:'D35400',fill:'FDEBDD',line:'E59866',badge:'D35400',badgeInk:'FFFFFF',name:INK,meta:'A04000',home:MUTED},
   story:{label:'STORY',short:'STORY',bar:'2874A6',fill:'E6F2FB',line:'85C1E9',badge:'2874A6',badgeInk:'FFFFFF',name:INK,meta:'1B4F72',home:MUTED},
+  bug:{label:'BUG',short:'BUG',bar:'C0392B',fill:'FDEDEC',line:'F1948A',badge:'C0392B',badgeInk:'FFFFFF',name:INK,meta:'922B21',home:MUTED},
 }
 const MS='8E44AD',MS_FILL='F4ECF8'
 const hex=(c:string|null|undefined,d:string)=>(c||d).replace('#','').toUpperCase()
@@ -27,7 +28,7 @@ const trunc=(text:string,w:number,fs:number,bold=false)=>{
 // Width of a short all-caps label at a size (Calibri capitals run wider)
 const capsW=(t:string,fs:number)=>t.length*fs*0.66/72+0.08
 
-export type PlanCard={kind:'initiative'|'epic'|'story',name:string,ref?:string,team?:string|null,wt?:string,home?:string|null,release?:string|null,quarter?:string|null,priority?:string|null,status?:string|null,flag?:string|null}
+export type PlanCard={kind:'initiative'|'epic'|'story'|'bug',name:string,ref?:string,team?:string|null,wt?:string,home?:string|null,release?:string|null,quarter?:string|null,priority?:string|null,status?:string|null,flag?:string|null}
 export type PlanMilestone={date:string,name:string,type:string,color?:string|null,team?:string|null,done?:boolean}
 export type PlanColumn={title:string,sub?:string,meta?:string[],milestones:PlanMilestone[],cards:PlanCard[],blocked?:boolean,now?:boolean,slimmable?:boolean}
 
@@ -48,7 +49,7 @@ export function drawBoard(pptx:any,title:string,subtitle:string,cols:PlanColumn[
   slide.addText(subtitle,{x:0.75,y:0.75,w:12.2,h:0.28,fontSize:12,bold:true,color:'E07B2A',margin:0})
   // Legend: the same coloured labels the cards carry
   let lx=0.75
-  for(const k of ['initiative','epic','story']){
+  for(const k of ['initiative','epic','story','bug']){
     const K=KIND[k],bw=capsW(K.label,8)
     slide.addShape(pptx.ShapeType.rect,{x:lx,y:7.1,w:0.3,h:0.2,fill:{color:K.fill},line:{color:K.line,width:0.75}})
     slide.addShape(pptx.ShapeType.rect,{x:lx,y:7.1,w:0.05,h:0.2,fill:{color:K.bar},line:{color:K.bar,width:0}})
@@ -121,7 +122,7 @@ function drawColumn(pptx:any,slide:any,c:PlanColumn,x:number,w:number,top:number
     y+=bh+0.08
   }
   // Cards: initiatives, then epics, then stories; two across when the column is wide
-  const cards=[...c.cards.filter(cd=>cd.kind==='initiative'),...c.cards.filter(cd=>cd.kind==='epic'),...c.cards.filter(cd=>cd.kind==='story')]
+  const cards=[...c.cards.filter(cd=>cd.kind==='initiative'),...c.cards.filter(cd=>cd.kind==='epic'),...c.cards.filter(cd=>cd.kind==='story'||cd.kind==='bug')]
   const n=cards.length,avail=bottom-0.06-y
   if(!n){slide.addText(c.blocked?'No release this month.':'Nothing planned.',{x:x+pad,y,w:iw,h:0.24,fontSize:9,italic:true,color:'9AA3AF',margin:0});return}
   // Cards two or three across in a wide column, never narrower than about 2.3 in
