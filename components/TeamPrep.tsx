@@ -5,6 +5,7 @@ import { fyQuarterOf, monthKeyOf, quarterLabel, fmtMonthKey, releaseOf } from '.
 import { planModel } from './PlanDeck'
 import { FullPlanDialog } from './FullPlanExport'
 import { workTypeOfProject, WT_LABEL } from './WorkTypes'
+import { ReadinessPips } from './Readiness'
 
 // The Teams tab: a briefing page to prep for each team, top to bottom: the team at a glance,
 // its roadmap, the quarter plan, releases, sprints, milestones, people, and what's not planned
@@ -113,6 +114,7 @@ export default function TeamPrep(props:any){
                       <div style={{display:'flex',gap:5,alignItems:'center',fontSize:9,fontWeight:800,color:K.c,flexWrap:'wrap' as const}}>
                         <span>{K.l}</span>{cd.ref&&<span style={{color:'#7A8FA6',fontFamily:'monospace'}}>{cd.ref}</span>}
                         <span style={{marginLeft:'auto',color:'#7A8FA6',fontWeight:700}}>{[cd.priority,cd.status,cd.release?`📦 ${cd.release}`:null,cd.quarter].filter(Boolean).join(' · ')}</span>
+                        <ReadinessPips kind="item" x={{prd_status:cd.prd,design_status:cd.design}} size={11}/>
                       </div>
                       <div style={{fontSize:11.5,color:'#F4F6F8',fontWeight:cd.kind==='story'?400:700,lineHeight:1.3}}>{cd.name}</div>
                       {cd.flag&&<div style={{fontSize:9.5,fontWeight:700,color:'#E74C3C'}}>⚠ {cd.flag}</div>}

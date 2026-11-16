@@ -4,6 +4,7 @@ import { supabase } from '../lib/supabase'
 import { ReleaseSelect, QuarterSelect, releaseText, fmtMonthKey, releaseOptions } from './Releases'
 import { InlineSelect, InlineText, InlineDate } from './InlineEdit'
 import { WORK_TYPE_KEYS, WT_LABEL, WorkTag, isWorkType, workTypeOfProject } from './WorkTypes'
+import { ReadinessPips } from './Readiness'
 
 // Epics in the Backlog: an epic row that sits in the same table as stories (styled apart),
 // the epic side panel, and converting a story into an epic or an epic back into a story.
@@ -67,7 +68,8 @@ export function EpicRow({epic,projects,items,isSel,onSelect,ccCount=0,releases=[
       <td style={{...TD,textAlign:'center' as const,color:EPIC,cursor:onDragEpic?'grab':'pointer'}} title={onDragEpic?'Drag onto another epic to rank it there':undefined}>{onDragEpic&&<span style={{color:'#3A4A5E',marginRight:3}}>⠿</span>}◆</td>
       <td style={{...TD,fontSize:9,fontWeight:800,color:EPIC,letterSpacing:1}}>EPIC</td>
       <td style={{...TD,minWidth:240}}>
-        <div style={{fontSize:12.5,fontWeight:800,color:'#F4F6F8'}}><InlineText value={epic.name} width={230} onSave={v=>v&&upd({name:v})}>{epic.name}</InlineText></div>
+        <div style={{fontSize:12.5,fontWeight:800,color:'#F4F6F8',display:'flex',alignItems:'center',gap:5}}><InlineText value={epic.name} width={230} onSave={v=>v&&upd({name:v})}>{epic.name}</InlineText>
+          {setEpics&&<ReadinessPips kind="epic" x={epic} apply={(f:any)=>setEpics((p:any[])=>p.map(r=>r.id===epic.id?{...r,...f}:r))} size={12}/>}</div>
         <div style={{display:'flex',alignItems:'center',gap:6,marginTop:4}}>
           <div style={{width:90,height:4,borderRadius:2,background:'#243447',overflow:'hidden'}}><div style={{width:pct+'%',height:'100%',background:pct===100?'#27AE60':EPIC}}/></div>
           <span style={{fontSize:10,color:'#7A8FA6'}}>{done}/{its.length} stories done</span>
