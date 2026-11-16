@@ -3206,6 +3206,10 @@ function Roadmap({items,setItems,projects,setProjects,milestones,setMilestones,t
   // Undated initiatives, epics and stories as rows to click a date onto
   const [showUndated,setShowUndatedState]=useState<boolean>(()=>{try{return localStorage.getItem('pg_rm_undated')!=='0'}catch{return true}})
   const setShowUndated=(v:boolean)=>{setShowUndatedState(v);try{localStorage.setItem('pg_rm_undated',v?'1':'0')}catch{}}
+  // A 📦 release marker being dragged to another month: {kind, x, startX, baseX, cur}
+  const [relDrag,setRelDragS]=useState<any>(null)
+  const relDragRef=useRef<any>(null)
+  const setRelDrag=(v:any)=>{relDragRef.current=v;setRelDragS(v)}
   // Timeline (the Gantt) or the monthly release calendar
   const [rmView,setRmViewState]=useState<string>(()=>{try{return localStorage.getItem('pg_rm_view')||'timeline'}catch{return 'timeline'}})
   const setRmView=(v:string)=>{setRmViewState(v);try{localStorage.setItem('pg_rm_view',v)}catch{}}
@@ -3665,19 +3669,38 @@ function Roadmap({items,setItems,projects,setProjects,milestones,setMilestones,t
   // the 📦 chip by the name on the left.
   const relDateOf=(k:string)=>releaseOf(releases,k)?.release_date||(()=>{const[y,m]=k.split('-').map(Number);return `${k}-${String(new Date(y,m,0).getDate()).padStart(2,'0')}`})()
   const inRange=(d:string)=>{const t=new Date(d+'T12:00:00');return t>=totalStart&&t<=totalEnd}
-  function relMarker(k:string|null|undefined,workEnd:string|null|undefined,top:number,o:{label?:string,muted?:boolean,earlyTop?:number}={}){
+  function relMarker(k:string|null|undefined,workEnd:string|null|undefined,top:number,o:{label?:string,muted?:boolean,earlyTop?:number,kind?:'item'|'epic'|'project',x?:any}={}){
     if(!k)return null
     const d=relDateOf(k);if(!inRange(d))return null
-    const rx=pct(d),ex=workEnd&&inRange(workEnd)?pct(workEnd):null
+    const dragging=!!o.x&&relDrag?.x?.id===o.x.id&&relDrag?.kind===o.kind
+    const rx=dragging?relDrag.cur:pct(d),ex=workEnd&&inRange(workEnd)?pct(workEnd):null
     const early=!!workEnd&&d<workEnd,clr=early?'#E74C3C':'#5DADE2'
     const nm=MONTHS_SHORT[Number(k.split('-')[1])-1]
     return(<>
       {ex!=null&&rx>ex+2&&<div style={{position:'absolute',top,left:ex,width:rx-ex,borderTop:`1.5px dashed ${o.muted?'rgba(93,173,226,0.45)':'rgba(93,173,226,0.8)'}`,zIndex:3,pointerEvents:'none'}}/>}
-      <div title={`${o.label||'Ships in'} the ${fmtMonthKey(k)} release (${d})${early?' — before the work ends':''}`}
+      <div title={`${o.label||'Ships in'} the ${fmtMonthKey(k)} release (${d})${early?' — before the work ends':''}${o.x?'\nDrag to another month to change the release':''}`}
+        onMouseDown={o.x?(ev:any)=>{ev.preventDefault();ev.stopPropagation();setRelDrag({kind:o.kind,x:o.x,startX:ev.clientX,baseX:rx,cur:rx})}:undefined}
         style={{position:'absolute',top:(early&&o.earlyTop!=null?o.earlyTop:top)-8,left:rx,transform:'translateX(-50%)',zIndex:6,background:early?'rgba(231,76,60,0.18)':'#0D1B2A',border:`1px solid ${clr}`,borderRadius:8,
-          padding:'0 5px',fontSize:9,fontWeight:800,color:clr,whiteSpace:'nowrap' as const,lineHeight:'15px',pointerEvents:'auto'}}>📦 {o.label?`${o.label} `:''}{nm}</div>
+          padding:'0 5px',fontSize:9,fontWeight:800,color:clr,whiteSpace:'nowrap' as const,lineHeight:'15px',pointerEvents:'auto',cursor:o.x?(dragging?'grabbing':'ew-resize'):'default',boxShadow:dragging?'0 0 0 2px #5DADE2':undefined}}>
+          📦 {o.label?`${o.label} `:''}{dragging?MONTHS_SHORT[Number(relMonthAt(relDrag.cur).split('-')[1])-1]:nm}</div>
     </>)
   }
+  // The release month at a point on the timeline: that date's month, or the next month that
+  // has a release when it's a code freeze
+  const relMonthAt=(px:number)=>{
+    const d=new Date(totalStart.getTime()+px/TOTAL_W*totalMs)
+    let y=d.getFullYear(),m=d.getMonth()+1
+    for(let n=0;n<18;n++){const k=`${y}-${String(m).padStart(2,'0')}`;if(!releaseOf(releases,k)?.no_release)return k;m++;if(m>12){m=1;y++}}
+    return `${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,'0')}`
+  }
+  useEffect(()=>{
+    if(!relDrag)return
+    const move=(e:MouseEvent)=>{const r=relDragRef.current;if(r)setRelDrag({...r,cur:Math.max(0,Math.min(TOTAL_W,r.baseX+e.clientX-r.startX))})}
+    const up=()=>{const r=relDragRef.current;setRelDrag(null);if(r&&Math.abs(r.cur-r.baseX)>3){const k=relMonthAt(r.cur);if(k!==r.x.release_month)setReleaseOf(r.kind,r.x,k)}}
+    const key=(e:KeyboardEvent)=>{if(e.key==='Escape')setRelDrag(null)}
+    window.addEventListener('mousemove',move);window.addEventListener('mouseup',up);window.addEventListener('keydown',key)
+    return()=>{window.removeEventListener('mousemove',move);window.removeEventListener('mouseup',up);window.removeEventListener('keydown',key)}
+  },[relDrag?.x?.id,relDrag?.kind])
   async function setReleaseOf(kind:'item'|'epic'|'project',x:any,month:string|null){
     if(month&&releaseOf(releases,month)?.no_release){alert(`${fmtMonthKey(month)} has no release. Pick another month.`);return}
     if((x.release_month||null)===month)return
@@ -3887,7 +3910,7 @@ function Roadmap({items,setItems,projects,setProjects,milestones,setMilestones,t
       </div>
 
       {rmView==='calendar'&&<>
-        <ReleaseCalendar releases={releases} setReleases={setReleases} projects={projects} epics={epics} items={items} team={ft}
+        <ReleaseCalendar releases={releases} setReleases={setReleases} projects={projects} epics={epics} items={items} team={ft} onSetRelease={(k:any,x:any,m:any)=>setReleaseOf(k,x,m)}
           onOpenProject={onOpenProject} onSetDates={setReleases?()=>setRelMgr(true):undefined}/>
         {relMgr&&setReleases&&<ReleasesManager releases={releases} setReleases={setReleases} onClose={()=>setRelMgr(false)}
           counts={(k:string)=>[...items,...projects,...(epics as any[])].filter((x:any)=>x.release_month===k).length}/>}
@@ -4195,7 +4218,7 @@ function Roadmap({items,setItems,projects,setProjects,milestones,setMilestones,t
                         const thr=shipsThrough(group),endD=group.ongoing?null:group.bar_end
                         return<>
                           {thr&&thr!==group.release_month&&relMarker(thr,endD,PARENT_H-9,{label:'ships through',muted:true})}
-                          {relMarker(group.release_month,endD,PARENT_H-9,{label:'go-live'})}
+                          {relMarker(group.release_month,endD,PARENT_H-9,{label:'go-live',kind:'project',x:group})}
                         </>
                       })()}
                       {milestones.filter(m=>m.project_id===group.id&&m.date).map(m=>{
@@ -4230,7 +4253,7 @@ function Roadmap({items,setItems,projects,setProjects,milestones,setMilestones,t
                               {setDeps&&draggingBar!==e.id&&<DepHandle k={depKey('epic',e.id)} size={8}/>}
                             </div>
                           ):null}
-                          {relMarker(e.release_month,x?.e,ROW_H/2,{earlyTop:ROW_H-8})}
+                          {relMarker(e.release_month,x?.e,ROW_H/2,{earlyTop:ROW_H-8,kind:'epic',x:e})}
                           {!x&&<>
                             {cols.map((col,ci)=><div key={col.key} className="pg-place" onClick={()=>placeAt('epic',e,col)} title={`Place "${e.name}" in ${col.label}`} style={{position:'absolute',top:0,bottom:0,left:ci*COL_W,width:COL_W,zIndex:2}}/>)}
                             <span style={{position:'sticky',left:8,display:'inline-block',marginTop:13,fontSize:10,color:'#7A8FA6',fontStyle:'italic',pointerEvents:'none',zIndex:3}}>◆ {e.name}: no dates — click a column in this row to place it</span>
@@ -4254,7 +4277,7 @@ function Roadmap({items,setItems,projects,setProjects,milestones,setMilestones,t
                               className={!item.start_date||!item.end_date?'pg-place':undefined}/>
                           ))}
                           <GanttBar item={item} groupColor={ragColor(group.rag)} isViolation={isViolation}/>
-                          {relMarker(item.release_month,item.end_date,ROW_H/2,{earlyTop:ROW_H-5})}
+                          {relMarker(item.release_month,item.end_date,ROW_H/2,{earlyTop:ROW_H-5,kind:'item',x:item})}
                         </div>
                       )
                     })}
@@ -4287,7 +4310,7 @@ function Roadmap({items,setItems,projects,setProjects,milestones,setMilestones,t
                           onDrop={e=>handleGanttDrop(e,'',col)}/>
                       ))}
                       <GanttBar item={item} groupColor='#7A8FA6' isViolation={false}/>
-                      {relMarker(item.release_month,item.end_date,ROW_H/2,{earlyTop:ROW_H-5})}
+                      {relMarker(item.release_month,item.end_date,ROW_H/2,{earlyTop:ROW_H-5,kind:'item',x:item})}
                     </div>
                   ))}
                 </div>
