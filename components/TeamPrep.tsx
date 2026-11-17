@@ -4,7 +4,7 @@ import { useMilestoneTypes } from './MilestoneTypes'
 import { fyQuarterOf, monthKeyOf, quarterLabel, fmtMonthKey, releaseOf } from './Releases'
 import { planModel } from './PlanDeck'
 import { FullPlanDialog } from './FullPlanExport'
-import { workTypeOfProject, WT_LABEL } from './WorkTypes'
+import { workTypeOfProject, WT_LABEL, CLOSED_STATUSES } from './WorkTypes'
 import { ReadinessPips } from './Readiness'
 
 // The Teams tab: a briefing page to prep for each team, top to bottom: the team at a glance,
@@ -13,7 +13,7 @@ import { ReadinessPips } from './Readiness'
 // plan' exports the full plan for just this team.
 
 const MONTHS=['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec']
-const INIT_DONE=['Complete','Cancelled','Done']
+const INIT_DONE=CLOSED_STATUSES
 const KIND:any={initiative:{c:'#C8973A',bg:'rgba(200,151,58,0.12)',l:'INITIATIVE'},epic:{c:'#E07B2A',bg:'rgba(224,123,42,0.10)',l:'EPIC'},story:{c:'#5DADE2',bg:'rgba(93,173,226,0.08)',l:'STORY'},bug:{c:'#E74C3C',bg:'rgba(231,76,60,0.09)',l:'🐞 BUG'}}
 const nextQ=(fy:number,q:number,n:number)=>{q+=n;while(q>4){q-=4;fy++}while(q<1){q+=4;fy--}return{fy,q}}
 const pad=(n:number)=>String(n).padStart(2,'0')

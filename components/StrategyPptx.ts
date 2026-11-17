@@ -5,8 +5,9 @@
 // team cost vs assigned, budget by initiative, and capacity by person. Each strategy is drawn
 // from its own sandbox (strategy_items), like the Strategy tab.
 import { strategyBudget, reportData } from './StrategyData'
+import { CLOSED_STATUSES } from './WorkTypes'
 
-const PROJECT_TERMINAL=['Complete','Cancelled','Done']
+const PROJECT_TERMINAL=CLOSED_STATUSES
 const BAD='E74C3C',GROUP='C8973A',NAVY='1F2A3C',STEEL='87A5BF',ORANGE='E07B2A',PROPOSED_FILL='F2C6A0',CREAM='FDFBF0',FREEZE='E4E4E4',GOAL_FILL='F8E9DF',INK='1F2A3C',MUTED='6B7280'
 const TEAM_FILL:any={'Consumer Experience':NAVY,'Operational Efficiency':STEEL}
 const MONTHS=['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec']

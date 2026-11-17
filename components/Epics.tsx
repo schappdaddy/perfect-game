@@ -1,10 +1,11 @@
 'use client'
+import { CLOSED_STATUSES } from './WorkTypes'
 import { useState } from 'react'
 import { supabase } from '../lib/supabase'
 
 // Epics group a project's granular items (stories, bugs) into mid-level chunks of work.
 // Progress rolls up from the items: an epic is as done as its items are.
-const ITEM_TERMINAL=['Done','Will Not Implement',"Won't Do"]
+const ITEM_TERMINAL=CLOSED_STATUSES
 
 export function EpicsSection({project,items,setItems,epics,setEpics}:any){
   const projectEpics=(epics as any[]).filter(e=>e.project_id===project.id).sort((a,b)=>(a.sort_order??0)-(b.sort_order??0))

@@ -2,7 +2,7 @@
 import { useState } from 'react'
 import { supabase } from '../lib/supabase'
 import { MilestoneTypeSelect, useMilestoneTypes, typeColor } from './MilestoneTypes'
-import { WT_LABEL, WorkTag, workTypeOfProject, isBug, BugTag } from './WorkTypes'
+import { WT_LABEL, WorkTag, workTypeOfProject, isBug, BugTag, CLOSED_STATUSES } from './WorkTypes'
 import { ReadinessPips, ReadinessAudit } from './Readiness'
 
 // Monthly releases and quarterly planning of all work (New, Sustain and SaaS deliverable).
@@ -13,7 +13,7 @@ import { ReadinessPips, ReadinessAudit } from './Readiness'
 // Tech Debt initiative ("FY27 Q4 Tech Debt (CX)") so it's costed as OpEx.
 
 const MONTHS=['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec']
-const TERMINAL=['Done','Will Not Implement',"Won't Do"]
+const TERMINAL=CLOSED_STATUSES
 const EFFORT_POINTS:any={XS:0.5,S:1,M:2,L:3,XL:5}
 const TEAM_SHORT:any={'Consumer Experience':'CX','Operational Efficiency':'OE','Retail Program':'RP'}
 const PRI_ORDER:any={P1:1,P2:2,P3:3,P4:4}
@@ -199,10 +199,11 @@ export function QuarterPlanner({items,setItems,projects,setProjects,epics=[],set
   const pool:Entry[]=[...(epics as any[]).filter(e=>open(e)&&!qkOf('epic',e)&&(poolTeam||ALL?teamOk('epic',e):true)&&wtOk('epic',e)&&(!noInitOnly||!homeOf('epic',e))).map(e=>ent('epic',e)),
     ...(items as any[]).filter(i=>open(i)&&!qkOf('item',i)&&!withItsEpic(i)&&(poolTeam||ALL?teamOk('item',i):true)&&wtOk('item',i)&&(!noInitOnly||!homeOf('item',i))).map(i=>ent('item',i))].sort(rank)
   // Everything with a quarter
-  const planned:Entry[]=[...(epics as any[]).filter(e=>(e.space||'work')==='work'&&qkOf('epic',e)&&shown('epic',e)).map(e=>ent('epic',e)),
-    ...(items as any[]).filter(i=>(i.space||'work')==='work'&&qkOf('item',i)&&!withItsEpic(i)&&shown('item',i)).map(i=>ent('item',i))].sort(rank)
+  // Closed work drops off the board (it's on the Done tab)
+  const planned:Entry[]=[...(epics as any[]).filter(e=>open(e)&&qkOf('epic',e)&&shown('epic',e)).map(e=>ent('epic',e)),
+    ...(items as any[]).filter(i=>open(i)&&qkOf('item',i)&&!withItsEpic(i)&&shown('item',i)).map(i=>ent('item',i))].sort(rank)
   // Initiatives go live in a release
-  const INIT_DONE=['Complete','Cancelled','Done']
+  const INIT_DONE=CLOSED_STATUSES
   const inits=(projects as any[]).filter(p=>!p.sustain_quarter&&(p.space||'work')==='work'&&!INIT_DONE.includes(p.status)&&(ALL||!poolTeam||!p.team||p.team===team)&&wtOk('project',p))
     .sort((a,b)=>(a.start_date||'9999').localeCompare(b.start_date||'9999')||a.name.localeCompare(b.name))
   const initEntries:Entry[]=inits.map(p=>ent('project',p))
@@ -453,7 +454,7 @@ export function QuarterPlanner({items,setItems,projects,setProjects,epics=[],set
       {o.showQuarter&&qi&&<div style={{fontSize:10,color:'#C8D4E0'}}>🗓 Worked in <b>{qi.label}</b>{later?<span style={{color:'#5DADE2'}}> · ships after</span>:''}</div>}
       {isEpic&&(()=>{
         // The stories that travel with this epic (same quarter), listed inside it
-        const inside=sts.filter(st=>withItsEpic(st)),shownSt=inside.slice(0,6)
+        const inside=sts.filter(st=>withItsEpic(st)&&open(st)),shownSt=inside.slice(0,6)
         return <div style={{display:'flex',flexDirection:'column',gap:1}}>
           <div style={{fontSize:10,color:'#7A8FA6'}}>{sts.length} stor{sts.length===1?'y':'ies'}{sts.length?` · ${done} done`:''}</div>
           {shownSt.map(st=>(
@@ -727,10 +728,11 @@ export function ReleaseCalendar({releases,projects,epics=[],items,team='All',onO
   function monthPlan(k:string){
     const groups=new Map<string,{p:any,goLive:boolean,epics:any[],stories:any[]}>()
     const g=(p:any)=>{const key=p?.id||'__none';if(!groups.has(key))groups.set(key,{p,goLive:false,epics:[],stories:[]});return groups.get(key)!}
-    for(const p of projects as any[])if(p.release_month===k&&work(p)&&inTeam(p))g(p).goLive=true
-    for(const e of epics as any[])if(e.release_month===k&&work(e)&&inTeam({team:e.team||projById(e.project_id)?.team}))g(projById(e.project_id)).epics.push(e)
+    // Closed work and finished initiatives are left out (they're on the Done tab)
+    for(const p of projects as any[])if(p.release_month===k&&work(p)&&!TERMINAL.includes(p.status)&&inTeam(p))g(p).goLive=true
+    for(const e of epics as any[])if(e.release_month===k&&work(e)&&!TERMINAL.includes(e.status)&&inTeam({team:e.team||projById(e.project_id)?.team}))g(projById(e.project_id)).epics.push(e)
     for(const i of items as any[]){
-      if(i.release_month!==k||!work(i)||!inTeam(i))continue
+      if(i.release_month!==k||!work(i)||TERMINAL.includes(i.status)||!inTeam(i))continue
       const ep=i.epic_id&&epicById(i.epic_id)
       if(ep&&ep.release_month===k)continue // goes out with its epic
       g(projByName(i.parent_project)).stories.push(i)

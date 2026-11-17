@@ -2,10 +2,10 @@
 // screen), for the PowerPoint export. Mirrors the Strategy tab: each strategy's own placement
 // of projects (strategy_items) and its own roster once edited there, the same allocation
 // (StrategyBudget.computeAllocation) and the same report tables as StrategyReport.
-import { workTypeOfProject } from './WorkTypes'
+import { workTypeOfProject, CLOSED_STATUSES } from './WorkTypes'
 import { computeAllocation, slotted, roleName, rateFor, capexShare, SLOTS, SHARED_TEAM } from './StrategyBudget'
 
-const PROJECT_TERMINAL=['Complete','Cancelled','Done']
+const PROJECT_TERMINAL=CLOSED_STATUSES
 const pad=(n:number)=>String(n).padStart(2,'0')
 const daysIn=(y:number,m:number)=>new Date(y,m,0).getDate()
 const monthStartISO=(abs:number)=>{const y=Math.floor(abs/12),m=abs-y*12+1;return `${y}-${pad(m)}-01`}

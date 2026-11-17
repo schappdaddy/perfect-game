@@ -8,11 +8,11 @@ import { quarterMonths, quarterKey, quarterLabel, fyQuarterOf, fmtMonthKey, rele
 import { drawBoard, type PlanColumn, type PlanCard } from './PlanningPptx'
 import { addStrategySlides } from './StrategyPptx'
 import { typeColor, typeName } from './MilestoneTypes'
-import { workTypeOfProject } from './WorkTypes'
+import { workTypeOfProject, CLOSED_STATUSES } from './WorkTypes'
 
 const MONTHS=['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec']
-const TERMINAL=['Done','Will Not Implement',"Won't Do"]
-const INIT_DONE=['Complete','Cancelled','Done']
+const TERMINAL=CLOSED_STATUSES
+const INIT_DONE=CLOSED_STATUSES
 const EFFORT_POINTS:any={XS:0.5,S:1,M:2,L:3,XL:5}
 const PRI:any={P1:1,P2:2,P3:3,P4:4}
 const TEAM_SHORT:any={'Consumer Experience':'CX','Operational Efficiency':'OE','Retail Program':'RP'}
@@ -54,8 +54,9 @@ export function planModel(inp:PlanInput){
   type Entry={kind:'item'|'epic'|'project',x:any,qk:string|null}
   const ent=(kind:any,x:any):Entry=>({kind,x,qk:qkOf(kind,x)})
   const rank=(a:Entry,b:Entry)=>(a.x.manual_rank??1e9)-(b.x.manual_rank??1e9)||(PRI[a.x.priority]||9)-(PRI[b.x.priority]||9)||(a.x.created_at||'').localeCompare(b.x.created_at||'')
-  const planned:Entry[]=[...epics.filter((e:any)=>work(e)&&qkOf('epic',e)&&shown('epic',e)).map((e:any)=>ent('epic',e)),
-    ...items.filter((i:any)=>work(i)&&qkOf('item',i)&&!withItsEpic(i)&&shown('item',i)).map((i:any)=>ent('item',i))].sort(rank)
+  // Closed work isn't in the plan (it's on the Done tab)
+  const planned:Entry[]=[...epics.filter((e:any)=>open(e)&&qkOf('epic',e)&&shown('epic',e)).map((e:any)=>ent('epic',e)),
+    ...items.filter((i:any)=>open(i)&&qkOf('item',i)&&!withItsEpic(i)&&shown('item',i)).map((i:any)=>ent('item',i))].sort(rank)
   const inits:Entry[]=projects.filter((p:any)=>!p.sustain_quarter&&work(p)&&!INIT_DONE.includes(p.status)&&(ALL||!p.team||p.team===team)&&wtOk('project',p)).map((p:any)=>ent('project',p))
   const storiesOf=(e:any)=>items.filter((i:any)=>i.epic_id===e.id)
   const ptsOf=(en:Entry):number=>en.kind==='item'?(EFFORT_POINTS[en.x.effort]||0)
@@ -148,10 +149,10 @@ export function planModel(inp:PlanInput){
   const calendarMonth=(k:string)=>{
     const groups=new Map<string,{p:any,goLive:boolean,epics:any[],stories:any[]}>()
     const g=(p:any)=>{const key=p?.id||'__none';if(!groups.has(key))groups.set(key,{p:p||null,goLive:false,epics:[],stories:[]});return groups.get(key)!}
-    for(const p of projects)if(p.release_month===k&&work(p)&&(ALL||!p.team||p.team===team)&&wtOk('project',p))g(p).goLive=true
-    for(const e of epics)if(e.release_month===k&&work(e)&&shown('epic',e))g(projects.find((p:any)=>p.id===e.project_id)).epics.push(e)
+    for(const p of projects)if(p.release_month===k&&work(p)&&!INIT_DONE.includes(p.status)&&(ALL||!p.team||p.team===team)&&wtOk('project',p))g(p).goLive=true
+    for(const e of epics)if(e.release_month===k&&open(e)&&shown('epic',e))g(projects.find((p:any)=>p.id===e.project_id)).epics.push(e)
     for(const i of items){
-      if(i.release_month!==k||!work(i)||!shown('item',i))continue
+      if(i.release_month!==k||!open(i)||!shown('item',i))continue
       const ep=i.epic_id&&epicById(i.epic_id);if(ep&&ep.release_month===k)continue
       g(projects.find((p:any)=>p.name===i.parent_project)).stories.push(i)
     }

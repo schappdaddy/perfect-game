@@ -1,4 +1,5 @@
 'use client'
+import { CLOSED_STATUSES } from './WorkTypes'
 import { useState } from 'react'
 import { supabase } from '../lib/supabase'
 import { ReleaseSelect, QuarterSelect, releaseText, fmtMonthKey, releaseOptions } from './Releases'
@@ -9,7 +10,7 @@ import { ReadinessPips } from './Readiness'
 // Epics in the Backlog: an epic row that sits in the same table as stories (styled apart),
 // the epic side panel, and converting a story into an epic or an epic back into a story.
 
-const ITEM_TERMINAL=['Done','Will Not Implement',"Won't Do"]
+const ITEM_TERMINAL=CLOSED_STATUSES
 const EPIC='#E07B2A'
 const PRIORITY_BG:any={P1:'#C00000',P2:'#D4820A',P3:'#2E86AB'}
 const STATUS_CLR:any={'New':'#5DADE2','In Progress':'#27AE60','Blocked':'#E74C3C','Done':'#16A085','Testing':'#C8973A','Ready':'#8E44AD','To Do':'#5DADE2','Waiting':'#E8B95A'}
