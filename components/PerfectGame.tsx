@@ -13,6 +13,7 @@ import { EpicRow, EpicPanel, epicProject, epicWorkType, convertStoryToEpic, conv
 import { FullPlanButton } from './FullPlanExport'
 import TeamPrep from './TeamPrep'
 import { ReadinessPips } from './Readiness'
+import { TaskPanel, NotesEditor, NotesToolbar, WeekNotes, NoteMentions } from './DeskNotebook'
 
 const T = {
   navy:'#0D1B2A',navyMid:'#162436',navyLt:'#1E3048',
@@ -3039,6 +3040,7 @@ const sorted=items.filter(i=>!isItemDone(i)).sort((a,b)=>{
               <EditableDropdown field="status" value={selected.status} options={statusOpts} setOptions={setStatusOpts} label="Status"/>
               <EditableDropdown field="effort" value={selected.effort} options={EFFORTS} setOptions={null} label="Effort"/>
               <EditableDropdown field="request_type" value={selected.request_type} options={rtOpts} setOptions={setRtOpts} label="Request Type"/>
+              <NoteMentions kind="i" id={selected.id}/>
               {isBug(selected)&&<div>
                 <div style={{fontSize:11,color:'#E74C3C',marginBottom:4,letterSpacing:0.5,fontWeight:700}}>🐞 SEVERITY</div>
                 <select value={selected.severity||''} onChange={e=>upd(selected.id,'severity',e.target.value||null)}
@@ -5092,7 +5094,7 @@ function crumbAge(dateStr:string){
   return Math.floor((Date.now()-+d)/86400000)
 }
 
-function Desk({items,setItems,projects,setProjects,milestones,setMilestones,tasks,setTasks,ccrs,setCcrs,ccrItems,setCcrItems,space,openAssistant}:{items:any[],setItems:any,projects:any[],setProjects:any,milestones:any[],setMilestones:any,tasks:any[],setTasks:any,ccrs:any[],setCcrs:any,ccrItems:any[],setCcrItems:any,space:string,openAssistant?:any}) {
+function Desk({items,setItems,projects,setProjects,milestones,setMilestones,tasks,setTasks,ccrs,setCcrs,ccrItems,setCcrItems,space,openAssistant,epics=[]}:{epics?:any[],items:any[],setItems:any,projects:any[],setProjects:any,milestones:any[],setMilestones:any,tasks:any[],setTasks:any,ccrs:any[],setCcrs:any,ccrItems:any[],setCcrItems:any,space:string,openAssistant?:any}) {
   const [asstText,setAsstText]=useState('')
   const [deskSpace,setDeskSpace]=useState(space) // work | home | both — Desk is the one place worlds can meet
   useEffect(()=>{setDeskSpace(space)},[space])
@@ -5283,6 +5285,7 @@ function Desk({items,setItems,projects,setProjects,milestones,setMilestones,task
   const [bothNoteSpace,setBothNoteSpace]=useState('work')
   const noteSpace=deskSpace==='both'?bothNoteSpace:deskSpace
   const [raw,setRaw]=useState(false)
+  const [noteView,setNoteView]=useState<'day'|'week'>('day')
   const [savedAt,setSavedAt]=useState<any>(null)
   const saveTimer=useRef<any>(null)
   const inputRefs=useRef<any>({})
@@ -5600,145 +5603,21 @@ function Desk({items,setItems,projects,setProjects,milestones,setMilestones,task
               style={{background:'#C8973A',border:'none',borderRadius:8,color:'#0D1B2A',fontSize:12,fontWeight:800,padding:'0 14px',cursor:'pointer',opacity:asstText.trim()?1:0.5}}>➤</button>
           </div>
         )}
-        {/* Project tasks — dated reminders attached to projects */}
-        <div style={{background:'#12202F',border:'1px solid #243447',borderRadius:10,padding:'10px 14px',marginBottom:12,maxHeight:'38%',display:'flex',flexDirection:'column' as const}}>
-          <button onClick={()=>setTasksOpen(o=>!o)} style={{background:'none',border:'none',padding:0,cursor:'pointer',display:'flex',alignItems:'center',gap:6,fontSize:11,fontWeight:700,letterSpacing:1,color:'#C8973A',marginBottom:tasksOpen?8:0}}>
-            <span style={{fontSize:9}}>{tasksOpen?'▾':'▸'}</span>☑ TASKS ({openTasks.length}{doneTasks.length?` · ${doneTasks.length} done`:''})
-          </button>
-          {tasksOpen&&(
-            <>
-            <div style={{overflowY:'auto',flex:1,minHeight:0}}>
-              {openTasks.length===0&&<div style={{fontSize:11,color:'#7A8FA6',fontStyle:'italic',marginBottom:6}}>No open tasks — add a reminder below</div>}
-              {openTasks.map(t=>{
-                const pr=projects.find(p=>p.id===t.project_id)
-                const overdue=t.due_date&&+new Date(t.due_date+'T12:00:00')<+now
-                const soon=t.due_date&&!overdue&&+new Date(t.due_date+'T12:00:00')<=+now+3*86400000
-                return(
-                  <div key={t.id} style={{display:'flex',alignItems:'center',gap:8,padding:'3px 0'}}>
-                    <input type="checkbox" checked={false} onChange={()=>toggleProjectTask(setTasks,t)} style={{cursor:'pointer',flexShrink:0}}/>
-                    <span style={{fontSize:13,color:'#F4F6F8',flex:1,minWidth:0,overflow:'hidden',whiteSpace:'nowrap' as const,textOverflow:'ellipsis'}}>{homeTag(t)?'🏠 ':''}{t.title}</span>
-                    {pr
-                      ?<span style={{fontSize:10,color:'#7A8FA6',background:'#1E3048',borderLeft:`3px solid ${pr.color||'#3A4A5E'}`,borderRadius:3,padding:'1px 7px',flexShrink:0,maxWidth:180,overflow:'hidden',whiteSpace:'nowrap' as const,textOverflow:'ellipsis'}}>{pr.name}</span>
-                      :<span style={{fontSize:10,color:'#5C6E80',background:'#0F1C2B',border:'1px solid #243447',borderRadius:3,padding:'1px 7px',flexShrink:0}}>General</span>}
-                    {editTaskId===t.id
-                      ?<input type="date" defaultValue={t.due_date||''} autoFocus onBlur={e=>saveTaskDate(t,e.target.value)} onKeyDown={e=>{if(e.key==='Enter')saveTaskDate(t,(e.target as HTMLInputElement).value);if(e.key==='Escape')setEditTaskId(null)}}
-                          style={{background:'#0D1B2A',border:'1px solid #C8973A',borderRadius:4,color:'#F4F6F8',fontSize:11,padding:'2px 5px',flexShrink:0}}/>
-                      :<span onClick={()=>setEditTaskId(t.id)} title="Click to edit date"
-                          style={{fontSize:11,fontWeight:700,color:overdue?'#E74C3C':soon?'#E8B95A':t.due_date?'#7A8FA6':'#3A4A5E',flexShrink:0,cursor:'pointer',borderBottom:t.due_date?'1px dashed #3A4A5E':'1px dashed #3A4A5E'}}>
-                          {overdue?'⚠ ':''}{t.due_date?fmtDt(t.due_date):'+ date'}
-                        </span>}
-                    <button onClick={()=>deleteProjectTask(setTasks,t)} title="Delete task" style={{background:'none',border:'none',color:'#3A4A5E',fontSize:12,cursor:'pointer',padding:0,flexShrink:0}}>✕</button>
-                  </div>
-                )
-              })}
-              {showDoneTasks&&doneTasks.map(t=>{
-                const pr=projects.find(p=>p.id===t.project_id)
-                return(
-                  <div key={t.id} style={{display:'flex',alignItems:'center',gap:8,padding:'3px 0',opacity:0.55}}>
-                    <input type="checkbox" checked onChange={()=>toggleProjectTask(setTasks,t)} style={{cursor:'pointer',flexShrink:0}}/>
-                    <span style={{fontSize:13,color:'#7A8FA6',flex:1,textDecoration:'line-through',overflow:'hidden',whiteSpace:'nowrap' as const,textOverflow:'ellipsis'}}>{t.title}</span>
-                    {pr&&<span style={{fontSize:10,color:'#7A8FA6',flexShrink:0}}>{pr.name}</span>}
-                    <button onClick={()=>deleteProjectTask(setTasks,t)} style={{background:'none',border:'none',color:'#3A4A5E',fontSize:12,cursor:'pointer',padding:0,flexShrink:0}}>✕</button>
-                  </div>
-                )
-              })}
-              {doneTasks.length>0&&<button onClick={()=>setShowDoneTasks(o=>!o)} style={{background:'none',border:'none',color:'#7A8FA6',fontSize:10,cursor:'pointer',padding:'2px 0'}}>{showDoneTasks?'Hide':'Show'} {doneTasks.length} completed</button>}
-            </div>
-            <div style={{display:'flex',gap:6,marginTop:8,flexShrink:0}}>
-              <select value={ntProj} onChange={e=>setNtProj(e.target.value)} style={{background:'#0D1B2A',border:'1px solid #243447',borderRadius:6,color:'#F4F6F8',fontSize:11,padding:'5px 8px',maxWidth:180}}>
-                <option value="">General</option>
-                {activeProjects.map(p=><option key={p.id} value={p.id}>{deskSpace==='both'?(spaceOf(p)==='home'?'🏠 ':'🏢 '):''}{p.name}</option>)}
-              </select>
-              {deskSpace==='both'&&!ntProj&&(
-                <select value={ntSpace} onChange={e=>setNtSpace(e.target.value)} title="Space for this general task"
-                  style={{background:'#0D1B2A',border:'1px solid #243447',borderRadius:6,color:'#F4F6F8',fontSize:11,padding:'5px 6px'}}>
-                  <option value="work">🏢</option><option value="home">🏠</option>
-                </select>
-              )}
-              <input placeholder="New reminder... (e.g., CCR required for deployment)" value={ntTitle} onChange={e=>setNtTitle(e.target.value)} onKeyDown={e=>{if(e.key==='Enter')submitTask()}}
-                style={{flex:1,background:'#0D1B2A',border:'1px solid #243447',borderRadius:6,color:'#F4F6F8',fontSize:12,padding:'5px 8px'}}/>
-              <input type="date" value={ntDate} onChange={e=>setNtDate(e.target.value)} style={{background:'#0D1B2A',border:'1px solid #243447',borderRadius:6,color:'#F4F6F8',fontSize:11,padding:'5px 8px'}}/>
-              <button onClick={submitTask} disabled={!ntTitle.trim()} style={{background:'#C8973A',border:'none',borderRadius:6,color:'#0D1B2A',fontSize:11,fontWeight:700,padding:'5px 14px',cursor:'pointer',opacity:!ntTitle.trim()?0.5:1}}>+ Task</button>
-            </div>
-            </>
-          )}
-        </div>
+        {/* Tasks: grouped by when they're due; to-dos typed in the notes land here too */}
+        <TaskPanel tasks={tasks} setTasks={setTasks} projects={projects} items={items} activeProjects={activeProjects} deskSpace={deskSpace} inDeskSpace={inDeskSpace}/>
+        <NotesToolbar content={content} persist={persist} date={date} setDate={setDate} noteSpace={noteSpace} view={noteView} setView={setNoteView} tasks={tasks} setTasks={setTasks}/>
         {raw?(
           <textarea value={content} onChange={e=>persist(e.target.value)} autoFocus
             style={{flex:1,background:'#0F1C2B',border:'1px solid #243447',borderRadius:10,color:'#F4F6F8',fontSize:14,lineHeight:1.7,padding:16,resize:'none' as const,fontFamily:'inherit',outline:'none'}}/>
+        ):noteView==='week'?(
+          <WeekNotes date={date} setDate={setDate} setView={setNoteView} noteSpace={noteSpace} tasks={tasks} setTasks={setTasks} projects={projects} epics={epics} items={items} setItems={setItems}/>
         ):(
-          <div style={{flex:1,overflowY:'auto',background:'#0F1C2B',border:'1px solid #243447',borderRadius:10,padding:'14px 16px'}}
-               onClick={e=>{if(e.target===e.currentTarget){const el=inputRefs.current[lines.length-1];el?.focus()}}}>
-            {lines.map((l,idx)=>{
-              const t=l.trimStart()
-              const task=isTask(l)
-              const done=t.startsWith('[x]')
-              const header=!task&&isDeskHeader(l)
-              const carried=header&&isCarriedHeader(l)
-              if(header){
-                const sub=isSubHeader(l)
-                const shown=l.replace(/\s*↻$/,'')
-                return(
-                  <div key={idx} style={{display:'flex',alignItems:'center',gap:8,padding:'2px 0',marginTop:idx===0?0:(sub?6:14),borderBottom:sub?'1px dashed #243447':'2px solid #2E4258',paddingLeft:sub?14:0}}>
-                    <input ref={el=>{if(el)inputRefs.current[idx]=el}} value={shown}
-                      onChange={e=>setLine(idx,e.target.value)}
-                      onKeyDown={e=>{
-                        if(e.key==='Tab'){
-                          e.preventDefault()
-                          const ls=content.split('\n')
-                          if(e.shiftKey) ls[idx]=ls[idx].replace(/^\s+/,'')
-                          else if(!isSubHeader(ls[idx])) ls[idx]='  '+ls[idx]
-                          persist(ls.join('\n'));return
-                        }
-                        onKey(e,idx)
-                      }}
-                      style={{...lineInput as any,color:sub?'#E8B95A':'#C8973A',fontWeight:800,fontSize:sub?13:16,letterSpacing:sub?0.2:0.5,textTransform:sub?'none' as const:'none' as const}}/>
-
-                  </div>
-                )
-              }
-              const bullet=isBullet(l)
-              const raw=task?t.slice(3).replace(/^\s/,''):bullet?t.slice(2):l
-              const mIdx=task?raw.indexOf(' ⌁ '):-1
-              const main=mIdx>=0?raw.slice(0,mIdx):raw
-              const meta=mIdx>=0?raw.slice(mIdx+3):null
-              const metaDate=meta?meta.split(' · ').pop()||'':''
-              const age=meta?crumbAge(metaDate):0
-              return(
-                <div key={idx} style={{display:'flex',alignItems:'center',gap:8,padding:'2px 0',paddingLeft:(task||bullet)?24:14}}>
-                  {task&&<input type="checkbox" checked={done} onChange={()=>toggle(idx)} style={{cursor:'pointer',flexShrink:0}}/>}
-                  {bullet&&<span style={{color:'#C8973A',fontSize:14,lineHeight:1,flexShrink:0,userSelect:'none' as const}}>•</span>}
-                  <input ref={el=>{if(el)inputRefs.current[idx]=el}} value={main}
-                    onChange={e=>setLine(idx,task?((done?'[x] ':'[ ] ')+e.target.value+(meta?' ⌁ '+meta:'')):bullet?('- '+e.target.value):e.target.value)}
-                    onKeyDown={e=>onKey(e,idx)}
-                    placeholder={idx===0&&lines.length===1&&!l?'Plan your day...  (type [ ] for a task, end a line with : for a section)':''}
-                    style={{...lineInput as any,color:done?'#7A8FA6':'#F4F6F8',textDecoration:done?'line-through':'none'}}/>
-                  {meta&&(
-                    <span style={{fontSize:10,color:'#5C6E80',flexShrink:0,whiteSpace:'nowrap' as const,marginLeft:'auto',maxWidth:280,overflow:'hidden',textOverflow:'ellipsis',paddingLeft:12}} title={`Carried since ${metaDate}`}>
-                      {meta.includes(' · ')?meta.slice(0,meta.lastIndexOf(' · ')):''}{meta.includes(' · ')?' · ':''}
-                      <span style={{color:age>=5?'#E74C3C':age>=2?'#E8B95A':'#5C6E80',fontWeight:age>=2?700:400}}>{metaDate}</span>
-                    </span>
-                  )}
-                </div>
-              )
-            })}
+          <div style={{flex:1,overflowY:'auto',background:'#0F1C2B',border:'1px solid #243447',borderRadius:10,padding:'14px 16px'}}>
+            <NotesEditor content={content} persist={persist} date={date} noteSpace={noteSpace} tasks={tasks} setTasks={setTasks} projects={projects} epics={epics} items={items} setItems={setItems}
+              onOpenProject={(p:any)=>setProjView(p)}/>
           </div>
         )}
-        <div style={{fontSize:10,color:'#7A8FA6',marginTop:6}}>Autosaves · daily scratch pad — durable to-dos go in Tasks above · [ ] = checkbox · - = bullet · end a line with : for a section · 1) or Tab for a sub-section</div>
-        {pastDates.filter(d2=>d2<localISO(new Date())).length>0&&(
-          <div style={{display:'flex',alignItems:'center',gap:6,marginTop:8,flexWrap:'wrap' as const}}>
-            <span style={{fontSize:10,color:'#5C6E80'}}>📋 Past:</span>
-            {pastDates.filter(d2=>d2<localISO(new Date())).slice(0,7).map(d2=>{
-              const dd=new Date(d2+'T12:00:00')
-              return(
-                <button key={d2} onClick={()=>setDate(d2)}
-                  style={{background:date===d2?'#C8973A':'#0F1C2B',border:'1px solid #243447',borderRadius:10,color:date===d2?'#0D1B2A':'#7A8FA6',fontSize:10,fontWeight:date===d2?700:400,padding:'2px 9px',cursor:'pointer'}}>
-                  {dd.toLocaleDateString('default',{month:'short',day:'numeric'})}
-                </button>
-              )
-            })}
-          </div>
-        )}
+        <div style={{fontSize:10,color:'#7A8FA6',marginTop:6}}>Autosaves · [ ] makes a task (also in Tasks; add 'fri' or 'tomorrow' for a date) · @ mentions an initiative, epic or story · - bullet · end a line with : for a section · ⋯ on a line: task, story, bug or flag</div>
       </div>
       <div style={{width:mobile?'100%':300,flexShrink:mobile?1:0,...(mobile?{flex:1,minHeight:0}:{}),borderLeft:mobile?'none':'1px solid #243447',padding:mobile?'14px 12px':'18px 16px',overflowY:'auto',display:mobile&&deskView!=='radar'?'none':'block',boxSizing:'border-box' as const}}>
         <div style={railCard as any}>
@@ -8578,7 +8457,7 @@ useEffect(()=>{
         {activeTab==='teams'&&<TeamPrep teams={TEAMS} strategies={strategies} projects={projects} items={items} epics={epics} releases={releases} milestones={milestones} sprints={sprints}
           strategyItems={strategyItems} tracks={tracks} goals={trackGoals} deps={projectDeps} strategyRoles={strategyRoles} projectRoles={projectRoles} people={people} roles={roles}
           workTypeOf={(i:any)=>workTypeOfItem(i,projects)} epicWorkTypeOf={(e:any)=>epicWorkType(e,projects)} onOpenProject={(p:any)=>{setSelectedProject(p);setActiveTab('projects')}}/>}
-        {activeTab==='desk'&&<Desk items={items} setItems={setItems} projects={projects} setProjects={setProjects} milestones={milestones} setMilestones={setMilestones} tasks={tasks} setTasks={setTasks} ccrs={ccrs} setCcrs={setCcrs} ccrItems={ccrItems} setCcrItems={setCcrItems} space={space} openAssistant={(t:string)=>{setAsstSeed(t);setAsstOpen(true)}}/>}
+        {activeTab==='desk'&&<Desk epics={epics} items={items} setItems={setItems} projects={projects} setProjects={setProjects} milestones={milestones} setMilestones={setMilestones} tasks={tasks} setTasks={setTasks} ccrs={ccrs} setCcrs={setCcrs} ccrItems={ccrItems} setCcrItems={setCcrItems} space={space} openAssistant={(t:string)=>{setAsstSeed(t);setAsstOpen(true)}}/>}
         <Assistant open={asstOpen} setOpen={setAsstOpen} seed={asstSeed} setSeed={setAsstSeed} items={items} setItems={setItems} projects={projects} setProjects={setProjects} milestones={milestones} tasks={tasks} setTasks={setTasks} ccrs={ccrs} setCcrs={setCcrs} ccrItems={ccrItems} setCcrItems={setCcrItems} space={space}
           epics={epics} setEpics={setEpics} strategies={strategies} tracks={tracks} setTracks={setTracks} goals={trackGoals} setGoals={setTrackGoals} deps={projectDeps} setDeps={setProjectDeps}
           strategyItems={strategyItems} setStrategyItems={setStrategyItems}/>
