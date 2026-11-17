@@ -3991,7 +3991,7 @@ function Roadmap({items,setItems,projects,setProjects,milestones,setMilestones,t
         <div style={{flex:1,display:'flex',overflow:'hidden',position:'relative',userSelect:draggingBar?'none':'auto' as const}}>
 
           {/* Frozen label column */}
-          <div style={{width:220,flexShrink:0,overflowY:'hidden',borderRight:'1px solid #243447',zIndex:6,background:'#0D1B2A',boxShadow:'4px 0 12px rgba(0,0,0,0.6)',display:'flex',flexDirection:'column'}}>
+          <div style={{width:300,flexShrink:0,overflowY:'hidden',borderRight:'1px solid #243447',zIndex:6,background:'#0D1B2A',boxShadow:'4px 0 12px rgba(0,0,0,0.6)',display:'flex',flexDirection:'column'}}>
             <div style={{height:36,flexShrink:0,background:'#162436',borderBottom:'1px solid #243447',padding:'0 12px',fontSize:11,fontWeight:700,color:'#7A8FA6',letterSpacing:1,display:'flex',alignItems:'center'}}>
               INITIATIVE / ITEM
             </div>
@@ -4028,9 +4028,9 @@ function Roadmap({items,setItems,projects,setProjects,milestones,setMilestones,t
                       if(r.kind==='epic'){const e=r.epic,closed=!!getCollapsed()['ep:'+e.id];return(
                         <div key={'ep'+e.id} title={`Epic: ${e.name}`} style={{height:ROW_H,borderBottom:'1px solid #243447',background:'rgba(224,123,42,0.06)',borderLeft:'3px solid #E07B2A',display:'flex',alignItems:'center',padding:'0 8px 0 14px',gap:6}}>
                           {r.count>0?<button onClick={()=>toggleCollapse('ep:'+e.id)} title={`${closed?'Show':'Hide'} its ${r.count} stor${r.count===1?'y':'ies'}`} style={{background:'none',border:'none',cursor:'pointer',color:'#E07B2A',fontSize:10,padding:'2px',width:14,flexShrink:0}}>{closed?'▶':'▼'}</button>:<span style={{width:14,flexShrink:0}}/>}
-                          <div style={{overflow:'hidden'}}>
-                            <div style={{fontSize:11,fontWeight:700,color:'#F4F6F8',overflow:'hidden',whiteSpace:'nowrap' as const,textOverflow:'ellipsis',maxWidth:150}}><span style={{color:'#E07B2A'}}>◆</span> {e.name}</div>
-                            <div style={{fontSize:9,color:'#7A8FA6'}}>EPIC · {r.count} stor{r.count===1?'y':'ies'} · <span style={{color:sc(e.status),fontWeight:700}}>{e.status||'New'}</span></div>
+                          <div style={{overflow:'hidden',flex:1,minWidth:0}}>
+                            <div style={{fontSize:11,fontWeight:700,color:'#F4F6F8',overflow:'hidden',whiteSpace:'nowrap' as const,textOverflow:'ellipsis'}}><span style={{color:'#E07B2A'}}>◆</span> {e.name}</div>
+                            <div style={{fontSize:9,color:'#7A8FA6',overflow:'hidden',whiteSpace:'nowrap' as const,textOverflow:'ellipsis'}}>EPIC · {r.count} stor{r.count===1?'y':'ies'} · <span style={{color:sc(e.status),fontWeight:700}}>{e.status||'New'}</span></div>
                           </div>
                           {relChip('epic',e)}<ReadinessPips kind="epic" x={e} apply={f=>setEpics?.((p:any[])=>p.map(r=>r.id===e.id?{...r,...f}:r))} size={11}/>
                         </div>
@@ -4043,8 +4043,8 @@ function Roadmap({items,setItems,projects,setProjects,milestones,setMilestones,t
                           style={{height:ROW_H,borderBottom:'1px solid #243447',background:isViolation?'rgba(192,57,43,0.05)':idx%2===0?'#0D1B2A':'#111D2C',display:'flex',alignItems:'center',padding:r.inEpic?'0 8px 0 40px':'0 8px 0 28px',gap:6,cursor:'pointer',borderLeft:r.inEpic?'3px solid rgba(224,123,42,0.35)':undefined}}>
                           <div style={{width:1,height:20,background:'#243447',flexShrink:0}}/>
                           <span style={{background:pc(item.priority).bg,color:'#fff',padding:'1px 5px',borderRadius:3,fontSize:9,fontWeight:700,flexShrink:0}}>{item.priority}</span>
-                          <div style={{overflow:'hidden'}}>
-                            <div style={{fontSize:11,color:isViolation?'#E74C3C':'#C8C8D4',overflow:'hidden',whiteSpace:'nowrap' as const,textOverflow:'ellipsis',maxWidth:130}}>{rt(item.request_type)} {item.name}{isViolation?' ⚠️':''}</div>
+                          <div style={{overflow:'hidden',flex:1,minWidth:0}}>
+                            <div style={{fontSize:11,color:isViolation?'#E74C3C':'#C8C8D4',overflow:'hidden',whiteSpace:'nowrap' as const,textOverflow:'ellipsis'}}>{rt(item.request_type)} {item.name}{isViolation?' ⚠️':''}</div>
                             <div style={{fontSize:9,color:'#7A8FA6',overflow:'hidden',whiteSpace:'nowrap' as const,textOverflow:'ellipsis'}}><span style={{fontFamily:'monospace'}}>{item.item_id}</span> <span style={{color:sc(item.status),fontWeight:700}}>● {item.status}</span></div>
                           </div>
                           {relChip('item',item)}<ReadinessPips kind="item" x={item} apply={f=>setItems((p:any[])=>p.map(r=>r.id===item.id?{...r,...f}:r))} size={11}/>
