@@ -7,7 +7,7 @@ import { EpicsSection } from './Epics'
 import { DependencyLayer, DepHandle, createDependency, deleteDependency, depKey } from './DependencyLayer'
 import { InlineSelect, InlineText, InlineDate, InlineEditStyles } from './InlineEdit'
 import { MilestoneTypeSelect } from './MilestoneTypes'
-import { WORK_TYPE_KEYS, WT_LABEL, WT_COLOR, WorkTag, isWorkType, workTypeOfProject, capacityShare, REQUEST_TYPES, isBug, SEVERITIES, sevOf, BugTag } from './WorkTypes'
+import { WORK_TYPE_KEYS, WT_LABEL, WT_COLOR, WorkTag, isWorkType, workTypeOfProject, capacityShare, REQUEST_TYPES, isBug, SEVERITIES, sevOf, BugTag, CLOSED_STATUSES, isClosed } from './WorkTypes'
 import { QuarterPlanner, ReleaseCalendar, ReleaseSelect, QuarterSelect, ReleasesManager, releaseOptions, releaseOf, releaseText, fmtMonthKey } from './Releases'
 import { EpicRow, EpicPanel, epicProject, epicWorkType, convertStoryToEpic, convertEpicToStory } from './BacklogEpics'
 import { FullPlanButton } from './FullPlanExport'
@@ -45,8 +45,8 @@ function pc(p) {
   return {bg:'#1E3048',text:'#7A8FA6'}
 }
 // Terminal statuses — these move records to the Done tab and out of working views
-const ITEM_TERMINAL=['Done','Will Not Implement',"Won't Do"]
-const PROJECT_TERMINAL=['Complete','Cancelled','Done'] // 'Done' is the home-space project terminal
+const ITEM_TERMINAL=CLOSED_STATUSES
+const PROJECT_TERMINAL=CLOSED_STATUSES // 'Done' is the home-space project terminal
 const isItemDone=(i:any)=>ITEM_TERMINAL.includes(i?.status)
 // Capacity split: new-project work vs. sustain work (tech debt, system stabilization and
 // enhancements to existing things). A project carries its work type; an item follows its
@@ -105,8 +105,9 @@ async function closeItemsForProject(items:any[],setItems:any,projectName:string,
 }
 
 // Flag audiences — legacy flags with no audience count as both
-function flagDev(i:any){return i.flagged&&(i.flag_audience==='dev'||i.flag_audience==='both'||!i.flag_audience)}
-function flagStk(i:any){return i.flagged&&(i.flag_audience==='stakeholder'||i.flag_audience==='both'||!i.flag_audience)}
+// Flagged, and still open: closed work drops out of every flag list
+function flagDev(i:any){return !!i.flagged&&!isClosed(i)&&(i.flag_audience==='dev'||i.flag_audience==='both'||!i.flag_audience)}
+function flagStk(i:any){return !!i.flagged&&!isClosed(i)&&(i.flag_audience==='stakeholder'||i.flag_audience==='both'||!i.flag_audience)}
 function flagLabel(i:any){return !i.flagged?'':i.flag_audience==='dev'?'D':i.flag_audience==='stakeholder'?'S':'DS'}
 // Project tasks — personal operational reminders attached to projects (never shown to teams/stakeholders)
 async function addProjectTask(setTasks:any,projectId:any,title:string,dueDate:string|null,space:string='work'){
@@ -1044,9 +1045,10 @@ function ProjectDetail({project,items,setItems,projects,setProjects,milestones,s
     if(b.start_date) return 1
     return 0
   })
-  const doneItems=projectItems.filter(i=>i.status==='Done')
-  const withDates=projectItems.filter(i=>i.status!=='Done'&&i.start_date&&i.end_date)
-  const noDates=projectItems.filter(i=>i.status!=='Done'&&(!i.start_date||!i.end_date))
+  // Any closed status (Done, Will Not Implement, …) goes under Done, not the active lists
+  const doneItems=projectItems.filter(i=>isClosed(i))
+  const withDates=projectItems.filter(i=>!isClosed(i)&&i.start_date&&i.end_date)
+  const noDates=projectItems.filter(i=>!isClosed(i)&&(!i.start_date||!i.end_date))
   const projectMilestones=milestones.filter(m=>m.project_id===project.id).sort((a,b)=>new Date(a.date).getTime()-new Date(b.date).getTime())
   const ragColor=RAG_COLORS[project.rag]||'#27AE60'
 
@@ -2310,7 +2312,7 @@ function Backlog({mode='list',items,setItems,projects,setProjects,space,ccrs=[],
   // Parent options driven by projects table
   const parentOpts=projects.map(p=>p.name)
 
-  const fc=items.filter(i=>i.flagged).length
+  const fc=items.filter(i=>i.flagged&&!isClosed(i)).length
 
   function sortVal(item,col){
     switch(col){
@@ -3376,7 +3378,8 @@ function Roadmap({items,setItems,projects,setProjects,milestones,setMilestones,t
   const barDragState=useRef(null)
   const today=new Date()
 
-  const filteredItems=items.filter(i=>ft==='All'||i.team===ft)
+  // Closed stories and bugs aren't on the roadmap (they're on the Done tab)
+  const filteredItems=items.filter(i=>(ft==='All'||i.team===ft)&&!isClosed(i))
   const withDates=filteredItems.filter(i=>i.start_date&&i.end_date)
   const noDates=filteredItems.filter(i=>!i.start_date||!i.end_date)
   const uncommitted=[...noDates].sort((a,b)=>{
@@ -3389,7 +3392,7 @@ function Roadmap({items,setItems,projects,setProjects,milestones,setMilestones,t
     const am=a.committed_priority??a.sort_order??999,bm=b.committed_priority??b.sort_order??999
     return am-bm
   })
-  const [hideDone,setHideDone]=useState(false)
+  const [hideDone,setHideDone]=useState(true) // closed initiatives off the roadmap unless asked for
   // Quarter plans with nothing planned in them yet aren't worth a roadmap row
   const emptyPlan=(p:any)=>p.sustain_quarter&&!items.some((i:any)=>i.parent_project===p.name)&&!(epics as any[]).some((e:any)=>e.project_id===p.id)
   const filteredProjects=projects.filter(p=>(ft==='All'||p.team===ft)&&(!hideDone||!PROJECT_TERMINAL.includes(p.status))&&!emptyPlan(p))
@@ -3439,7 +3442,7 @@ function Roadmap({items,setItems,projects,setProjects,milestones,setMilestones,t
       const st=storiesOf(e).filter((i:any)=>i.start_date&&i.end_date);if(!st.length)return null
       return{s:st.map(i=>i.start_date).sort()[0],e:st.map(i=>i.end_date).sort().slice(-1)[0],derived:true}
     }
-    const shown=gEpics.filter((e:any)=>!ITEM_TERMINAL.includes(e.status)||storiesOf(e).length).map((e:any)=>({e,ext:extent(e)}))
+    const shown=gEpics.filter((e:any)=>!isClosed(e)).map((e:any)=>({e,ext:extent(e)}))
       .sort((a:any,b:any)=>(a.ext?.s||'9999').localeCompare(b.ext?.s||'9999')||(a.e.sort_order??0)-(b.e.sort_order??0))
     const rows:any[]=[]
     for(const{e,ext}of shown){
@@ -3794,7 +3797,7 @@ function Roadmap({items,setItems,projects,setProjects,milestones,setMilestones,t
     }).filter(Boolean) as any[]
   })()
   // Release chips close together (e.g. Jan 9 and Feb 1) go on a second lane instead of overlapping
-  const relTagged=(k:string)=>projects.filter((p:any)=>p.release_month===k).length+(epics as any[]).filter((e:any)=>e.release_month===k).length+items.filter((i:any)=>i.release_month===k).length
+  const relTagged=(k:string)=>projects.filter((p:any)=>p.release_month===k&&!isClosed(p)).length+(epics as any[]).filter((e:any)=>e.release_month===k&&!isClosed(e)).length+items.filter((i:any)=>i.release_month===k&&!isClosed(i)).length
   const relLane=(()=>{
     const m=new Map<string,number>(),ends=[-1e9,-1e9]
     for(const r of [...relMarks].sort((a:any,b:any)=>a.x-b.x)){
@@ -4169,9 +4172,9 @@ function Roadmap({items,setItems,projects,setProjects,milestones,setMilestones,t
               {showReleases&&relMarks.length>0&&(
                 <div style={{position:'sticky' as const,top:showSprints&&sprintBands.length>0?60:36,zIndex:9,height:REL_H,background:'#0D1B2A',borderBottom:'1px solid #243447'}}>
                   {relMarks.map((r:any)=>{
-                    const tagged=[...projects.filter((p:any)=>p.release_month===r.k).map((p:any)=>({kind:'Initiative',name:p.name})),
-                      ...(epics as any[]).filter((e:any)=>e.release_month===r.k).map((e:any)=>({kind:'Epic',name:e.name})),
-                      ...items.filter((i:any)=>i.release_month===r.k).map((i:any)=>({kind:'Story',name:i.name,id:i.item_id}))]
+                    const tagged=[...projects.filter((p:any)=>p.release_month===r.k&&!isClosed(p)).map((p:any)=>({kind:'Initiative',name:p.name})),
+                      ...(epics as any[]).filter((e:any)=>e.release_month===r.k&&!isClosed(e)).map((e:any)=>({kind:'Epic',name:e.name})),
+                      ...items.filter((i:any)=>i.release_month===r.k&&!isClosed(i)).map((i:any)=>({kind:isBug(i)?'Bug':'Story',name:i.name,id:i.item_id}))]
                     return(
                       <div key={r.k} style={{position:'absolute',left:r.x,top:relTwoLanes?(relLane.get(r.k)?21:3):0,height:relTwoLanes?18:24,transform:'translateX(-50%)',display:'flex',alignItems:'center',zIndex:relPopover===r.k?2:1}}>
                         <span onClick={()=>setRelPopover(relPopover===r.k?null:r.k)} title={`${fmtMonthKey(r.k)} release${r.dated?' · '+r.date:' · date not set'}\n${tagged.length} tagged. Click for the list.`}
@@ -4516,7 +4519,7 @@ function Roadmap({items,setItems,projects,setProjects,milestones,setMilestones,t
       {quickProject&&(()=>{
         const pms=milestones.filter((m:any)=>m.project_id===quickProject.id).sort((a:any,b:any)=>a.date<b.date?-1:1)
         const pis=items.filter((i:any)=>i.parent_project===quickProject.name)
-        const committedN=pis.filter((i:any)=>i.status!=='Done'&&i.start_date&&i.end_date).length
+        const committedN=pis.filter((i:any)=>!isClosed(i)&&i.start_date&&i.end_date).length
         return(
         <div onClick={()=>setQuickProject(null)} style={{position:'fixed',inset:0,background:'rgba(0,0,0,0.6)',zIndex:250,display:'flex',alignItems:'center',justifyContent:'center'}}>
           <div onClick={e=>e.stopPropagation()} style={{background:'#162436',border:'1px solid #243447',borderRadius:12,width:520,maxWidth:'94vw',maxHeight:'86vh',overflowY:'auto',padding:16,boxSizing:'border-box' as const}}>
@@ -4617,9 +4620,9 @@ function Roadmap({items,setItems,projects,setProjects,milestones,setMilestones,t
               )
             })()}
             {(()=>{
-              const doneP=pis.filter((i:any)=>i.status==='Done')
-              const committedList=pis.filter((i:any)=>i.status!=='Done'&&i.start_date&&i.end_date)
-              const uncommittedP=pis.filter((i:any)=>i.status!=='Done'&&!(i.start_date&&i.end_date))
+              const doneP=pis.filter((i:any)=>isClosed(i))
+              const committedList=pis.filter((i:any)=>!isClosed(i)&&i.start_date&&i.end_date)
+              const uncommittedP=pis.filter((i:any)=>!isClosed(i)&&!(i.start_date&&i.end_date))
               const committedI=(i:any)=>!!(i.start_date&&i.end_date)
               const row=(i:any)=>(
                 <div key={i.id} style={{display:'flex',alignItems:'center',gap:8,fontSize:11,marginBottom:3}}>
@@ -4975,8 +4978,8 @@ function Stakeholder({items,projects,milestones}:{items:any[],projects:any[],mil
   const bl=items.filter(i=>i.priority!=='P1'&&i.priority!=='P2'&&!ITEM_TERMINAL.includes(i.status)&&!(i.start_date&&i.end_date))
     .sort((a,b)=>(a.committed_priority??a.sort_order??999)-(b.committed_priority??b.sort_order??999)).slice(0,10)
   const disc=items.filter(flagStk)
-  const redProjects=projects.filter(p=>p.rag==='Red')
-  const amberProjects=projects.filter(p=>p.rag==='Amber')
+  const redProjects=projects.filter(p=>p.rag==='Red'&&!isClosed(p))
+  const amberProjects=projects.filter(p=>p.rag==='Amber'&&!isClosed(p))
   return(
     <div style={{maxWidth:960,margin:'0 auto',padding:'24px 20px',overflowY:'auto',height:'100%',boxSizing:'border-box' as const}}>
       <div style={{marginBottom:24}}>
@@ -5803,8 +5806,8 @@ function Desk({items,setItems,projects,setProjects,milestones,setMilestones,task
         const pms=milestones.filter(m=>m.project_id===projView.id).sort((a,b)=>a.date<b.date?-1:1)
         const pis=items.filter(i=>i.parent_project===projView.name)
           .sort((a:any,b:any)=>((PRIORITY_ORDER[a.priority]??4)-(PRIORITY_ORDER[b.priority]??4))||((a.committed_priority??999)-(b.committed_priority??999)))
-        const doneP=pis.filter(i=>i.status==='Done')
-        const committed=pis.filter(i=>i.status!=='Done'&&i.start_date&&i.end_date)
+        const doneP=pis.filter(i=>isClosed(i))
+        const committed=pis.filter(i=>!isClosed(i)&&i.start_date&&i.end_date)
         return(
         <div onClick={()=>setProjView(null)} style={{position:'fixed',inset:0,background:'rgba(0,0,0,0.6)',zIndex:250,display:'flex',alignItems:'center',justifyContent:'center'}}>
           <div onClick={e=>e.stopPropagation()} style={{background:'#162436',border:'1px solid #243447',borderRadius:12,width:560,maxWidth:'94vw',maxHeight:'86vh',overflowY:'auto',padding:16,boxSizing:'border-box' as const}}>
@@ -5934,7 +5937,7 @@ function Desk({items,setItems,projects,setProjects,milestones,setMilestones,task
               )
             })()}
             {(()=>{
-              const uncommittedP=pis.filter(i=>i.status!=='Done'&&!(i.start_date&&i.end_date))
+              const uncommittedP=pis.filter(i=>!isClosed(i)&&!(i.start_date&&i.end_date))
               const committedI=(i:any)=>!!(i.start_date&&i.end_date)
               async function commitItem(i:any){
                 if(!projView.start_date||!projView.end_date){

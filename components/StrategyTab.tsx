@@ -3,7 +3,7 @@ import { useState, useEffect, useRef, Fragment } from 'react'
 import { supabase } from '../lib/supabase'
 import { DependencyLayer, DepHandle, createDependency, deleteDependency, depKey } from './DependencyLayer'
 import { StrategyReport } from './StrategyReport'
-import { WT_LABEL, WT_COLOR, WORK_TYPE_KEYS, workTypeOfProject, capacityShare } from './WorkTypes'
+import { WT_LABEL, WT_COLOR, WORK_TYPE_KEYS, workTypeOfProject, capacityShare, CLOSED_STATUSES } from './WorkTypes'
 import { exportStrategiesPptx } from './StrategyPptx'
 import { StrategyBudgetPanel, StaffingSection, computeAllocation, slotted, overlapsFor, SLOTS, SHARED_TEAM } from './StrategyBudget'
 
@@ -15,8 +15,8 @@ import { StrategyBudgetPanel, StaffingSection, computeAllocation, slotted, overl
 // depend on other projects (the arrows). Everything here is editable by hand; the
 // assistant writes the same fields, and anything it drafts lands as "proposed".
 
-const PROJECT_TERMINAL=['Complete','Cancelled','Done']
-const ITEM_TERMINAL=['Done','Will Not Implement',"Won't Do"]
+const PROJECT_TERMINAL=CLOSED_STATUSES
+const ITEM_TERMINAL=CLOSED_STATUSES
 const EPIC='#E07B2A'
 const MONTH_W=34          // px per month; a quarter is 3× this
 const LABEL_W_DESKTOP=250

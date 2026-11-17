@@ -25,6 +25,13 @@ export const capacityShare=(wt:WorkType|string):'new'|'sustain'=>wt==='new'?'new
 // Request types for work items
 export const REQUEST_TYPES=['Enhancement','Tech Debt','Bug']
 
+// Closed work: any of these statuses takes an item, epic or initiative out of every working
+// view (Backlog, Planning, Roadmap, Sprints pools, Teams, flags, Desk, PowerPoints); it's
+// kept on the Done tab
+export const CLOSED_STATUSES=['Done','Will Not Implement',"Won't Do",'Closed','Cancelled','Canceled','Resolved','Complete','Completed']
+export const isClosedStatus=(s:any)=>CLOSED_STATUSES.includes(s)||/^(done|closed|complete(d)?|cancell?ed|resolved|will not implement|won'?t do)$/i.test(String(s||'').trim())
+export const isClosed=(x:any)=>isClosedStatus(x?.status)
+
 // Bugs: work items with request type 'Bug', tracked like stories, with a severity
 export const isBug=(i:any)=>i?.request_type==='Bug'
 export const SEVERITIES=[{key:'S1',label:'S1 Critical',color:'#E74C3C'},{key:'S2',label:'S2 Major',color:'#E67E22'},{key:'S3',label:'S3 Minor',color:'#E8B95A'},{key:'S4',label:'S4 Trivial',color:'#8FA6BC'}]
