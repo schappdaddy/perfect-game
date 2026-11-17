@@ -261,6 +261,17 @@ export function NotesEditor({content,persist,date,noteSpace,tasks,setTasks,proje
     setItems((p:any[])=>p.map(x=>x.id===im.id?{...x,flagged:true,flag_audience:x.flag_audience||'dev'}:x))
     await supabase.from('items').update({flagged:true}).eq('id',im.id);setMenu(null)
   }
+  // Delete a meeting (its header and every line under it, up to the next meeting), or one line.
+  // A deleted to-do's task stays in Tasks (delete it there if it's not needed).
+  function deleteMeeting(idx:number,n:number){
+    if(n&&!confirm(`Delete this meeting and its ${n} line${n!==1?'s':''} of notes?`))return
+    const ls=cur();ls.splice(idx,n+1)
+    while(ls.length>1&&ls[ls.length-1].trim()===''&&ls[ls.length-2].trim()==='')ls.pop()
+    setLines(ls.length?ls:[''])
+  }
+  function deleteLine(idx:number){
+    const ls=cur();ls.splice(idx,1);setLines(ls.length?ls:['']);setMenu(null)
+  }
   const openMention=(k:string,id:string)=>{if(k==='i'){const it=items.find((i:any)=>i.id===id);if(it)onOpenItem?.(it)}else if(k==='p'){const p=projects.find((x:any)=>x.id===id);if(p)onOpenProject?.(p)}else{const e=epics.find((x:any)=>x.id===id);const p=e&&projects.find((x:any)=>x.id===e.project_id);if(p)onOpenProject?.(p)}}
   const lineInput={flex:1,minWidth:0,background:'transparent',border:'none',outline:'none',color:'#F4F6F8',fontSize:14,lineHeight:1.6,fontFamily:'inherit',padding:0}
 
@@ -285,6 +296,7 @@ export function NotesEditor({content,persist,date,noteSpace,tasks,setTasks,proje
               {readOnly?<span style={{color:'#7A8FA6',fontSize:11}}>{time}</span>:<input value={time} onChange={e=>set(1,e.target.value)} placeholder="time" style={{...lineInput,flex:'0 0 54px',fontSize:11.5,color:'#7A8FA6'}}/>}
               {readOnly?<span style={{color:'#7A8FA6',fontSize:11}}>{who}</span>:<input value={who} onChange={e=>set(2,e.target.value)} placeholder="who was there" style={{...lineInput,flex:'0 1 200px',fontSize:11.5,color:'#7A8FA6'}}/>}
               {collapsed[`${idx}`]&&<span style={{fontSize:10,color:'#5C6E80'}}>{n} line{n!==1?'s':''}</span>}
+              {!readOnly&&<button onClick={()=>deleteMeeting(idx,n)} title="Delete this meeting and its notes" style={{background:'none',border:'none',color:'#5C6E80',cursor:'pointer',fontSize:12,padding:'0 2px'}}>🗑</button>}
             </div>)
         }
         if(isSection(l)){
@@ -314,13 +326,14 @@ export function NotesEditor({content,persist,date,noteSpace,tasks,setTasks,proje
               :<div onClick={()=>{if(!readOnly){pending.current={idx,caret:null};setFocus(idx)}}} style={{flex:1,minWidth:0,fontSize:14,lineHeight:1.6,color:done?'#7A8FA6':'#F4F6F8',textDecoration:done?'line-through':'none',cursor:readOnly?'default':'text',minHeight:22}}>
                 <Rendered text={body} onMention={openMention}/></div>}
             {t&&<span title={`A task${t.due_date?`, due ${fmtDay(t.due_date)}`:''}: also in Tasks`} style={{fontSize:9.5,fontWeight:700,color:t.due_date&&t.due_date<isoOf(new Date())&&!t.done?'#E74C3C':'#5C6E80',flexShrink:0}}>☑ {t.due_date?(t.due_date===isoOf(new Date())?'today':fmtDay(t.due_date).slice(4)):'task'}</span>}
-            {!readOnly&&body.trim()&&<button className="pg-line-act" onClick={e=>{e.stopPropagation();setMenu(menu===idx?null:idx)}} title="Actions" style={{background:'none',border:'none',color:'#5C6E80',cursor:'pointer',fontSize:14,padding:'0 2px',flexShrink:0}}>⋯</button>}
+            {!readOnly&&(body.trim()||lines.length>1)&&<button className="pg-line-act" onClick={e=>{e.stopPropagation();setMenu(menu===idx?null:idx)}} title="Actions" style={{background:'none',border:'none',color:'#5C6E80',cursor:'pointer',fontSize:14,padding:'0 2px',flexShrink:0}}>⋯</button>}
             {menu===idx&&<div onClick={e=>e.stopPropagation()} style={{position:'absolute',right:0,top:24,zIndex:30,background:'#162436',border:'1px solid #3A4A5E',borderRadius:8,padding:4,minWidth:210,boxShadow:'0 8px 20px rgba(0,0,0,0.45)'}}>
-              {([!task&&['☑ Make it a task',()=>{const ls=cur();ls[idx]='[ ] '+body;setLines(ls);setMenu(null);setTimeout(()=>linkTask(idx),50)}],
-                !im&&['▪ New backlog story from this',()=>makeItem(idx,false)],
-                !im&&['🐞 New bug from this',()=>makeItem(idx,true)],
+              {([body.trim()&&!task&&['☑ Make it a task',()=>{const ls=cur();ls[idx]='[ ] '+body;setLines(ls);setMenu(null);setTimeout(()=>linkTask(idx),50)}],
+                body.trim()&&!im&&['▪ New backlog story from this',()=>makeItem(idx,false)],
+                body.trim()&&!im&&['🐞 New bug from this',()=>makeItem(idx,true)],
                 im&&['🚩 Flag the mentioned item',()=>flagItem(idx)],
-                im&&['↗ Open the mentioned item',()=>{openMention('i',im.id);setMenu(null)}]].filter(Boolean) as any[]).map(([lbl,fn]:any)=>(
+                im&&['↗ Open the mentioned item',()=>{openMention('i',im.id);setMenu(null)}],
+                ['🗑 Delete line',()=>deleteLine(idx)]].filter(Boolean) as any[]).map(([lbl,fn]:any)=>(
                 <button key={lbl} onClick={fn} style={{display:'block',width:'100%',textAlign:'left' as const,background:'none',border:'none',color:'#E1E7EE',fontSize:12,padding:'6px 8px',cursor:'pointer',borderRadius:5}}>{lbl}</button>))}
             </div>}
             {ac&&ac.idx===idx&&(()=>{const sg=suggestions(ac.q);return sg.length?(
