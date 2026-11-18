@@ -5384,6 +5384,35 @@ function Desk({items,setItems,projects,setProjects,milestones,setMilestones,task
   const mobile=useIsMobile()
   const [deskView,setDeskView]=useState('plan') // mobile: plan | radar | flags
   const railCard={background:'#162436',border:'1px solid #243447',borderRadius:8,padding:'10px 12px',marginBottom:12}
+  // Quick edits from the rail: works even when the initiative is closed (a milestone can outlive its project)
+  const [railEdit,setRailEdit]=useState<string|null>(null)
+  async function updMs(m:any,upd:any){
+    setMilestones((p:any[])=>p.map((x:any)=>x.id===m.id?{...x,...upd}:x))
+    const{error}=await supabase.from('milestones').update(upd).eq('id',m.id)
+    if(error)alert('Failed to update milestone: '+error.message)
+  }
+  async function delMs(m:any){
+    if(!confirm(`Delete milestone “${m.name}”?`))return
+    setMilestones((p:any[])=>p.filter((x:any)=>x.id!==m.id));setRailEdit(null)
+    const{error}=await supabase.from('milestones').delete().eq('id',m.id)
+    if(error)alert('Failed to delete milestone: '+error.message)
+  }
+  async function updItem(i:any,upd:any){
+    setItems((p:any[])=>p.map((x:any)=>x.id===i.id?{...x,...upd}:x))
+    const{error}=await supabase.from('items').update(upd).eq('id',i.id)
+    if(error)alert('Failed to update: '+error.message)
+  }
+  const reInp={background:'#0D1B2A',border:'1px solid #243447',borderRadius:4,color:'#F4F6F8',fontSize:11,padding:'3px 6px',colorScheme:'dark' as const}
+  const reBtn=(c:string)=>({background:'none',border:'1px solid '+c,borderRadius:4,color:c,fontSize:10,fontWeight:700,padding:'2px 7px',cursor:'pointer'})
+  const plusDays=(iso:string,n:number)=>{const d=new Date((iso||localISO(new Date()))+'T12:00:00');d.setDate(d.getDate()+n);return localISO(d)}
+  const RailEditor=({date,onDate,extra}:{date:string,onDate:(v:string)=>void,extra:any})=>(
+    <div onClick={e=>e.stopPropagation()} style={{display:'flex',flexWrap:'wrap' as const,gap:5,alignItems:'center',margin:'5px 0 2px'}}>
+      <input type="date" value={date||''} onChange={e=>e.target.value&&onDate(e.target.value)} style={reInp}/>
+      <button onClick={()=>onDate(plusDays(localISO(new Date()),7))} title="One week from today" style={reBtn('#7A8FA6')}>+1w</button>
+      <button onClick={()=>onDate(plusDays(localISO(new Date()),14))} title="Two weeks from today" style={reBtn('#7A8FA6')}>+2w</button>
+      {extra}
+    </div>)
+  const rowStyle=(k:string)=>({fontSize:11,marginBottom:6,lineHeight:1.4,cursor:'pointer',borderRadius:5,padding:'2px 4px',margin:'0 -4px 6px',background:railEdit===k?'#1E3048':'transparent'})
   const railTitle={fontSize:10,fontWeight:700,letterSpacing:1,color:'#C8973A',marginBottom:8}
   const lineInput={flex:1,background:'transparent',border:'none',outline:'none',color:'#F4F6F8',fontSize:14,lineHeight:1.6,fontFamily:'inherit',padding:0}
 
@@ -5624,10 +5653,13 @@ function Desk({items,setItems,projects,setProjects,milestones,setMilestones,task
           <RailHead k="due">🎯 DUE — NEXT 5 DAYS ({dueSoon.length})</RailHead>
           {railOpen.due&&<>
           {dueSoon.length===0&&<div style={{fontSize:11,color:'#7A8FA6',fontStyle:'italic'}}>Nothing due</div>}
-          {dueSoon.map(i=>{const overdue=+new Date(i.end_date+'T12:00:00')<+now;return(
-            <div key={i.id} style={{fontSize:11,marginBottom:6,lineHeight:1.4}}>
+          {dueSoon.map(i=>{const overdue=+new Date(i.end_date+'T12:00:00')<+now,k='d'+i.id;return(
+            <div key={i.id} onClick={()=>setRailEdit(railEdit===k?null:k)} title="Click to change the date or close it" style={rowStyle(k)}>
               <span style={{color:overdue?'#E74C3C':'#C8973A',fontWeight:700}}>{fmtDt(i.end_date)}{overdue?' ⚠':''}</span> <span style={{color:'#F4F6F8'}}>{rt(i.request_type)} {i.name}</span>
               <div style={{color:'#7A8FA6',fontSize:10}}>{i.item_id}{i.parent_project?` · ${i.parent_project}`:''} · <span style={{color:sc(i.status)}}>{i.status}</span></div>
+              {railEdit===k&&<RailEditor date={i.end_date} onDate={v=>updItem(i,{end_date:v})} extra={<>
+                <button onClick={()=>{updItem(i,{status:'Done',flagged:false});setRailEdit(null)}} style={reBtn('#2ECC71')}>✓ Done</button>
+                <button onClick={()=>{updItem(i,{end_date:null});setRailEdit(null)}} title="Remove the due date" style={reBtn('#7A8FA6')}>No date</button></>}/>}
             </div>
           )})}
           </>}
@@ -5636,10 +5668,13 @@ function Desk({items,setItems,projects,setProjects,milestones,setMilestones,task
           <RailHead k="ms">📅 MILESTONES — OVERDUE & NEXT 14 DAYS ({upMs.length})</RailHead>
           {railOpen.ms&&<>
           {upMs.length===0&&<div style={{fontSize:11,color:'#7A8FA6',fontStyle:'italic'}}>None due</div>}
-          {upMs.map(m=>{const pr=projects.find(p=>p.id===m.project_id);const overdue=+new Date(m.date+'T12:00:00')<+now;return(
-            <div key={m.id} style={{fontSize:11,marginBottom:6,lineHeight:1.4}}>
+          {upMs.map(m=>{const pr=projects.find(p=>p.id===m.project_id);const overdue=+new Date(m.date+'T12:00:00')<+now,k='m'+m.id;return(
+            <div key={m.id} onClick={()=>setRailEdit(railEdit===k?null:k)} title="Click to move, complete or delete it" style={rowStyle(k)}>
               <span style={{color:overdue?'#E74C3C':'#C8973A',fontWeight:700}}>{fmtDt(m.date)}{overdue?' ⚠':''}</span> <span style={{color:'#F4F6F8'}}>{m.name}</span>
-              {pr&&<div style={{color:'#7A8FA6',fontSize:10}}>{pr.name}</div>}
+              {pr&&<div style={{color:'#7A8FA6',fontSize:10}}>{pr.name}{isClosed(pr)?` · ${pr.status}`:''}</div>}
+              {railEdit===k&&<RailEditor date={m.date} onDate={v=>updMs(m,{date:v})} extra={<>
+                <button onClick={()=>{updMs(m,{completed:true});setRailEdit(null)}} style={reBtn('#2ECC71')}>✓ Complete</button>
+                <button onClick={()=>delMs(m)} style={reBtn('#E74C3C')}>🗑</button></>}/>}
             </div>
           )})}
           </>}
@@ -5648,10 +5683,12 @@ function Desk({items,setItems,projects,setProjects,milestones,setMilestones,task
           <RailHead k="vend">🚚 VENDOR DATES — THIS WEEK ({vend.length})</RailHead>
           {railOpen.vend&&<>
           {vend.length===0&&<div style={{fontSize:11,color:'#7A8FA6',fontStyle:'italic'}}>None due</div>}
-          {vend.map(i=>{const overdue=+new Date(i.vendor_delivery_date+'T12:00:00')<+now;return(
-            <div key={i.id} style={{fontSize:11,marginBottom:6,lineHeight:1.4}}>
+          {vend.map(i=>{const overdue=+new Date(i.vendor_delivery_date+'T12:00:00')<+now,k='v'+i.id;return(
+            <div key={i.id} onClick={()=>setRailEdit(railEdit===k?null:k)} title="Click to change the vendor date" style={rowStyle(k)}>
               <span style={{color:overdue?'#E74C3C':'#C8973A',fontWeight:700}}>{fmtDt(i.vendor_delivery_date)}{overdue?' ⚠':''}</span> <span style={{color:'#F4F6F8'}}>{rt(i.request_type)} {i.name}</span>
               <div style={{color:'#7A8FA6',fontSize:10}}>{i.item_id}{i.vendor?` · ${i.vendor}`:''}</div>
+              {railEdit===k&&<RailEditor date={i.vendor_delivery_date} onDate={v=>updItem(i,{vendor_delivery_date:v})} extra={<>
+                <button onClick={()=>{updItem(i,{vendor_delivery_date:null});setRailEdit(null)}} title="Delivered / no longer expected" style={reBtn('#2ECC71')}>✓ Delivered</button></>}/>}
             </div>
           )})}
           </>}
