@@ -6,7 +6,7 @@ import { supabase } from '../lib/supabase'
 // Where an initiative is in the intake process. The stages are your own list (intake_stages:
 // name, colour, order), created and edited from the UI. Each initiative has one stage
 // (projects.intake_stage_id), shown as a small bubble next to the PRD / Design dots.
-// Every change is kept in readiness_log (gate 'intake') with who and when.
+// Every change is kept in readiness_log (gate 'intake') with when it happened.
 
 const GREY='#5B6B7E'
 export const INTAKE_COLORS=['#5DADE2','#9B59B6','#E8B95A','#E07B2A','#27AE60','#E74C3C','#1ABC9C','#7A8FA6']
@@ -56,17 +56,15 @@ function IntakePopover({x,rect,apply,onClose}:{x:any,rect:DOMRect,apply:(f:any)=
   const [manage,setManage]=useState(false)
   const [hist,setHist]=useState<any[]|null>(null)
   const [busy,setBusy]=useState(false)
-  const [by,setBy]=useState<string>(()=>{try{return localStorage.getItem('pg_ready_by')||''}catch{return ''}})
   useEffect(()=>{supabase.from('readiness_log').select('*').eq('entity_type','project').eq('entity_id',x.id).eq('gate','intake').order('created_at',{ascending:false}).limit(15).then(({data})=>setHist(data||[]))},[x.id])
   useEffect(()=>{const k=(e:KeyboardEvent)=>{if(e.key==='Escape')onClose()};window.addEventListener('keydown',k);return()=>window.removeEventListener('keydown',k)},[onClose])
   async function pick(id:string|null){
     if(id===(x.intake_stage_id||null)){onClose();return}
     const from=intakeStageOf(x,list)?.name||null,to=list.find(s=>s.id===id)?.name||null
     setBusy(true);apply({intake_stage_id:id})
-    try{if(by.trim())localStorage.setItem('pg_ready_by',by.trim())}catch{}
     const{error}=await supabase.from('projects').update({intake_stage_id:id}).eq('id',x.id)
     if(error){apply({intake_stage_id:x.intake_stage_id??null});setBusy(false);alert('Failed to save: '+error.message);return}
-    await supabase.from('readiness_log').insert({entity_type:'project',entity_id:x.id,entity_name:x.name,gate:'intake',from_status:from,to_status:to,by_name:by.trim()||null})
+    await supabase.from('readiness_log').insert({entity_type:'project',entity_id:x.id,entity_name:x.name,gate:'intake',from_status:from,to_status:to})
     setBusy(false);onClose()
   }
   const W=300,left=Math.min(Math.max(8,rect.left-W/2),window.innerWidth-W-8),below=rect.bottom+6+380<window.innerHeight
@@ -90,8 +88,6 @@ function IntakePopover({x,rect,apply,onClose}:{x:any,rect:DOMRect,apply:(f:any)=
               </button>)})}
             {x.intake_stage_id&&<button disabled={busy} onClick={()=>pick(null)} style={{background:'none',border:'none',color:'#7A8FA6',fontSize:11,cursor:'pointer',textAlign:'left' as const,padding:'2px 8px'}}>Clear stage</button>}
           </div>
-          <input value={by} onChange={e=>setBy(e.target.value)} placeholder="Your name (for the history)"
-            style={{width:'100%',boxSizing:'border-box' as const,background:'#0F1C2B',color:'#F4F6F8',border:'1px solid #243447',borderRadius:5,fontSize:11.5,padding:'5px 7px',marginBottom:8}}/>
           <div style={{borderTop:'1px solid #243447',paddingTop:6}}>
             <div style={{fontSize:10,fontWeight:800,color:'#7A8FA6',letterSpacing:0.6,marginBottom:3}}>HISTORY</div>
             {hist===null?<div style={{fontSize:10.5,color:'#5B6B7E'}}>Loading…</div>:!hist.length?<div style={{fontSize:10.5,color:'#5B6B7E',fontStyle:'italic'}}>No changes yet.</div>:
