@@ -26,7 +26,7 @@ export function useIntakeStages(){
 }
 export const intakeStageOf=(p:any,list:any[])=>list.find(s=>s.id===p?.intake_stage_id)||null
 
-export function IntakeBubble({x,apply,size=11,showEmpty=true}:{x:any,apply?:(fields:any)=>void,size?:number,showEmpty?:boolean}){
+export function IntakeBubble({x,apply,size=11,showEmpty=true,maxName}:{x:any,apply?:(fields:any)=>void,size?:number,showEmpty?:boolean,maxName?:number}){
   const list=useIntakeStages()
   const [open,setOpen]=useState<DOMRect|null>(null)
   const st=intakeStageOf(x,list),idx=st?list.indexOf(st):-1
@@ -42,7 +42,7 @@ export function IntakeBubble({x,apply,size=11,showEmpty=true}:{x:any,apply?:(fie
         <span style={{display:'inline-flex',gap:1}}>
           {(list.length?list:[null]).slice(0,8).map((s:any,i:number)=><span key={i} style={{width:3,height:size*0.55,borderRadius:1,background:i<=idx?c:`${GREY}88`}}/>)}
         </span>
-        {st?st.name:'Intake'}
+        <span style={{maxWidth:maxName,overflow:'hidden',textOverflow:'ellipsis'}}>{st?st.name:'Intake'}</span>
       </span>
       {open&&apply&&typeof document!=='undefined'&&createPortal(<IntakePopover x={x} rect={open} apply={apply} onClose={()=>setOpen(null)}/>,document.body)}
     </span>

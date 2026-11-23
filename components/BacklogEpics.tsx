@@ -70,7 +70,8 @@ export function EpicRow({epic,projects,items,isSel,onSelect,ccCount=0,releases=[
       <td style={{...TD,textAlign:'center' as const,color:EPIC,cursor:onDragEpic?'grab':'pointer'}} title={onDragEpic?'Drag onto another epic to rank it there':undefined}>{onDragEpic&&<span style={{color:'#3A4A5E',marginRight:3}}>⠿</span>}◆</td>
       <td style={{...TD,fontSize:9,fontWeight:800,color:EPIC,letterSpacing:1}}>EPIC</td>
       <td style={{...TD,minWidth:240}}>
-        <div style={{fontSize:12.5,fontWeight:800,color:'#F4F6F8',display:'flex',alignItems:'center',gap:5}}><InlineText value={epic.name} width={230} onSave={v=>v&&upd({name:v})}>{epic.name}</InlineText>
+        <div style={{fontSize:12.5,fontWeight:800,color:'#F4F6F8',lineHeight:1.35}}><InlineText value={epic.name} width={230} onSave={v=>v&&upd({name:v})}>{epic.name}</InlineText></div>
+        <div style={{display:'flex',alignItems:'center',gap:5,marginTop:3}}>
           {setEpics&&<ReadinessPips kind="epic" x={epic} apply={(f:any)=>setEpics((p:any[])=>p.map(r=>r.id===epic.id?{...r,...f}:r))} size={12}/>}{setEpics&&<JiraChip kind="epic" x={epic} apply={(f:any)=>setEpics((p:any[])=>p.map(r=>r.id===epic.id?{...r,...f}:r))} size={10}/>}</div>
         <div style={{display:'flex',alignItems:'center',gap:6,marginTop:4}}>
           <div style={{width:90,height:4,borderRadius:2,background:'#243447',overflow:'hidden'}}><div style={{width:pct+'%',height:'100%',background:pct===100?'#27AE60':EPIC}}/></div>

@@ -2928,9 +2928,9 @@ const sorted=items.filter(i=>!isItemDone(i)).sort((a,b)=>{
                     </td>
                     <td style={{...TD,color:'#7A8FA6',fontFamily:'monospace',fontSize:10}}>{item.item_id}</td>
                     <td style={{...TD,minWidth:240,paddingLeft:item.__indent?30:12,borderLeft:item.__indent?'2px solid rgba(224,123,42,0.35)':undefined}}>
-                      <div style={{display:'flex',alignItems:'center',gap:6}}>
-                        <div style={{fontSize:12,color:'#F4F6F8',fontWeight:isSel?700:400,display:'flex',alignItems:'center',gap:5}}><span>{rt(item.request_type)} <InlineText value={item.name} width={220} onSave={v=>v&&upd(item.id,'name',v)}>{item.name}</InlineText></span>
-                          <ReadinessPips kind="item" x={item} apply={f=>setItems((p:any[])=>p.map(r=>r.id===item.id?{...r,...f}:r))} size={12}/><JiraChip kind="item" x={item} apply={f=>setItems((p:any[])=>p.map(r=>r.id===item.id?{...r,...f}:r))} size={11}/></div>
+                      <div style={{fontSize:12,color:'#F4F6F8',fontWeight:isSel?700:400,lineHeight:1.35,marginBottom:3,display:'flex',alignItems:'flex-start',gap:4}}>{rt(item.request_type)&&<span style={{flexShrink:0}}>{rt(item.request_type)}</span>}<span style={{minWidth:0}}><InlineText value={item.name} width={220} onSave={v=>v&&upd(item.id,'name',v)}>{item.name}</InlineText></span></div>
+                      <div style={{display:'flex',alignItems:'center',gap:6,flexWrap:'wrap' as const}}>
+                        <ReadinessPips kind="item" x={item} apply={f=>setItems((p:any[])=>p.map(r=>r.id===item.id?{...r,...f}:r))} size={12}/><JiraChip kind="item" x={item} apply={f=>setItems((p:any[])=>p.map(r=>r.id===item.id?{...r,...f}:r))} size={10}/>
                         {item.start_date&&item.end_date
                           ?<span onClick={e=>{e.stopPropagation();uncommitBacklogItem(item)}} title={`Committed: ${item.start_date} → ${item.end_date} — click to uncommit`}
                               style={{background:'rgba(39,174,96,0.15)',color:'#27AE60',border:'1px solid rgba(39,174,96,0.4)',borderRadius:4,padding:'1px 6px',fontSize:9,fontWeight:700,flexShrink:0,cursor:'pointer'}}>
@@ -4038,8 +4038,10 @@ function Roadmap({items,setItems,projects,setProjects,milestones,setMilestones,t
                           {group.violations.length>0&&<span style={{fontSize:9,color:'#E74C3C',flexShrink:0}}>⚠️</span>}
                         </div>
                         <div style={{display:'flex',alignItems:'center',gap:5,fontSize:9,color:'#7A8FA6',minWidth:0,overflow:'hidden',whiteSpace:'nowrap' as const}}>
-                          <span style={{flexShrink:0}}>{childItems.length} committed · {group.status}</span>
-                          {relChip('project',group)}<IntakeBubble x={group} size={11} apply={f=>setProjects((p:any[])=>p.map(r=>r.id===group.id?{...r,...f}:r))}/><ReadinessPips kind="project" x={group} apply={f=>setProjects((p:any[])=>p.map(r=>r.id===group.id?{...r,...f}:r))} size={11}/><JiraChip kind="project" x={group} apply={f=>setProjects((p:any[])=>p.map(r=>r.id===group.id?{...r,...f}:r))} size={10}/>
+                          <span title={`${childItems.length} committed · ${group.status}`} style={{flex:1,minWidth:0,overflow:'hidden',textOverflow:'ellipsis'}}>{childItems.length} committed · {group.status}</span>
+                          <span style={{display:'inline-flex',alignItems:'center',gap:4,flexShrink:0}}>
+                            {relChip('project',group)}<IntakeBubble x={group} size={11} maxName={58} apply={f=>setProjects((p:any[])=>p.map(r=>r.id===group.id?{...r,...f}:r))}/><ReadinessPips kind="project" x={group} apply={f=>setProjects((p:any[])=>p.map(r=>r.id===group.id?{...r,...f}:r))} size={11}/><JiraChip kind="project" x={group} compact size={9}/>
+                          </span>
                         </div>
                       </div>
                     </div>
@@ -4049,9 +4051,11 @@ function Roadmap({items,setItems,projects,setProjects,milestones,setMilestones,t
                           {r.count>0?<button onClick={()=>toggleCollapse('ep:'+e.id)} title={`${closed?'Show':'Hide'} its ${r.count} stor${r.count===1?'y':'ies'}`} style={{background:'none',border:'none',cursor:'pointer',color:'#E07B2A',fontSize:10,padding:'2px',width:14,flexShrink:0}}>{closed?'▶':'▼'}</button>:<span style={{width:14,flexShrink:0}}/>}
                           <div style={{overflow:'hidden',flex:1,minWidth:0}}>
                             <div style={{fontSize:11,fontWeight:700,color:'#F4F6F8',overflow:'hidden',whiteSpace:'nowrap' as const,textOverflow:'ellipsis'}}><span style={{color:'#E07B2A'}}>◆</span> {e.name}</div>
-                            <div style={{fontSize:9,color:'#7A8FA6',overflow:'hidden',whiteSpace:'nowrap' as const,textOverflow:'ellipsis'}}>EPIC · {r.count} stor{r.count===1?'y':'ies'} · <span style={{color:sc(e.status),fontWeight:700}}>{e.status||'New'}</span></div>
+                            <div style={{display:'flex',alignItems:'center',gap:5,fontSize:9,color:'#7A8FA6',whiteSpace:'nowrap' as const}}>
+                              <span style={{flex:1,minWidth:0,overflow:'hidden',textOverflow:'ellipsis'}}>EPIC · {r.count} stor{r.count===1?'y':'ies'} · <span style={{color:sc(e.status),fontWeight:700}}>{e.status||'New'}</span></span>
+                              <span style={{display:'inline-flex',alignItems:'center',gap:4,flexShrink:0}}>{relChip('epic',e)}<ReadinessPips kind="epic" x={e} apply={f=>setEpics?.((p:any[])=>p.map(r=>r.id===e.id?{...r,...f}:r))} size={11}/><JiraChip kind="epic" x={e} compact size={9}/></span>
+                            </div>
                           </div>
-                          {relChip('epic',e)}<ReadinessPips kind="epic" x={e} apply={f=>setEpics?.((p:any[])=>p.map(r=>r.id===e.id?{...r,...f}:r))} size={11}/><JiraChip kind="epic" x={e} apply={f=>setEpics?.((p:any[])=>p.map(r=>r.id===e.id?{...r,...f}:r))} size={10}/>
                         </div>
                       )}
                       const item=r.item
@@ -4064,9 +4068,11 @@ function Roadmap({items,setItems,projects,setProjects,milestones,setMilestones,t
                           <span style={{background:pc(item.priority).bg,color:'#fff',padding:'1px 5px',borderRadius:3,fontSize:9,fontWeight:700,flexShrink:0}}>{item.priority}</span>
                           <div style={{overflow:'hidden',flex:1,minWidth:0}}>
                             <div style={{fontSize:11,color:isViolation?'#E74C3C':'#C8C8D4',overflow:'hidden',whiteSpace:'nowrap' as const,textOverflow:'ellipsis'}}>{rt(item.request_type)} {item.name}{isViolation?' ⚠️':''}</div>
-                            <div style={{fontSize:9,color:'#7A8FA6',overflow:'hidden',whiteSpace:'nowrap' as const,textOverflow:'ellipsis'}}><span style={{fontFamily:'monospace'}}>{item.item_id}</span> <span style={{color:sc(item.status),fontWeight:700}}>● {item.status}</span></div>
+                            <div style={{display:'flex',alignItems:'center',gap:5,fontSize:9,color:'#7A8FA6',whiteSpace:'nowrap' as const}}>
+                              <span style={{flex:1,minWidth:0,overflow:'hidden',textOverflow:'ellipsis'}}><span style={{fontFamily:'monospace'}}>{item.item_id}</span> <span style={{color:sc(item.status),fontWeight:700}}>● {item.status}</span></span>
+                              <span style={{display:'inline-flex',alignItems:'center',gap:4,flexShrink:0}}>{relChip('item',item)}<ReadinessPips kind="item" x={item} apply={f=>setItems((p:any[])=>p.map(r=>r.id===item.id?{...r,...f}:r))} size={11}/><JiraChip kind="item" x={item} compact size={9}/></span>
+                            </div>
                           </div>
-                          {relChip('item',item)}<ReadinessPips kind="item" x={item} apply={f=>setItems((p:any[])=>p.map(r=>r.id===item.id?{...r,...f}:r))} size={11}/><JiraChip kind="item" x={item} apply={f=>setItems((p:any[])=>p.map(r=>r.id===item.id?{...r,...f}:r))} size={10}/>
                         </div>
                       )
                     })}

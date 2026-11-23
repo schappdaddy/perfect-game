@@ -521,11 +521,11 @@ export function QuarterPlanner({items,setItems,projects,setProjects,epics=[],set
       <div key={en.key} draggable onDragStart={e=>{setDragId(en.key);e.dataTransfer.effectAllowed='move'}} onDragEnd={()=>{setDragId(null);setOver(null)}}
         title="Drag onto a quarter to plan when it's worked, or onto a release for its go-live"
         style={{background:'rgba(200,151,58,0.10)',border:'1px solid rgba(200,151,58,0.5)',borderLeft:'3px solid #C8973A',borderRadius:6,padding:'6px 8px',cursor:'grab',opacity:dragId===en.key?0.4:1,display:'flex',flexDirection:'column',gap:3}}>
-        <div style={{display:'flex',alignItems:'center',gap:6}}>
+        <div style={{display:'flex',alignItems:'center',gap:6,flexWrap:'wrap' as const,rowGap:3}}>
           <span style={{fontSize:9,fontWeight:800,color:KIND_CLR.initiative,letterSpacing:1,whiteSpace:'nowrap' as const}}>◈ INITIATIVE{o.goLive?' GO-LIVE':''}</span>
           {workTypeOfProject(p)!=='new'&&<WorkTag compact wt={workTypeOfProject(p)}/>}
-          <span style={{marginLeft:'auto',display:'flex',gap:5,alignItems:'center'}}>
-            <IntakeBubble x={p} size={12} apply={f=>applyLocal('project',p.id,f)}/><ReadinessPips kind="project" x={p} apply={f=>applyLocal('project',p.id,f)} size={12}/><JiraChip kind="project" x={p} apply={f=>applyLocal('project',p.id,f)} size={10}/>
+          <span style={{marginLeft:'auto',display:'flex',gap:5,alignItems:'center',flexWrap:'wrap' as const,justifyContent:'flex-end',minWidth:0}}>
+            <IntakeBubble x={p} size={12} maxName={110} apply={f=>applyLocal('project',p.id,f)}/><ReadinessPips kind="project" x={p} apply={f=>applyLocal('project',p.id,f)} size={12}/><JiraChip kind="project" x={p} apply={f=>applyLocal('project',p.id,f)} size={10}/>
             {p.release_month&&(!o.goLive||o.relBadge)&&<span style={{fontSize:9.5,fontWeight:700,color:'#5DADE2'}}>📦 {fmtMonthKey(p.release_month)}</span>}
             <TeamTag team={p.team}/>
           </span>
