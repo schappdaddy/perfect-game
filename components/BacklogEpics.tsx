@@ -6,6 +6,7 @@ import { ReleaseSelect, QuarterSelect, releaseText, fmtMonthKey, releaseOptions 
 import { InlineSelect, InlineText, InlineDate } from './InlineEdit'
 import { WORK_TYPE_KEYS, WT_LABEL, WorkTag, isWorkType, workTypeOfProject } from './WorkTypes'
 import { ReadinessPips } from './Readiness'
+import { JiraChip } from './JiraLink'
 
 // Epics in the Backlog: an epic row that sits in the same table as stories (styled apart),
 // the epic side panel, and converting a story into an epic or an epic back into a story.
@@ -70,7 +71,7 @@ export function EpicRow({epic,projects,items,isSel,onSelect,ccCount=0,releases=[
       <td style={{...TD,fontSize:9,fontWeight:800,color:EPIC,letterSpacing:1}}>EPIC</td>
       <td style={{...TD,minWidth:240}}>
         <div style={{fontSize:12.5,fontWeight:800,color:'#F4F6F8',display:'flex',alignItems:'center',gap:5}}><InlineText value={epic.name} width={230} onSave={v=>v&&upd({name:v})}>{epic.name}</InlineText>
-          {setEpics&&<ReadinessPips kind="epic" x={epic} apply={(f:any)=>setEpics((p:any[])=>p.map(r=>r.id===epic.id?{...r,...f}:r))} size={12}/>}</div>
+          {setEpics&&<ReadinessPips kind="epic" x={epic} apply={(f:any)=>setEpics((p:any[])=>p.map(r=>r.id===epic.id?{...r,...f}:r))} size={12}/>}{setEpics&&<JiraChip kind="epic" x={epic} apply={(f:any)=>setEpics((p:any[])=>p.map(r=>r.id===epic.id?{...r,...f}:r))} size={10}/>}</div>
         <div style={{display:'flex',alignItems:'center',gap:6,marginTop:4}}>
           <div style={{width:90,height:4,borderRadius:2,background:'#243447',overflow:'hidden'}}><div style={{width:pct+'%',height:'100%',background:pct===100?'#27AE60':EPIC}}/></div>
           <span style={{fontSize:10,color:'#7A8FA6'}}>{done}/{its.length} stories done</span>
@@ -174,7 +175,8 @@ export function EpicPanel({epic,projects,items,setItems,setEpics,statusOpts,prio
     <div style={{width:320,borderLeft:'1px solid #243447',background:'#162436',overflowY:'auto',flexShrink:0,display:'flex',flexDirection:'column'}}>
       <div style={{padding:'14px 16px',borderBottom:'1px solid #243447',borderTop:`3px solid ${EPIC}`,display:'flex',alignItems:'center',gap:8}}>
         <div style={{flex:1}}>
-          <div style={{fontSize:10,color:EPIC,fontWeight:800,letterSpacing:1}}>◆ EPIC</div>
+          <div style={{fontSize:10,color:EPIC,fontWeight:800,letterSpacing:1,display:'flex',alignItems:'center',gap:8}}>◆ EPIC
+            <JiraChip kind="epic" x={epic} add size={10} apply={(f:any)=>setEpics((p:any[])=>p.map((r:any)=>r.id===epic.id?{...r,...f}:r))}/></div>
           <div style={{fontSize:13,fontWeight:700,color:'#F4F6F8',marginTop:2,lineHeight:1.3}}>{epic.name}</div>
         </div>
         <button onClick={onClose} style={{background:'none',border:'none',cursor:'pointer',fontSize:20,color:'#7A8FA6'}}>×</button>

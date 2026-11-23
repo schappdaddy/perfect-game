@@ -7,6 +7,7 @@ import { EpicsSection } from './Epics'
 import { DependencyLayer, DepHandle, createDependency, deleteDependency, depKey } from './DependencyLayer'
 import { InlineSelect, InlineText, InlineDate, InlineEditStyles } from './InlineEdit'
 import { MilestoneTypeSelect } from './MilestoneTypes'
+import { JiraChip } from './JiraLink'
 import { WORK_TYPE_KEYS, WT_LABEL, WT_COLOR, WorkTag, isWorkType, workTypeOfProject, capacityShare, REQUEST_TYPES, isBug, SEVERITIES, sevOf, BugTag, CLOSED_STATUSES, isClosed } from './WorkTypes'
 import { QuarterPlanner, ReleaseCalendar, ReleaseSelect, QuarterSelect, ReleasesManager, releaseOptions, releaseOf, releaseText, fmtMonthKey } from './Releases'
 import { EpicRow, EpicPanel, epicProject, epicWorkType, convertStoryToEpic, convertEpicToStory } from './BacklogEpics'
@@ -1112,7 +1113,8 @@ function ProjectDetail({project,items,setItems,projects,setProjects,milestones,s
         <div style={{width:12,height:12,borderRadius:2,background:project.color||'#2E86AB',flexShrink:0}}/>
         <div style={{flex:1,minWidth:0}}>
           <div style={{fontSize:14,fontWeight:700,color:'#F4F6F8',overflow:'hidden',whiteSpace:'nowrap' as const,textOverflow:'ellipsis'}}>{project.name}</div>
-          <div style={{fontSize:11,color:'#7A8FA6',marginTop:1}}>{projectItems.length} items · {projectMilestones.length} milestones</div>
+          <div style={{fontSize:11,color:'#7A8FA6',marginTop:1,display:'flex',alignItems:'center',gap:8}}>{projectItems.length} items · {projectMilestones.length} milestones
+            <JiraChip kind="project" x={project} add apply={(f:any)=>setProjects((p:any[])=>p.map((r:any)=>r.id===project.id?{...r,...f}:r))}/></div>
         </div>
         <span style={{color:ragColor,fontSize:14}}>{project.rag==='Green'?'🟢':project.rag==='Amber'?'🟡':project.rag==='Red'?'🔴':'⚪'}</span>
         <button onClick={onClose} style={{background:'none',border:'none',cursor:'pointer',fontSize:20,color:'#7A8FA6',padding:'0 4px'}}>×</button>
@@ -2923,7 +2925,7 @@ const sorted=items.filter(i=>!isItemDone(i)).sort((a,b)=>{
                     <td style={{...TD,minWidth:240,paddingLeft:item.__indent?30:12,borderLeft:item.__indent?'2px solid rgba(224,123,42,0.35)':undefined}}>
                       <div style={{display:'flex',alignItems:'center',gap:6}}>
                         <div style={{fontSize:12,color:'#F4F6F8',fontWeight:isSel?700:400,display:'flex',alignItems:'center',gap:5}}><span>{rt(item.request_type)} <InlineText value={item.name} width={220} onSave={v=>v&&upd(item.id,'name',v)}>{item.name}</InlineText></span>
-                          <ReadinessPips kind="item" x={item} apply={f=>setItems((p:any[])=>p.map(r=>r.id===item.id?{...r,...f}:r))} size={12}/></div>
+                          <ReadinessPips kind="item" x={item} apply={f=>setItems((p:any[])=>p.map(r=>r.id===item.id?{...r,...f}:r))} size={12}/><JiraChip kind="item" x={item} apply={f=>setItems((p:any[])=>p.map(r=>r.id===item.id?{...r,...f}:r))} size={11}/></div>
                         {item.start_date&&item.end_date
                           ?<span onClick={e=>{e.stopPropagation();uncommitBacklogItem(item)}} title={`Committed: ${item.start_date} → ${item.end_date} — click to uncommit`}
                               style={{background:'rgba(39,174,96,0.15)',color:'#27AE60',border:'1px solid rgba(39,174,96,0.4)',borderRadius:4,padding:'1px 6px',fontSize:9,fontWeight:700,flexShrink:0,cursor:'pointer'}}>
@@ -3016,7 +3018,8 @@ const sorted=items.filter(i=>!isItemDone(i)).sort((a,b)=>{
           <div style={{width:320,borderLeft:'1px solid #243447',background:'#162436',overflowY:'auto',flexShrink:0,display:'flex',flexDirection:'column'}}>
             <div style={{padding:'14px 16px',borderBottom:'1px solid #243447',display:'flex',alignItems:'center',gap:8,flexShrink:0}}>
               <div style={{flex:1}}>
-                <div style={{fontSize:10,color:'#7A8FA6',fontFamily:'monospace'}}>{selected.item_id}</div>
+                <div style={{fontSize:10,color:'#7A8FA6',fontFamily:'monospace',display:'flex',alignItems:'center',gap:8}}>{selected.item_id}
+                  <JiraChip kind="item" x={selected} add size={10} apply={(f:any)=>{setItems((p:any[])=>p.map((r:any)=>r.id===selected.id?{...r,...f}:r));setSelected((sl:any)=>sl&&sl.id===selected.id?{...sl,...f}:sl)}}/></div>
                 <div style={{fontSize:13,fontWeight:700,color:'#F4F6F8',marginTop:2,lineHeight:1.3}}>{selected.name}</div>
               </div>
               {hasViolation(selected)&&<span title="Outside initiative timeline" style={{fontSize:16}}>⚠️</span>}
@@ -4019,7 +4022,7 @@ function Roadmap({items,setItems,projects,setProjects,milestones,setMilestones,t
                           <span onClick={()=>setQuickProject(group)} title="Click to edit this initiative" style={{fontSize:12,fontWeight:700,color:'#F4F6F8',overflow:'hidden',whiteSpace:'nowrap' as const,textOverflow:'ellipsis',minWidth:0,cursor:'pointer'}}>{group.name}{group.ongoing?' ∞':''}</span>
                           <span style={{fontSize:10,color:rc,fontWeight:700,flexShrink:0}}>{group.rag==='Green'?'🟢':group.rag==='Amber'?'🟡':group.rag==='Red'?'🔴':'⚪'}</span>
                           {group.violations.length>0&&<span style={{fontSize:9,color:'#E74C3C',flexShrink:0}}>⚠️</span>}
-                          {relChip('project',group)}<ReadinessPips kind="project" x={group} apply={f=>setProjects((p:any[])=>p.map(r=>r.id===group.id?{...r,...f}:r))} size={11}/>
+                          {relChip('project',group)}<ReadinessPips kind="project" x={group} apply={f=>setProjects((p:any[])=>p.map(r=>r.id===group.id?{...r,...f}:r))} size={11}/><JiraChip kind="project" x={group} apply={f=>setProjects((p:any[])=>p.map(r=>r.id===group.id?{...r,...f}:r))} size={10}/>
                         </div>
                         <div style={{fontSize:9,color:'#7A8FA6'}}>{childItems.length} committed · {group.status}</div>
                       </div>
@@ -4032,7 +4035,7 @@ function Roadmap({items,setItems,projects,setProjects,milestones,setMilestones,t
                             <div style={{fontSize:11,fontWeight:700,color:'#F4F6F8',overflow:'hidden',whiteSpace:'nowrap' as const,textOverflow:'ellipsis'}}><span style={{color:'#E07B2A'}}>◆</span> {e.name}</div>
                             <div style={{fontSize:9,color:'#7A8FA6',overflow:'hidden',whiteSpace:'nowrap' as const,textOverflow:'ellipsis'}}>EPIC · {r.count} stor{r.count===1?'y':'ies'} · <span style={{color:sc(e.status),fontWeight:700}}>{e.status||'New'}</span></div>
                           </div>
-                          {relChip('epic',e)}<ReadinessPips kind="epic" x={e} apply={f=>setEpics?.((p:any[])=>p.map(r=>r.id===e.id?{...r,...f}:r))} size={11}/>
+                          {relChip('epic',e)}<ReadinessPips kind="epic" x={e} apply={f=>setEpics?.((p:any[])=>p.map(r=>r.id===e.id?{...r,...f}:r))} size={11}/><JiraChip kind="epic" x={e} apply={f=>setEpics?.((p:any[])=>p.map(r=>r.id===e.id?{...r,...f}:r))} size={10}/>
                         </div>
                       )}
                       const item=r.item
@@ -4047,7 +4050,7 @@ function Roadmap({items,setItems,projects,setProjects,milestones,setMilestones,t
                             <div style={{fontSize:11,color:isViolation?'#E74C3C':'#C8C8D4',overflow:'hidden',whiteSpace:'nowrap' as const,textOverflow:'ellipsis'}}>{rt(item.request_type)} {item.name}{isViolation?' ⚠️':''}</div>
                             <div style={{fontSize:9,color:'#7A8FA6',overflow:'hidden',whiteSpace:'nowrap' as const,textOverflow:'ellipsis'}}><span style={{fontFamily:'monospace'}}>{item.item_id}</span> <span style={{color:sc(item.status),fontWeight:700}}>● {item.status}</span></div>
                           </div>
-                          {relChip('item',item)}<ReadinessPips kind="item" x={item} apply={f=>setItems((p:any[])=>p.map(r=>r.id===item.id?{...r,...f}:r))} size={11}/>
+                          {relChip('item',item)}<ReadinessPips kind="item" x={item} apply={f=>setItems((p:any[])=>p.map(r=>r.id===item.id?{...r,...f}:r))} size={11}/><JiraChip kind="item" x={item} apply={f=>setItems((p:any[])=>p.map(r=>r.id===item.id?{...r,...f}:r))} size={10}/>
                         </div>
                       )
                     })}

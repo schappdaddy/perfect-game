@@ -4,6 +4,7 @@ import { supabase } from '../lib/supabase'
 import { MilestoneTypeSelect, useMilestoneTypes, typeColor } from './MilestoneTypes'
 import { WT_LABEL, WorkTag, workTypeOfProject, isBug, BugTag, CLOSED_STATUSES } from './WorkTypes'
 import { ReadinessPips, ReadinessAudit } from './Readiness'
+import { JiraChip } from './JiraLink'
 
 // Monthly releases and quarterly planning of all work (New, Sustain and SaaS deliverable).
 // A release is a month ('2026-11'). Each month can have a release date, or be marked as
@@ -446,7 +447,7 @@ export function QuarterPlanner({items,setItems,projects,setProjects,epics=[],set
         {isEpic?<span style={{fontSize:9,fontWeight:800,color:KIND_CLR.epic,letterSpacing:1}}>◆ EPIC</span>
           :isBug(x)?<><BugTag item={x}/><span style={{fontSize:10,color:'#7A8FA6',fontFamily:'monospace'}}>{x.item_id}</span></>
           :<><span style={{fontSize:9,fontWeight:800,color:KIND_CLR.story,letterSpacing:1}}>▪ STORY</span><span style={{fontSize:10,color:'#7A8FA6',fontFamily:'monospace'}}>{x.item_id}</span><span title={x.request_type} style={{fontSize:11}}>{RT_ICON[x.request_type]||''}</span></>}
-        <span style={{marginLeft:'auto',display:'flex',gap:4,alignItems:'center'}}><ReadinessPips kind={en.kind==='epic'?'epic':'item'} x={x} apply={f=>applyLocal(en.kind==='epic'?'epic':'item',x.id,f)} size={12}/>{wtF==='all'&&<WorkTag compact wt={wtOf(en.kind,x)}/>}<TeamTag team={teamOf(en.kind,x)}/></span>
+        <span style={{marginLeft:'auto',display:'flex',gap:4,alignItems:'center'}}><ReadinessPips kind={en.kind==='epic'?'epic':'item'} x={x} apply={f=>applyLocal(en.kind==='epic'?'epic':'item',x.id,f)} size={12}/><JiraChip kind={en.kind==='epic'?'epic':'item'} x={x} apply={f=>applyLocal(en.kind==='epic'?'epic':'item',x.id,f)} size={10}/>{wtF==='all'&&<WorkTag compact wt={wtOf(en.kind,x)}/>}<TeamTag team={teamOf(en.kind,x)}/></span>
         <span style={{fontSize:10,fontWeight:700,color:x.priority==='P1'?'#E74C3C':x.priority==='P2'?'#D4820A':'#7A8FA6'}}>{x.priority}</span>
         {(isEpic?ptsOf(en)>0:!!x.effort)&&<span title={isEpic&&!x.effort?'Effort points of its open stories':undefined} style={{fontSize:10,color:'#7A8FA6',border:'1px solid #3A4A5E',borderRadius:3,padding:'0 4px'}}>{isEpic&&!x.effort?ptsOf(en)+' pts':x.effort}</span>}
       </div>
@@ -523,7 +524,7 @@ export function QuarterPlanner({items,setItems,projects,setProjects,epics=[],set
           <span style={{fontSize:9,fontWeight:800,color:KIND_CLR.initiative,letterSpacing:1,whiteSpace:'nowrap' as const}}>◈ INITIATIVE{o.goLive?' GO-LIVE':''}</span>
           {workTypeOfProject(p)!=='new'&&<WorkTag compact wt={workTypeOfProject(p)}/>}
           <span style={{marginLeft:'auto',display:'flex',gap:5,alignItems:'center'}}>
-            <ReadinessPips kind="project" x={p} apply={f=>applyLocal('project',p.id,f)} size={12}/>
+            <ReadinessPips kind="project" x={p} apply={f=>applyLocal('project',p.id,f)} size={12}/><JiraChip kind="project" x={p} apply={f=>applyLocal('project',p.id,f)} size={10}/>
             {p.release_month&&(!o.goLive||o.relBadge)&&<span style={{fontSize:9.5,fontWeight:700,color:'#5DADE2'}}>📦 {fmtMonthKey(p.release_month)}</span>}
             <TeamTag team={p.team}/>
           </span>
