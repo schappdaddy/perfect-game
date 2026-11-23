@@ -88,8 +88,12 @@ export function planModel(inp:PlanInput){
       meta:[...bks,`${list.length} planned${ini.length?` · ${ini.length} go-live${ini.length!==1?'s':''}`:''} · ${pts(list)} pts`],
       milestones:msIn(qi.qStart,qi.qEnd).map(toMs),cards:[...ini.map(en=>toCard(en,{release:true})),...list.map(en=>toCard(en,{release:true}))]}
   })
+  // Stories planned with their epic but shipping in a different release (an epic released in
+  // stages) also appear in their own release's month
+  const shipsApart=(i:any)=>{if(!i.release_month||!withItsEpic(i))return false;const e=epicById(i.epic_id);return !!e&&i.release_month!==(e.release_month||null)}
+  const staged:Entry[]=items.filter((i:any)=>open(i)&&qkOf('item',i)&&shipsApart(i)&&shown('item',i)).map((i:any)=>ent('item',i))
   const monthCol=(k:string):PlanColumn=>{
-    const td=planned.filter(en=>en.x.release_month===k&&inView(en)),ini=inits.filter(en=>en.x.release_month===k),r=releaseOf(releases,k),blocked=isBlocked(k)
+    const td=[...planned,...staged].filter(en=>en.x.release_month===k&&inView(en)).sort(rank),ini=inits.filter(en=>en.x.release_month===k),r=releaseOf(releases,k),blocked=isBlocked(k)
     return{title:`${fmtMonthKey(k)}`,sub:blocked?`No release${r?.notes?' · '+r.notes:''}`:releaseText(releases,k),blocked,slimmable:true,
       meta:blocked?[]:[`${ini.length?`${ini.length} go-live${ini.length!==1?'s':''} · `:''}${td.length} planned · ${pts(td)} pts`],
       milestones:msIn(`${k}-01`,lastDay(k)).map(toMs),cards:[...ini.map(en=>toCard(en)),...td.map(en=>toCard(en,{quarter:true}))]}
