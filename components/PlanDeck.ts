@@ -142,7 +142,12 @@ export function planModel(inp:PlanInput){
     ...items.filter((i:any)=>open(i)&&!qkOf('item',i)&&!withItsEpic(i)&&shown('item',i)).map((i:any)=>ent('item',i))]
   const groupName=(en:Entry)=>homeOf(en.kind,en.x)?.name||'No initiative'
   unplannedWork.sort((a,b)=>{const ga=groupName(a),gb=groupName(b);return(ga==='No initiative'?1:0)-(gb==='No initiative'?1:0)||ga.localeCompare(gb)||(PRI[a.x.priority]||9)-(PRI[b.x.priority]||9)||(a.kind==='epic'?0:1)-(b.kind==='epic'?0:1)})
-  const unplannedRows=unplannedWork.map(en=>({group:groupName(en),kind:en.kind==='epic'?'Epic':en.x.request_type==='Bug'?'Bug':'Story',ref:en.kind==='item'?en.x.item_id||'':'',name:en.x.name,team:shortOf(teamOf(en.kind,en.x))||'',wt:WTS[wtOf(en.kind,en.x)]||'',priority:en.x.priority||'',status:en.x.status||'',stories:en.kind==='epic'?storiesOf(en.x).filter(open).length:null}))
+  const rowOf=(en:Entry,child=false)=>({child,group:groupName(en),kind:en.kind==='epic'?'Epic':en.x.request_type==='Bug'?'Bug':'Story',ref:en.kind==='item'?en.x.item_id||'':'',name:en.x.name,team:shortOf(teamOf(en.kind,en.x))||'',wt:WTS[wtOf(en.kind,en.x)]||'',priority:en.x.priority||'',status:en.x.status||'',stories:null})
+  // Each unplanned epic is followed by its own open stories and bugs that aren't planned either
+  const unplannedRows=unplannedWork.flatMap(en=>en.kind!=='epic'?[rowOf(en)]:[rowOf(en),
+    ...storiesOf(en.x).filter((i:any)=>open(i)&&!qkOf('item',i)&&withItsEpic(i)&&shown('item',i))
+      .sort((a:any,b:any)=>(PRI[a.priority]||9)-(PRI[b.priority]||9)||String(a.item_id||'').localeCompare(String(b.item_id||'')))
+      .map((i:any)=>rowOf(ent('item',i),true))])
 
   // The release calendar: for each month of a fiscal year, what ships, by initiative (as on
   // the Roadmap's Release calendar)
@@ -300,7 +305,7 @@ export async function exportFullPlanPptx({strategy,strategyCtx,plan,sections,fil
     tableSlides(pptx,'Initiatives not on the roadmap',`No dates or release · ${sub}`,['Initiative','Team','Work type','Status','Priority','Epics','Stories'],[4.6,1.1,1.3,1.6,1.1,1.1,1.1],
       m.undatedInits.map((p:any)=>({cells:[p.name,shortOf(p.team)||'',WTS[workTypeOfProject(p)]||'',p.status||'',p.priority||'',String(plan.epics.filter((e:any)=>e.project_id===p.id&&!TERMINAL.includes(e.status)).length),String(plan.items.filter((i:any)=>i.parent_project===p.name&&!TERMINAL.includes(i.status)).length)]})))
     tableSlides(pptx,'Work with no quarter',`Epics and stories not planned yet, by initiative and priority · ${sub}`,['Kind','ID','Name','Team','Work type','Priority','Status'],[0.8,1.0,5.6,0.8,1.2,0.9,1.6],
-      m.unplannedRows.map(r=>({group:r.group,cells:[r.kind,r.ref,r.name+(r.stories?` (${r.stories} open stor${r.stories===1?"y":"ies"})`:""),r.team,r.wt,r.priority,r.status]})),2)
+      m.unplannedRows.map(r=>({group:r.group,cells:[r.kind,r.ref,(r.child?'   ↳ ':'')+r.name,r.team,r.wt,r.priority,r.status]})),2)
   }
   if(sections.readiness){
     const ready=(st:any)=>st==='approved'||st==='na'
