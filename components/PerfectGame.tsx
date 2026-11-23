@@ -2100,6 +2100,8 @@ function Backlog({mode='list',items,setItems,projects,setProjects,space,ccrs=[],
     const e=(epics as any[]).find(x=>x.id===item.epic_id)
     if(!e)return null
     if(!e.project_id)return e
+    // No initiative on the item: still show its epic (it takes the epic's initiative when saved)
+    if(!item.parent_project)return e
     const pr=projects.find((p:any)=>p.id===e.project_id)
     return pr&&pr.name===item.parent_project?e:null
   }
