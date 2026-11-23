@@ -39,12 +39,18 @@ function resolve(input:string,base:string):{url:string|null,key:string|null,need
   return{url:/^[\w.-]+\.[a-z]{2,}\//i.test(t)?'https://'+t:t,key:null}
 }
 
-export function JiraChip({kind,x,apply,size=11,add=false}:{kind:JiraKind,x:any,apply?:(fields:any)=>void,size?:number,add?:boolean}){
+export function JiraChip({kind,x,apply,size=11,add=false,compact=false}:{kind:JiraKind,x:any,apply?:(fields:any)=>void,size?:number,add?:boolean,compact?:boolean}){
   const [open,setOpen]=useState<DOMRect|null>(null)
   const key=jiraKeyOf(x),href=jiraHrefOf(x),set=hasJira(x)
   if(!set&&!(add&&apply))return null
   const pop=open&&apply&&typeof document!=='undefined'&&createPortal(<JiraPopover kind={kind} x={x} rect={open} apply={apply} onClose={()=>setOpen(null)}/>,document.body)
   const edit=(e:any)=>{e.preventDefault();e.stopPropagation();setOpen((e.currentTarget as HTMLElement).getBoundingClientRect())}
+  // Compact: just the ◆ mark (the key is in its tooltip); for tight rows
+  if(compact&&set)return(
+    <span onClick={e=>e.stopPropagation()} onMouseDown={e=>e.stopPropagation()} style={{display:'inline-flex',flexShrink:0}}>
+      {href?<a href={href} target="_blank" rel="noreferrer" title={`${key||'Jira'}: open in Jira\n${href}`} style={{color:BLUE,fontSize:size,fontWeight:800,textDecoration:'none',border:`1px solid ${BLUE}66`,background:`${BLUE}1A`,borderRadius:4,padding:'0 4px',lineHeight:1.3}}>◆</a>
+        :<span title={key||'Jira'} style={{color:BLUE,fontSize:size,fontWeight:800,border:`1px solid ${BLUE}66`,borderRadius:4,padding:'0 4px',lineHeight:1.3}}>◆</span>}
+    </span>)
   if(!set)return(
     <span onClick={e=>e.stopPropagation()} onMouseDown={e=>e.stopPropagation()} style={{display:'inline-flex',flexShrink:0}}>
       <button onClick={edit} title="Link this to Jira" style={{background:'none',border:`1px dashed ${BLUE}66`,borderRadius:4,color:BLUE,fontSize:size,fontWeight:700,padding:'1px 6px',cursor:'pointer',lineHeight:1.3}}>＋ Jira</button>
