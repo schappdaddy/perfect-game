@@ -2567,6 +2567,16 @@ const sorted=items.filter(i=>!isItemDone(i)).sort((a,b)=>{
     return new Date(item.start_date)<new Date(project.start_date)||new Date(item.end_date)>new Date(project.end_date)
   }
 
+  // Epics to pick from: the item's initiative's first, then epics with no initiative, then the rest
+  function epicChoices(proj:any,cur?:any){
+    const all=(epics as any[]).filter((e:any)=>spaceOf(e)===space&&(!ITEM_TERMINAL.includes(e.status)||e.id===cur?.id))
+    const rank=(e:any)=>proj&&e.project_id===proj.id?0:!e.project_id?1:2
+    return all.sort((a:any,b:any)=>rank(a)-rank(b)||String(a.name).localeCompare(String(b.name)))
+  }
+  function epicLabel(e:any,proj:any){
+    const pr=e.project_id&&projects.find((p:any)=>p.id===e.project_id)
+    return pr&&pr.id!==proj?.id?`${e.name} · ${pr.name}`:e.name
+  }
   async function upd(id,field,val) {
     if(field==='status'){
       if(selected?.id===id) setSelected(s=>({...s,status:val,...(ITEM_TERMINAL.includes(val)?{committed_priority:null}:{})}))
@@ -2574,8 +2584,12 @@ const sorted=items.filter(i=>!isItemDone(i)).sort((a,b)=>{
       return
     }
     const extra:any=field==='vendor_delivery_date'?{vendor_date_changed_at:new Date().toISOString()}:{}
-    // Epics belong to one project — moving an item to another project drops its epic
-    if(field==='parent_project'){const it=items.find(i=>i.id===id);if(it?.parent_project!==val)extra.epic_id=null}
+    // An epic belongs to at most one initiative. Picking an epic links the item to the epic's
+    // initiative; moving the item to another initiative drops an epic that belongs elsewhere.
+    if(field==='epic_id'&&val){const ep=(epics as any[]).find((e:any)=>e.id===val);const pr=ep?.project_id&&projects.find((p:any)=>p.id===ep.project_id);if(pr)extra.parent_project=pr.name}
+    if(field==='parent_project'){const it=items.find(i=>i.id===id);const ep=it?.epic_id&&(epics as any[]).find((e:any)=>e.id===it.epic_id)
+      const epProj=ep?.project_id&&projects.find((p:any)=>p.id===ep.project_id)
+      if(ep&&epProj&&epProj.name!==val)extra.epic_id=null}
     setItems(items.map(i=>i.id===id?{...i,[field]:val,...extra}:i))
     if(selected?.id===id) setSelected(s=>({...s,[field]:val,...extra}))
     await supabase.from('items').update({[field]:val,...extra}).eq('id',id)
@@ -2958,10 +2972,9 @@ const sorted=items.filter(i=>!isItemDone(i)).sort((a,b)=>{
                     <td style={{...TD,fontSize:11,color:item.parent_project?'#F4F6F8':'#7A8FA6',minWidth:110}}>
                       <InlineSelect value={item.parent_project||''} options={[{value:'',label:'No initiative'},...[...parentOpts].sort().map((n:string)=>({value:n,label:n}))]} onChange={v=>upd(item.id,'parent_project',v)}>{item.parent_project||'—'}</InlineSelect></td>
                     <td style={TD}>{(()=>{const ep=epicOf(item);const proj=projects.find((p:any)=>p.name===item.parent_project)
-                      const opts=(epics as any[]).filter((e:any)=>spaceOf(e)===space&&(proj?e.project_id===proj.id:!e.project_id))
-                      if(ep&&!opts.includes(ep))opts.unshift(ep)
-                      return <InlineSelect value={ep?.id||''} title={proj?'Click to change the epic':'Epics without an initiative, or set the initiative first'}
-                        options={[{value:'',label:'No epic'},...opts.map((e:any)=>({value:e.id,label:e.name}))]} onChange={v=>upd(item.id,'epic_id',v)}>{ep
+                      const opts=epicChoices(proj,ep)
+                      return <InlineSelect value={ep?.id||''} title="Click to change the epic. Picking one links the item to the epic's initiative."
+                        options={[{value:'',label:'No epic'},...opts.map((e:any)=>({value:e.id,label:epicLabel(e,proj)}))]} onChange={v=>upd(item.id,'epic_id',v||null)}>{ep
                       ?<span title={`Epic: ${ep.name}`} style={{display:'inline-flex',alignItems:'center',gap:4,fontSize:11,color:'#E07B2A',border:'1px solid rgba(224,123,42,0.45)',background:'rgba(224,123,42,0.1)',borderRadius:4,padding:'1px 6px',maxWidth:150,overflow:'hidden',whiteSpace:'nowrap' as const,textOverflow:'ellipsis'}}>◆ {ep.name}</span>
                       :<span style={{fontSize:11,color:'#3A4A5E'}}>—</span>}</InlineSelect>})()}</td>
                     <td style={TD}><InlineSelect value={item.work_type||''} title="Work type: automatic follows the initiative or request type"
@@ -3047,6 +3060,14 @@ const sorted=items.filter(i=>!isItemDone(i)).sort((a,b)=>{
               <EditableDropdown field="swimlane" value={selected.swimlane} options={swimlaneOpts} setOptions={setSwimOpts} label="Swimlane"/>
               <EditableDropdown field="status" value={selected.status} options={statusOpts} setOptions={setStatusOpts} label="Status"/>
               <EditableDropdown field="effort" value={selected.effort} options={EFFORTS} setOptions={null} label="Effort"/>
+              <div>
+                <div style={{fontSize:11,color:'#7A8FA6',marginBottom:4,letterSpacing:0.5}}>TYPE</div>
+                <div style={{display:'flex',gap:4}}>
+                  {([['story','▪ Story','#5DADE2'],['bug','🐞 Bug','#E74C3C']] as [string,string,string][]).map(([k,l,c])=>{const on=(k==='bug')===isBug(selected);return(
+                    <button key={k} onClick={()=>{if(!on)upd(selected.id,'request_type',k==='bug'?'Bug':'Enhancement')}} title={on?'':k==='bug'?'Make this a bug':'Make this a story (Enhancement)'}
+                      style={{flex:1,background:on?`${c}22`:'transparent',border:`1px solid ${on?c:'#243447'}`,borderRadius:6,color:on?c:'#7A8FA6',fontSize:12,fontWeight:700,padding:'6px 0',cursor:on?'default':'pointer'}}>{l}</button>)})}
+                </div>
+              </div>
               <EditableDropdown field="request_type" value={selected.request_type} options={rtOpts} setOptions={setRtOpts} label="Request Type"/>
               <NoteMentions kind="i" id={selected.id}/>
               {isBug(selected)&&<div>
@@ -3061,15 +3082,16 @@ const sorted=items.filter(i=>!isItemDone(i)).sort((a,b)=>{
               <EditableDropdown field="parent_project" value={selected.parent_project} options={parentOpts} setOptions={null} label="Parent Initiative"/>
               {(()=>{
                 const proj=projects.find((p:any)=>p.name===selected.parent_project)
-                const opts=proj?(epics as any[]).filter(e=>e.project_id===proj.id):[]
+                const cur=(epics as any[]).find((e:any)=>e.id===selected.epic_id)
+                const opts=epicChoices(proj,cur)
                 return(
                   <div>
                     <div style={{fontSize:11,color:'#7A8FA6',marginBottom:4,letterSpacing:0.5}}>EPIC</div>
-                    <select value={opts.some(e=>e.id===selected.epic_id)?selected.epic_id:''} disabled={!proj} onChange={e=>upd(selected.id,'epic_id',e.target.value||null)}
-                      title={proj?(opts.length?'':'This initiative has no epics yet. Add them from the initiative panel.'):'Set a parent initiative first'}
-                      style={{width:'100%',background:'#1E3048',color:'#F4F6F8',border:'1px solid #243447',borderRadius:6,padding:'7px 10px',fontSize:13,cursor:proj?'pointer':'not-allowed',opacity:proj?1:0.5}}>
-                      <option value="">{!proj?'Set a parent initiative first':opts.length?'No epic':'No epics in this initiative yet'}</option>
-                      {opts.map(e=><option key={e.id} value={e.id}>{e.name}</option>)}
+                    <select value={cur?selected.epic_id:''} onChange={e=>upd(selected.id,'epic_id',e.target.value||null)}
+                      title="Picking an epic links this item to the epic's initiative"
+                      style={{width:'100%',background:'#1E3048',color:'#F4F6F8',border:'1px solid #243447',borderRadius:6,padding:'7px 10px',fontSize:13,cursor:'pointer'}}>
+                      <option value="">{opts.length?'No epic':'No epics yet'}</option>
+                      {opts.map(e=><option key={e.id} value={e.id}>{epicLabel(e,proj)}</option>)}
                     </select>
                   </div>
                 )

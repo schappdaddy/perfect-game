@@ -154,7 +154,7 @@ export async function convertEpicToStory(epic:any,{projects,items,setItems,setEp
 export function EpicPanel({epic,projects,items,setItems,setEpics,statusOpts,priorities,teams,efforts,onClose,onConvert,onDelete,releases=[],opts={}}:any){
   const pr=epicProject(epic,projects)
   const its=epicStories(epic,items,projects)
-  const candidates=items.filter((i:any)=>i.epic_id!==epic.id&&!ITEM_TERMINAL.includes(i.status)&&(!pr||i.parent_project===pr.name))
+  const candidates=items.filter((i:any)=>i.epic_id!==epic.id&&!ITEM_TERMINAL.includes(i.status)&&(!pr||!i.parent_project||i.parent_project===pr.name))
     .sort((a:any,b:any)=>(a.item_id||'').localeCompare(b.item_id||''))
   const [name,setName]=useState(epic.name)
   const [desc,setDesc]=useState(epic.description||'')
@@ -162,8 +162,10 @@ export function EpicPanel({epic,projects,items,setItems,setEpics,statusOpts,prio
   const upd=(fields:any)=>updateEpic(epic.id,fields,setEpics)
   const setProject=(projectId:string)=>setEpicProject(epic,projectId,{projects,items,setItems,setEpics})
   async function setStoryEpic(itemId:any,epicId:any){
-    setItems((prev:any[])=>prev.map((i:any)=>i.id===itemId?{...i,epic_id:epicId}:i))
-    const{error}=await supabase.from('items').update({epic_id:epicId}).eq('id',itemId)
+    // Adding to an epic that has an initiative links the story to that initiative too
+    const f:any={epic_id:epicId};if(epicId&&pr)f.parent_project=pr.name
+    setItems((prev:any[])=>prev.map((i:any)=>i.id===itemId?{...i,...f}:i))
+    const{error}=await supabase.from('items').update(f).eq('id',itemId)
     if(error)alert('Failed to update story: '+error.message)
   }
   const sel=(field:string,opts:string[],blank?:string)=>(
