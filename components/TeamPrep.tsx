@@ -155,7 +155,7 @@ export default function TeamPrep(props:any){
           {tile(`PLANNED ${m.quarterCols[0].title}`,thisQ,'epics and stories this quarter','#5DADE2')}
           {tile('NEXT RELEASE',nextRel?fmtDay(nextRel.r?.release_date||`${nextRel.k}-01`):'—',nextRel?`${fmtMonthKey(nextRel.k)} · ${nextRelCount} item${nextRelCount!==1?'s':''} for ${team}${nextRel.r?.release_date?'':' · date not set'}`:'no release ahead')}
           {tile('SPRINT',curSprint?`S${teamSprints.indexOf(curSprint)+1}`:'—',curSprint?`${fmtDay(curSprint.start_date)} – ${fmtDay(curSprint.end_date)} · ${items.filter((i:any)=>i.sprint_id===curSprint.id).length} items`:'no sprint running')}
-          {tile('NOT PLANNED',m.unplannedRows.length+m.undatedInits.length,`${m.unplannedRows.length} epics/stories · ${m.undatedInits.length} initiatives`,m.unplannedRows.length?'#E8B95A':'#F4F6F8')}
+          {tile('NOT PLANNED',m.unplannedRows.length+m.undatedInits.length,`${m.unplannedRows.length} epics/stories/bugs · ${m.undatedInits.length} initiatives`,m.unplannedRows.length?'#E8B95A':'#F4F6F8')}
           {tile('PEOPLE',crew.length,[...new Set(crew.map((p:any)=>roles.find((r:any)=>r.id===p.role_id)?.name).filter(Boolean))].slice(0,3).join(' · '))}
         </div>
 
@@ -201,17 +201,17 @@ export default function TeamPrep(props:any){
           </div>
         </div>
 
-        <div style={{...box,marginTop:16}}>{H('NOT PLANNED YET',`${m.undatedInits.length} initiatives with no dates · ${m.unplannedRows.length} epics and stories with no quarter, by initiative and priority`)}
+        <div style={{...box,marginTop:16}}>{H('NOT PLANNED YET',`${m.undatedInits.length} initiatives with no dates · ${m.unplannedRows.length} epics, stories and bugs with no quarter, by initiative and priority`)}
           {m.undatedInits.length>0&&<div style={{display:'flex',gap:6,flexWrap:'wrap' as const,marginBottom:10}}>
             {m.undatedInits.map((p:any)=><span key={p.id} onClick={()=>onOpenProject?.(p)} style={{cursor:'pointer',fontSize:11,color:'#C8973A',border:'1px dashed rgba(200,151,58,0.6)',borderRadius:10,padding:'2px 9px'}}>◈ {p.name} · no dates</span>)}
           </div>}
           {(()=>m.unplannedRows.map((r:any,i:number)=>{const head=i===0||r.group!==m.unplannedRows[i-1].group;return(
             <div key={i}>
               {head&&<div style={{fontSize:10.5,fontWeight:800,color:r.group==='No initiative'?'#8FA6BC':'#C8973A',margin:'8px 0 3px'}}>{r.group==='No initiative'?'○':'◈'} {r.group}</div>}
-              <div style={{display:'grid',gridTemplateColumns:'54px 80px 1fr 70px 40px 120px',gap:8,alignItems:'center',fontSize:11.5,padding:'4px 0 4px 10px',borderBottom:'1px solid #1C2C3F'}}>
+              <div style={{display:'grid',gridTemplateColumns:'54px 80px 1fr 70px 40px 120px',gap:8,alignItems:'center',fontSize:11.5,padding:`4px 0 4px ${r.child?28:10}px`,borderBottom:'1px solid #1C2C3F',borderLeft:r.child?'2px solid rgba(224,123,42,0.35)':undefined,marginLeft:r.child?10:0}}>
                 <span style={{fontSize:9,fontWeight:800,color:r.kind==='Epic'?'#E07B2A':r.kind==='Bug'?'#E74C3C':'#5DADE2'}}>{r.kind==='Bug'?'🐞 BUG':r.kind.toUpperCase()}</span>
                 <span style={{color:'#7A8FA6',fontFamily:'monospace',fontSize:10.5}}>{r.ref}</span>
-                <span style={{color:'#F4F6F8'}}>{r.name}{r.stories?<span style={{color:'#7A8FA6'}}> · {r.stories} open stor{r.stories===1?'y':'ies'}</span>:''}</span>
+                <span style={{color:r.child?'#C8C8D4':'#F4F6F8'}}>{r.name}</span>
                 <span style={{color:'#7A8FA6'}}>{r.wt}</span>
                 <span style={{fontWeight:700,color:r.priority==='P1'?'#E74C3C':r.priority==='P2'?'#D4820A':'#7A8FA6'}}>{r.priority}</span>
                 <span style={{color:'#7A8FA6'}}>{r.status}</span>
