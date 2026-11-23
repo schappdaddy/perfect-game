@@ -3554,6 +3554,14 @@ function Roadmap({items,setItems,projects,setProjects,milestones,setMilestones,t
       scrollAnchorRef.current=null
     }
   },[view,zoom,cols.length])
+  // Open on today: today sits a little in from the left edge, so there's a bit of the past
+  // for context and the rest of the screen is what's coming up
+  const scrollToToday=()=>{const g=ganttRef.current as any;if(g)g.scrollLeft=Math.max(0,todayPx()-Math.min(COL_W*0.6,g.clientWidth*0.15))}
+  const openedRef=useRef(false)
+  useEffect(()=>{
+    if(openedRef.current||!ganttRef.current||!cols.length||!projects.length)return
+    openedRef.current=true;scrollToToday()
+  })
   // Sprint windows, deduped by exact date match (two teams sharing a cadence collapse
   // into one band) and given their real "Sprint N" ordinal — computed once, shared by
   // both the background shading (inside the scrollable body) and the dedicated label
@@ -3928,6 +3936,7 @@ function Roadmap({items,setItems,projects,setProjects,milestones,setMilestones,t
               setZoom(parseFloat(e.target.value))
             }} style={{width:90,accentColor:'#C8973A'}}/>
           <button onClick={()=>setZoom(1)} style={{...sel,fontSize:11,padding:'3px 8px'}}>Fit</button>
+          <button onClick={scrollToToday} title="Scroll to today" style={{...sel,fontSize:11,padding:'3px 8px',color:'#C8973A'}}>Today</button>
         </div>}
         {!mobileR&&<div style={{display:'flex',gap:6}}>
           <button onClick={expandAll} style={{...sel,fontSize:11,padding:'3px 10px'}}>Expand All</button>
@@ -4027,9 +4036,11 @@ function Roadmap({items,setItems,projects,setProjects,milestones,setMilestones,t
                           <span onClick={()=>setQuickProject(group)} title="Click to edit this initiative" style={{fontSize:12,fontWeight:700,color:'#F4F6F8',overflow:'hidden',whiteSpace:'nowrap' as const,textOverflow:'ellipsis',minWidth:0,cursor:'pointer'}}>{group.name}{group.ongoing?' ∞':''}</span>
                           <span style={{fontSize:10,color:rc,fontWeight:700,flexShrink:0}}>{group.rag==='Green'?'🟢':group.rag==='Amber'?'🟡':group.rag==='Red'?'🔴':'⚪'}</span>
                           {group.violations.length>0&&<span style={{fontSize:9,color:'#E74C3C',flexShrink:0}}>⚠️</span>}
+                        </div>
+                        <div style={{display:'flex',alignItems:'center',gap:5,fontSize:9,color:'#7A8FA6',minWidth:0,overflow:'hidden',whiteSpace:'nowrap' as const}}>
+                          <span style={{flexShrink:0}}>{childItems.length} committed · {group.status}</span>
                           {relChip('project',group)}<IntakeBubble x={group} size={11} apply={f=>setProjects((p:any[])=>p.map(r=>r.id===group.id?{...r,...f}:r))}/><ReadinessPips kind="project" x={group} apply={f=>setProjects((p:any[])=>p.map(r=>r.id===group.id?{...r,...f}:r))} size={11}/><JiraChip kind="project" x={group} apply={f=>setProjects((p:any[])=>p.map(r=>r.id===group.id?{...r,...f}:r))} size={10}/>
                         </div>
-                        <div style={{fontSize:9,color:'#7A8FA6'}}>{childItems.length} committed · {group.status}</div>
                       </div>
                     </div>
                     {!isCollapsed&&roadmapRows(group,childItems).map((r:any,idx:number)=>{

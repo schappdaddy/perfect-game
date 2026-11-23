@@ -3,7 +3,7 @@ import { useState, useEffect, useRef, Fragment } from 'react'
 import { supabase } from '../lib/supabase'
 import { DependencyLayer, DepHandle, createDependency, deleteDependency, depKey } from './DependencyLayer'
 import { StrategyReport } from './StrategyReport'
-import { WT_LABEL, WT_COLOR, WORK_TYPE_KEYS, workTypeOfProject, capacityShare, CLOSED_STATUSES } from './WorkTypes'
+import { WT_LABEL, WT_COLOR, WORK_TYPE_KEYS, workTypeOfProject, capacityShare, CLOSED_STATUSES, isBug, isClosed } from './WorkTypes'
 import { exportStrategiesPptx } from './StrategyPptx'
 import { StrategyBudgetPanel, StaffingSection, computeAllocation, slotted, overlapsFor, SLOTS, SHARED_TEAM } from './StrategyBudget'
 
@@ -17,7 +17,7 @@ import { StrategyBudgetPanel, StaffingSection, computeAllocation, slotted, overl
 
 const PROJECT_TERMINAL=CLOSED_STATUSES
 const ITEM_TERMINAL=CLOSED_STATUSES
-const EPIC='#E07B2A'
+const EPIC='#E07B2A',STORY='#5DADE2',BUG='#E74C3C'
 const MONTH_W=34          // px per month; a quarter is 3× this
 const LABEL_W_DESKTOP=250
 const ROW_H=26
@@ -150,7 +150,7 @@ export default function StrategyTab({projects:mainProjects,setProjects,strategie
   const [editGoal,setEditGoal]=useState<any>(null) // {track_id,fy,text}
   const pref=(k:string,d:any)=>{try{const v=localStorage.getItem('pg_strat_'+k);return v==null?d:JSON.parse(v)}catch{return d}}
   const [exporting,setExporting]=useState(false)
-  const [view,setView]=useState<any>(()=>({sortBy:pref('sortBy','start_date'),sortDir:pref('sortDir','asc'),showLoad:pref('showLoad',false),showEpics:pref('showEpics',true),snap:pref('snap','quarter'),groupBy:pref('groupBy','tracks'),budgetScope:pref('budgetScope','all'),sideTab:pref('sideTab','settings'),mode:pref('mode','map'),collapsed:pref('collapsed',{})}))
+  const [view,setView]=useState<any>(()=>({sortBy:pref('sortBy','start_date'),sortDir:pref('sortDir','asc'),showLoad:pref('showLoad',false),showEpics:pref('showEpics',true),showStories:pref('showStories',true),snap:pref('snap','quarter'),groupBy:pref('groupBy','tracks'),budgetScope:pref('budgetScope','all'),sideTab:pref('sideTab','settings'),mode:pref('mode','map'),collapsed:pref('collapsed',{})}))
   function setPref(k:string,v:any){setView((cur:any)=>({...cur,[k]:v}));try{localStorage.setItem('pg_strat_'+k,JSON.stringify(v))}catch{}}
   const toggleCollapsed=(key:string)=>setPref('collapsed',{...view.collapsed,[key]:!view.collapsed[key]})
   const [narrow,setNarrow]=useState(false)
@@ -517,7 +517,8 @@ export default function StrategyTab({projects:mainProjects,setProjects,strategie
   // ── Checks: dependencies, code freeze, team capacity ─────────────────────
   const issues:any[]=[]
   const shownKeys=new Set<string>()
-  shown.forEach(p=>{shownKeys.add(depKey('project',p.id));if(view.showEpics)projectEpics(p).forEach(e=>shownKeys.add(depKey('epic',e.id)))})
+  shown.forEach(p=>{shownKeys.add(depKey('project',p.id));if(view.showEpics)projectEpics(p).forEach(e=>shownKeys.add(depKey('epic',e.id)))
+    if(view.showStories)(items as any[]).filter(i=>i.parent_project===p.name).forEach(i=>shownKeys.add(depKey('item',i.id)))})
   for(const d of deps as any[]){
     const from=depKey(d.blocker_type,d.blocker_id),to=depKey(d.blocked_type,d.blocked_id)
     if(!shownKeys.has(from)&&!shownKeys.has(to))continue
@@ -595,8 +596,18 @@ export default function StrategyTab({projects:mainProjects,setProjects,strategie
   }
   function pushProject(p:any,inGroup=false){
     const eps=view.showEpics?projectEpics(p):[]
-    rows.push({kind:'project',p,epicCount:eps.length,inGroup,h:ROW_H})
-    if(eps.length&&!view.collapsed['pe:'+p.id])eps.forEach(e=>rows.push({kind:'epic',e,p,h:20}))
+    // Stories and bugs: under their epic, or straight under the initiative when they have no epic
+    // (or their epic isn't shown)
+    const shownEp=new Set(eps.map((e:any)=>e.id))
+    const loose=view.showStories?projectItems(p).filter((i:any)=>!shownEp.has(i.epic_id)):[]
+    rows.push({kind:'project',p,epicCount:eps.length+loose.length,inGroup,h:ROW_H})
+    if(view.collapsed['pe:'+p.id])return
+    eps.forEach(e=>{
+      const its=view.showStories?epicItems(e,p):[]
+      rows.push({kind:'epic',e,p,itemCount:its.length,h:20})
+      if(!view.collapsed['es:'+e.id])its.forEach((it:any)=>rows.push({kind:'item',it,p,indent:44,h:18}))
+    })
+    loose.forEach((it:any)=>rows.push({kind:'item',it,p,indent:28,h:18}))
   }
   const teamView=view.groupBy==='teams'
   if(teamView){
@@ -707,6 +718,21 @@ export default function StrategyTab({projects:mainProjects,setProjects,strategie
     if(!b.derived&&s===ep.start_date&&e===ep.end_date)return
     await updEpic(ep.id,{start_date:s,end_date:e})
   }
+  // Open stories and bugs linked to an initiative (closed work is left out, as everywhere else)
+  function byDate(a:any,b:any){return(a.start_date||a.end_date||'9999').localeCompare(b.start_date||b.end_date||'9999')||String(a.item_id||'').localeCompare(String(b.item_id||''))}
+  function projectItems(p:any){
+    return(items as any[]).filter(i=>i.parent_project===p.name&&!isClosed(i)).sort(byDate)
+  }
+  function epicItems(ep:any,p:any){
+    return(items as any[]).filter(i=>i.epic_id===ep.id&&!isClosed(i)&&(!p||!i.parent_project||i.parent_project===p.name)).sort(byDate)
+  }
+  // A story's bar: its own dates, else its release month (drawn as a marker)
+  function itemExtent(it:any){
+    if(it.start_date||it.end_date){const s=it.start_date||it.end_date,e=it.end_date||it.start_date;return{s,e,x0:clampX(posStart(s)),x1:clampX(posEnd(e)),rel:false}}
+    if(it.release_month&&/^\d{4}-\d{2}$/.test(it.release_month)){const[y,m]=it.release_month.split('-').map(Number);const abs=y*12+m-1
+      const s=monthStartISO(abs),e=monthEndISO(abs);return{s,e,x0:clampX(posStart(s)),x1:clampX(posEnd(e)),rel:true}}
+    return null
+  }
   function projectEpics(p:any){
     return(epics as any[]).filter(e=>e.project_id===p.id)
       .sort((a,b)=>(epicBase(a)?.s||'9999').localeCompare(epicBase(b)?.s||'9999')||a.name.localeCompare(b.name))
@@ -786,6 +812,9 @@ export default function StrategyTab({projects:mainProjects,setProjects,strategie
           </select>
           <label title="Show each initiative's epics under it" style={{display:'flex',alignItems:'center',gap:5,fontSize:11,color:'#7A8FA6',cursor:'pointer',whiteSpace:'nowrap' as const}}>
             <input type="checkbox" checked={view.showEpics} onChange={e=>setPref('showEpics',e.target.checked)} style={{accentColor:EPIC}}/>Epics
+          </label>
+          <label title="Show the stories and bugs linked to each initiative (under their epic when epics are shown)" style={{display:'flex',alignItems:'center',gap:5,fontSize:11,color:'#7A8FA6',cursor:'pointer',whiteSpace:'nowrap' as const}}>
+            <input type="checkbox" checked={view.showStories} onChange={e=>setPref('showStories',e.target.checked)} style={{accentColor:STORY}}/>Stories &amp; bugs
           </label>
         </div>}
         <div style={{marginLeft:'auto',display:'flex',gap:6}}>
@@ -935,9 +964,12 @@ export default function StrategyTab({projects:mainProjects,setProjects,strategie
                   const ep=r.e,ex=epicExtent(ep),isSelE=selId==='epic:'+ep.id,done=ITEM_TERMINAL.includes(ep.status)
                   return(
                     <div key={ri} style={{display:'flex',height:r.h,position:'relative',zIndex:1}}>
-                      <div onClick={()=>setSelId('epic:'+ep.id)} style={{...cellLabel,padding:'0 12px 0 28px',display:'flex',alignItems:'center',gap:5,cursor:'pointer',background:isSelE?'#2A2418':'#0D1B2A'}}>
+                      <div onClick={()=>setSelId('epic:'+ep.id)} style={{...cellLabel,padding:r.itemCount?'0 12px 0 14px':'0 12px 0 28px',display:'flex',alignItems:'center',gap:5,cursor:'pointer',background:isSelE?'#2A2418':'#0D1B2A'}}>
+                        {r.itemCount>0&&<button onClick={e=>{e.stopPropagation();toggleCollapsed('es:'+ep.id)}} title={`${view.collapsed['es:'+ep.id]?'Show':'Hide'} ${r.itemCount} stor${r.itemCount!==1?'ies':'y'} and bugs`}
+                          style={{...HDR_BTN,color:STORY,fontSize:8,padding:0,width:10}}>{view.collapsed['es:'+ep.id]?'▸':'▾'}</button>}
                         <span style={{fontSize:9,color:EPIC}}>◆</span>
                         <span title={ep.name} style={{...CLIP,fontSize:10.5,color:done?'#7A8FA6':'#C8C8D4',textDecoration:done?'line-through':'none'}}>{ep.name}</span>
+                        {r.itemCount>0&&view.collapsed['es:'+ep.id]&&<span style={{fontSize:9,color:'#7A8FA6',flexShrink:0}}>{r.itemCount}</span>}
                       </div>
                       <div onClick={e=>onEpicRowClick(e,ep)} style={{width:TW,position:'relative',cursor:ex?'default':'copy'}}>
                         {!ex&&<span style={{position:'absolute',left:8,top:3,fontSize:9.5,color:'#3A4A5E',fontStyle:'italic',pointerEvents:'none'}}>No dates. Click a {view.snap==='month'?'month':'quarter'} to place it there.</span>}
@@ -957,6 +989,25 @@ export default function StrategyTab({projects:mainProjects,setProjects,strategie
                     </div>
                   )
                 }
+                if(r.kind==='item'){
+                  const it=r.it,bug=isBug(it),c=bug?BUG:STORY,ix=itemExtent(it)
+                  const tip=`${bug?'🐞 Bug':'▪ Story'} ${it.item_id||''} · ${it.name}\n${it.status||''}${it.team?` · ${it.team}`:''}${ix?(ix.rel?`\nRelease ${it.release_month} (no dates)`:`\n${fmtDate(ix.s)} → ${fmtDate(ix.e)}`):'\nNo dates or release'}`
+                  return(
+                    <div key={ri} style={{display:'flex',height:r.h,position:'relative',zIndex:1}}>
+                      <div title={tip} style={{...cellLabel,padding:`0 12px 0 ${r.indent}px`,display:'flex',alignItems:'center',gap:5,background:'#0D1B2A'}}>
+                        <span style={{fontSize:bug?9:8,color:c,flexShrink:0}}>{bug?'🐞':'▪'}</span>
+                        <span style={{fontSize:9,color:'#7A8FA6',fontFamily:'monospace',flexShrink:0}}>{it.item_id}</span>
+                        <span style={{...CLIP,fontSize:10,color:'#AAB6C4'}}>{it.name}</span>
+                      </div>
+                      <div style={{width:TW,position:'relative'}}>
+                        {!ix&&<span style={{position:'absolute',left:8,top:3,fontSize:9,color:'#3A4A5E',fontStyle:'italic',pointerEvents:'none'}}>No dates or release</span>}
+                        {ix&&(ix.rel
+                          ?<div data-dep-key={depKey('item',it.id)} title={tip} style={{position:'absolute',left:ix.x0,width:Math.max(6,ix.x1-ix.x0),top:6,height:6,boxSizing:'border-box' as const,borderRadius:3,border:`1px dashed ${c}`,background:'transparent'}}/>
+                          :<div data-dep-key={depKey('item',it.id)} title={tip} style={{position:'absolute',left:ix.x0,width:Math.max(6,ix.x1-ix.x0),top:6,height:6,borderRadius:3,background:c,opacity:0.75}}/>)}
+                      </div>
+                    </div>
+                  )
+                }
                 // Project row
                 const p=r.p,ex=extent(p),st=state(p)
                 const isSel=sel?.id===p.id
@@ -965,7 +1016,7 @@ export default function StrategyTab({projects:mainProjects,setProjects,strategie
                 return(
                   <div key={ri} style={{display:'flex',height:r.h,position:'relative',zIndex:1}}>
                     <div onClick={()=>setSelId(p.id)} style={{...cellLabel,padding:r.epicCount?'0 12px 0 6px':'0 12px',display:'flex',alignItems:'center',gap:6,cursor:'pointer',background:isSel?'#1E3048':'#0D1B2A',borderLeft:r.inGroup?`3px solid ${GROUP}`:undefined}}>
-                      {r.epicCount>0&&<button onClick={e=>{e.stopPropagation();toggleCollapsed('pe:'+p.id)}} title={`${view.collapsed['pe:'+p.id]?'Show':'Hide'} ${r.epicCount} epic${r.epicCount!==1?'s':''}`}
+                      {r.epicCount>0&&<button onClick={e=>{e.stopPropagation();toggleCollapsed('pe:'+p.id)}} title={`${view.collapsed['pe:'+p.id]?'Show':'Hide'} its ${r.epicCount} epic${r.epicCount!==1?'s':''}, stories and bugs`}
                         style={{...HDR_BTN,color:EPIC,fontSize:9}}>{view.collapsed['pe:'+p.id]?'▸':'▾'}</button>}
                       <span style={{fontSize:11,color:done?'#7A8FA6':'#F4F6F8',fontWeight:isSel?700:400,overflow:'hidden',whiteSpace:'nowrap' as const,textOverflow:'ellipsis',flex:1,textDecoration:done?'line-through':'none'}}>{p.name}</span>
                       {p.team&&<span style={{fontSize:9,color:'#7A8FA6'}}>{teamShort(p.team)}</span>}
@@ -1007,6 +1058,9 @@ export default function StrategyTab({projects:mainProjects,setProjects,strategie
             <Legend swatch={{background:SAAS}} label="SaaS deliverable"/>
             {view.showEpics&&<Legend swatch={{background:'rgba(224,123,42,0.65)',height:8,borderRadius:4}} label="Epic"/>}
             {view.showEpics&&<Legend swatch={{border:`1px dashed ${EPIC}`,height:8,borderRadius:4}} label="Epic dated by its stories"/>}
+            {view.showStories&&<Legend swatch={{background:STORY,opacity:0.75,height:6,borderRadius:3}} label="Story"/>}
+            {view.showStories&&<Legend swatch={{background:BUG,opacity:0.75,height:6,borderRadius:3}} label="Bug"/>}
+            {view.showStories&&<Legend swatch={{border:`1px dashed ${STORY}`,height:6,borderRadius:3}} label="Story by release month (no dates)"/>}
             <Legend swatch={{borderTop:`2px solid ${GROUP}`,borderLeft:`2px solid ${GROUP}`,borderRight:`2px solid ${GROUP}`,height:6}} label="Group: runs at the same time"/>
             <Legend swatch={{background:'rgba(255,255,255,0.12)'}} label={`Code freeze (${freeze.map(m=>MONTHS[m-1]).join(', ')||'none'})`}/>
             <span>Drag the dot at a bar&apos;s end onto another bar to add a dependency, and click a line to remove it.</span>
