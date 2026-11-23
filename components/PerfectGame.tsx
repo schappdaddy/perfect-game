@@ -7,6 +7,8 @@ import { EpicsSection } from './Epics'
 import { DependencyLayer, DepHandle, createDependency, deleteDependency, depKey } from './DependencyLayer'
 import { InlineSelect, InlineText, InlineDate, InlineEditStyles } from './InlineEdit'
 import { MilestoneTypeSelect } from './MilestoneTypes'
+import { JiraChip } from './JiraLink'
+import { IntakeBubble } from './Intake'
 import { WORK_TYPE_KEYS, WT_LABEL, WT_COLOR, WorkTag, isWorkType, workTypeOfProject, capacityShare, REQUEST_TYPES, isBug, SEVERITIES, sevOf, BugTag, CLOSED_STATUSES, isClosed } from './WorkTypes'
 import { QuarterPlanner, ReleaseCalendar, ReleaseSelect, QuarterSelect, ReleasesManager, releaseOptions, releaseOf, releaseText, fmtMonthKey } from './Releases'
 import { EpicRow, EpicPanel, epicProject, epicWorkType, convertStoryToEpic, convertEpicToStory } from './BacklogEpics'
@@ -1112,7 +1114,9 @@ function ProjectDetail({project,items,setItems,projects,setProjects,milestones,s
         <div style={{width:12,height:12,borderRadius:2,background:project.color||'#2E86AB',flexShrink:0}}/>
         <div style={{flex:1,minWidth:0}}>
           <div style={{fontSize:14,fontWeight:700,color:'#F4F6F8',overflow:'hidden',whiteSpace:'nowrap' as const,textOverflow:'ellipsis'}}>{project.name}</div>
-          <div style={{fontSize:11,color:'#7A8FA6',marginTop:1}}>{projectItems.length} items · {projectMilestones.length} milestones</div>
+          <div style={{fontSize:11,color:'#7A8FA6',marginTop:1,display:'flex',alignItems:'center',gap:8}}>{projectItems.length} items · {projectMilestones.length} milestones
+            <IntakeBubble x={project} apply={(f:any)=>setProjects((p:any[])=>p.map((r:any)=>r.id===project.id?{...r,...f}:r))}/>
+            <JiraChip kind="project" x={project} add apply={(f:any)=>setProjects((p:any[])=>p.map((r:any)=>r.id===project.id?{...r,...f}:r))}/></div>
         </div>
         <span style={{color:ragColor,fontSize:14}}>{project.rag==='Green'?'🟢':project.rag==='Amber'?'🟡':project.rag==='Red'?'🔴':'⚪'}</span>
         <button onClick={onClose} style={{background:'none',border:'none',cursor:'pointer',fontSize:20,color:'#7A8FA6',padding:'0 4px'}}>×</button>
@@ -1853,6 +1857,9 @@ function Projects({items,setItems,projects,setProjects,milestones,setMilestones,
                       </span>
                       <span style={{color:sc(project.status),fontSize:11,fontWeight:600}}>{project.status}</span>
                       <span style={{fontSize:11,color:'#7A8FA6'}}>{project.team==='Consumer Experience'?'CE':'OE'}</span>
+                      <IntakeBubble x={project} size={13} apply={(f:any)=>setProjects((p:any[])=>p.map((r:any)=>r.id===project.id?{...r,...f}:r))}/>
+                      <ReadinessPips kind="project" x={project} size={13} apply={(f:any)=>setProjects((p:any[])=>p.map((r:any)=>r.id===project.id?{...r,...f}:r))}/>
+                      <JiraChip kind="project" x={project} size={10} apply={(f:any)=>setProjects((p:any[])=>p.map((r:any)=>r.id===project.id?{...r,...f}:r))}/>
                       {violations.length>0&&<span style={{background:'rgba(192,57,43,0.15)',border:'1px solid rgba(192,57,43,0.4)',borderRadius:5,padding:'2px 7px',fontSize:11,color:'#E74C3C'}}>⚠️ {violations.length} violation{violations.length!==1?'s':''}</span>}
                       {projectMilestones.length>0&&<span style={{background:'rgba(200,151,58,0.15)',border:'1px solid rgba(200,151,58,0.3)',borderRadius:5,padding:'2px 7px',fontSize:11,color:'#C8973A'}}>🏁 {projectMilestones.length} milestone{projectMilestones.length!==1?'s':''}</span>}
                     </div>
@@ -2923,7 +2930,7 @@ const sorted=items.filter(i=>!isItemDone(i)).sort((a,b)=>{
                     <td style={{...TD,minWidth:240,paddingLeft:item.__indent?30:12,borderLeft:item.__indent?'2px solid rgba(224,123,42,0.35)':undefined}}>
                       <div style={{display:'flex',alignItems:'center',gap:6}}>
                         <div style={{fontSize:12,color:'#F4F6F8',fontWeight:isSel?700:400,display:'flex',alignItems:'center',gap:5}}><span>{rt(item.request_type)} <InlineText value={item.name} width={220} onSave={v=>v&&upd(item.id,'name',v)}>{item.name}</InlineText></span>
-                          <ReadinessPips kind="item" x={item} apply={f=>setItems((p:any[])=>p.map(r=>r.id===item.id?{...r,...f}:r))} size={12}/></div>
+                          <ReadinessPips kind="item" x={item} apply={f=>setItems((p:any[])=>p.map(r=>r.id===item.id?{...r,...f}:r))} size={12}/><JiraChip kind="item" x={item} apply={f=>setItems((p:any[])=>p.map(r=>r.id===item.id?{...r,...f}:r))} size={11}/></div>
                         {item.start_date&&item.end_date
                           ?<span onClick={e=>{e.stopPropagation();uncommitBacklogItem(item)}} title={`Committed: ${item.start_date} → ${item.end_date} — click to uncommit`}
                               style={{background:'rgba(39,174,96,0.15)',color:'#27AE60',border:'1px solid rgba(39,174,96,0.4)',borderRadius:4,padding:'1px 6px',fontSize:9,fontWeight:700,flexShrink:0,cursor:'pointer'}}>
@@ -3016,7 +3023,8 @@ const sorted=items.filter(i=>!isItemDone(i)).sort((a,b)=>{
           <div style={{width:320,borderLeft:'1px solid #243447',background:'#162436',overflowY:'auto',flexShrink:0,display:'flex',flexDirection:'column'}}>
             <div style={{padding:'14px 16px',borderBottom:'1px solid #243447',display:'flex',alignItems:'center',gap:8,flexShrink:0}}>
               <div style={{flex:1}}>
-                <div style={{fontSize:10,color:'#7A8FA6',fontFamily:'monospace'}}>{selected.item_id}</div>
+                <div style={{fontSize:10,color:'#7A8FA6',fontFamily:'monospace',display:'flex',alignItems:'center',gap:8}}>{selected.item_id}
+                  <JiraChip kind="item" x={selected} add size={10} apply={(f:any)=>{setItems((p:any[])=>p.map((r:any)=>r.id===selected.id?{...r,...f}:r));setSelected((sl:any)=>sl&&sl.id===selected.id?{...sl,...f}:sl)}}/></div>
                 <div style={{fontSize:13,fontWeight:700,color:'#F4F6F8',marginTop:2,lineHeight:1.3}}>{selected.name}</div>
               </div>
               {hasViolation(selected)&&<span title="Outside initiative timeline" style={{fontSize:16}}>⚠️</span>}
@@ -4019,7 +4027,7 @@ function Roadmap({items,setItems,projects,setProjects,milestones,setMilestones,t
                           <span onClick={()=>setQuickProject(group)} title="Click to edit this initiative" style={{fontSize:12,fontWeight:700,color:'#F4F6F8',overflow:'hidden',whiteSpace:'nowrap' as const,textOverflow:'ellipsis',minWidth:0,cursor:'pointer'}}>{group.name}{group.ongoing?' ∞':''}</span>
                           <span style={{fontSize:10,color:rc,fontWeight:700,flexShrink:0}}>{group.rag==='Green'?'🟢':group.rag==='Amber'?'🟡':group.rag==='Red'?'🔴':'⚪'}</span>
                           {group.violations.length>0&&<span style={{fontSize:9,color:'#E74C3C',flexShrink:0}}>⚠️</span>}
-                          {relChip('project',group)}<ReadinessPips kind="project" x={group} apply={f=>setProjects((p:any[])=>p.map(r=>r.id===group.id?{...r,...f}:r))} size={11}/>
+                          {relChip('project',group)}<IntakeBubble x={group} size={11} apply={f=>setProjects((p:any[])=>p.map(r=>r.id===group.id?{...r,...f}:r))}/><ReadinessPips kind="project" x={group} apply={f=>setProjects((p:any[])=>p.map(r=>r.id===group.id?{...r,...f}:r))} size={11}/><JiraChip kind="project" x={group} apply={f=>setProjects((p:any[])=>p.map(r=>r.id===group.id?{...r,...f}:r))} size={10}/>
                         </div>
                         <div style={{fontSize:9,color:'#7A8FA6'}}>{childItems.length} committed · {group.status}</div>
                       </div>
@@ -4032,7 +4040,7 @@ function Roadmap({items,setItems,projects,setProjects,milestones,setMilestones,t
                             <div style={{fontSize:11,fontWeight:700,color:'#F4F6F8',overflow:'hidden',whiteSpace:'nowrap' as const,textOverflow:'ellipsis'}}><span style={{color:'#E07B2A'}}>◆</span> {e.name}</div>
                             <div style={{fontSize:9,color:'#7A8FA6',overflow:'hidden',whiteSpace:'nowrap' as const,textOverflow:'ellipsis'}}>EPIC · {r.count} stor{r.count===1?'y':'ies'} · <span style={{color:sc(e.status),fontWeight:700}}>{e.status||'New'}</span></div>
                           </div>
-                          {relChip('epic',e)}<ReadinessPips kind="epic" x={e} apply={f=>setEpics?.((p:any[])=>p.map(r=>r.id===e.id?{...r,...f}:r))} size={11}/>
+                          {relChip('epic',e)}<ReadinessPips kind="epic" x={e} apply={f=>setEpics?.((p:any[])=>p.map(r=>r.id===e.id?{...r,...f}:r))} size={11}/><JiraChip kind="epic" x={e} apply={f=>setEpics?.((p:any[])=>p.map(r=>r.id===e.id?{...r,...f}:r))} size={10}/>
                         </div>
                       )}
                       const item=r.item
@@ -4047,7 +4055,7 @@ function Roadmap({items,setItems,projects,setProjects,milestones,setMilestones,t
                             <div style={{fontSize:11,color:isViolation?'#E74C3C':'#C8C8D4',overflow:'hidden',whiteSpace:'nowrap' as const,textOverflow:'ellipsis'}}>{rt(item.request_type)} {item.name}{isViolation?' ⚠️':''}</div>
                             <div style={{fontSize:9,color:'#7A8FA6',overflow:'hidden',whiteSpace:'nowrap' as const,textOverflow:'ellipsis'}}><span style={{fontFamily:'monospace'}}>{item.item_id}</span> <span style={{color:sc(item.status),fontWeight:700}}>● {item.status}</span></div>
                           </div>
-                          {relChip('item',item)}<ReadinessPips kind="item" x={item} apply={f=>setItems((p:any[])=>p.map(r=>r.id===item.id?{...r,...f}:r))} size={11}/>
+                          {relChip('item',item)}<ReadinessPips kind="item" x={item} apply={f=>setItems((p:any[])=>p.map(r=>r.id===item.id?{...r,...f}:r))} size={11}/><JiraChip kind="item" x={item} apply={f=>setItems((p:any[])=>p.map(r=>r.id===item.id?{...r,...f}:r))} size={10}/>
                         </div>
                       )
                     })}
@@ -5384,6 +5392,35 @@ function Desk({items,setItems,projects,setProjects,milestones,setMilestones,task
   const mobile=useIsMobile()
   const [deskView,setDeskView]=useState('plan') // mobile: plan | radar | flags
   const railCard={background:'#162436',border:'1px solid #243447',borderRadius:8,padding:'10px 12px',marginBottom:12}
+  // Quick edits from the rail: works even when the initiative is closed (a milestone can outlive its project)
+  const [railEdit,setRailEdit]=useState<string|null>(null)
+  async function updMs(m:any,upd:any){
+    setMilestones((p:any[])=>p.map((x:any)=>x.id===m.id?{...x,...upd}:x))
+    const{error}=await supabase.from('milestones').update(upd).eq('id',m.id)
+    if(error)alert('Failed to update milestone: '+error.message)
+  }
+  async function delMs(m:any){
+    if(!confirm(`Delete milestone “${m.name}”?`))return
+    setMilestones((p:any[])=>p.filter((x:any)=>x.id!==m.id));setRailEdit(null)
+    const{error}=await supabase.from('milestones').delete().eq('id',m.id)
+    if(error)alert('Failed to delete milestone: '+error.message)
+  }
+  async function updItem(i:any,upd:any){
+    setItems((p:any[])=>p.map((x:any)=>x.id===i.id?{...x,...upd}:x))
+    const{error}=await supabase.from('items').update(upd).eq('id',i.id)
+    if(error)alert('Failed to update: '+error.message)
+  }
+  const reInp={background:'#0D1B2A',border:'1px solid #243447',borderRadius:4,color:'#F4F6F8',fontSize:11,padding:'3px 6px',colorScheme:'dark' as const}
+  const reBtn=(c:string)=>({background:'none',border:'1px solid '+c,borderRadius:4,color:c,fontSize:10,fontWeight:700,padding:'2px 7px',cursor:'pointer'})
+  const plusDays=(iso:string,n:number)=>{const d=new Date((iso||localISO(new Date()))+'T12:00:00');d.setDate(d.getDate()+n);return localISO(d)}
+  const RailEditor=({date,onDate,extra}:{date:string,onDate:(v:string)=>void,extra:any})=>(
+    <div onClick={e=>e.stopPropagation()} style={{display:'flex',flexWrap:'wrap' as const,gap:5,alignItems:'center',margin:'5px 0 2px'}}>
+      <input type="date" value={date||''} onChange={e=>e.target.value&&onDate(e.target.value)} style={reInp}/>
+      <button onClick={()=>onDate(plusDays(localISO(new Date()),7))} title="One week from today" style={reBtn('#7A8FA6')}>+1w</button>
+      <button onClick={()=>onDate(plusDays(localISO(new Date()),14))} title="Two weeks from today" style={reBtn('#7A8FA6')}>+2w</button>
+      {extra}
+    </div>)
+  const rowStyle=(k:string)=>({fontSize:11,marginBottom:6,lineHeight:1.4,cursor:'pointer',borderRadius:5,padding:'2px 4px',margin:'0 -4px 6px',background:railEdit===k?'#1E3048':'transparent'})
   const railTitle={fontSize:10,fontWeight:700,letterSpacing:1,color:'#C8973A',marginBottom:8}
   const lineInput={flex:1,background:'transparent',border:'none',outline:'none',color:'#F4F6F8',fontSize:14,lineHeight:1.6,fontFamily:'inherit',padding:0}
 
@@ -5624,10 +5661,13 @@ function Desk({items,setItems,projects,setProjects,milestones,setMilestones,task
           <RailHead k="due">🎯 DUE — NEXT 5 DAYS ({dueSoon.length})</RailHead>
           {railOpen.due&&<>
           {dueSoon.length===0&&<div style={{fontSize:11,color:'#7A8FA6',fontStyle:'italic'}}>Nothing due</div>}
-          {dueSoon.map(i=>{const overdue=+new Date(i.end_date+'T12:00:00')<+now;return(
-            <div key={i.id} style={{fontSize:11,marginBottom:6,lineHeight:1.4}}>
+          {dueSoon.map(i=>{const overdue=+new Date(i.end_date+'T12:00:00')<+now,k='d'+i.id;return(
+            <div key={i.id} onClick={()=>setRailEdit(railEdit===k?null:k)} title="Click to change the date or close it" style={rowStyle(k)}>
               <span style={{color:overdue?'#E74C3C':'#C8973A',fontWeight:700}}>{fmtDt(i.end_date)}{overdue?' ⚠':''}</span> <span style={{color:'#F4F6F8'}}>{rt(i.request_type)} {i.name}</span>
               <div style={{color:'#7A8FA6',fontSize:10}}>{i.item_id}{i.parent_project?` · ${i.parent_project}`:''} · <span style={{color:sc(i.status)}}>{i.status}</span></div>
+              {railEdit===k&&<RailEditor date={i.end_date} onDate={v=>updItem(i,{end_date:v})} extra={<>
+                <button onClick={()=>{updItem(i,{status:'Done',flagged:false});setRailEdit(null)}} style={reBtn('#2ECC71')}>✓ Done</button>
+                <button onClick={()=>{updItem(i,{end_date:null});setRailEdit(null)}} title="Remove the due date" style={reBtn('#7A8FA6')}>No date</button></>}/>}
             </div>
           )})}
           </>}
@@ -5636,10 +5676,13 @@ function Desk({items,setItems,projects,setProjects,milestones,setMilestones,task
           <RailHead k="ms">📅 MILESTONES — OVERDUE & NEXT 14 DAYS ({upMs.length})</RailHead>
           {railOpen.ms&&<>
           {upMs.length===0&&<div style={{fontSize:11,color:'#7A8FA6',fontStyle:'italic'}}>None due</div>}
-          {upMs.map(m=>{const pr=projects.find(p=>p.id===m.project_id);const overdue=+new Date(m.date+'T12:00:00')<+now;return(
-            <div key={m.id} style={{fontSize:11,marginBottom:6,lineHeight:1.4}}>
+          {upMs.map(m=>{const pr=projects.find(p=>p.id===m.project_id);const overdue=+new Date(m.date+'T12:00:00')<+now,k='m'+m.id;return(
+            <div key={m.id} onClick={()=>setRailEdit(railEdit===k?null:k)} title="Click to move, complete or delete it" style={rowStyle(k)}>
               <span style={{color:overdue?'#E74C3C':'#C8973A',fontWeight:700}}>{fmtDt(m.date)}{overdue?' ⚠':''}</span> <span style={{color:'#F4F6F8'}}>{m.name}</span>
-              {pr&&<div style={{color:'#7A8FA6',fontSize:10}}>{pr.name}</div>}
+              {pr&&<div style={{color:'#7A8FA6',fontSize:10}}>{pr.name}{isClosed(pr)?` · ${pr.status}`:''}</div>}
+              {railEdit===k&&<RailEditor date={m.date} onDate={v=>updMs(m,{date:v})} extra={<>
+                <button onClick={()=>{updMs(m,{completed:true});setRailEdit(null)}} style={reBtn('#2ECC71')}>✓ Complete</button>
+                <button onClick={()=>delMs(m)} style={reBtn('#E74C3C')}>🗑</button></>}/>}
             </div>
           )})}
           </>}
@@ -5648,10 +5691,12 @@ function Desk({items,setItems,projects,setProjects,milestones,setMilestones,task
           <RailHead k="vend">🚚 VENDOR DATES — THIS WEEK ({vend.length})</RailHead>
           {railOpen.vend&&<>
           {vend.length===0&&<div style={{fontSize:11,color:'#7A8FA6',fontStyle:'italic'}}>None due</div>}
-          {vend.map(i=>{const overdue=+new Date(i.vendor_delivery_date+'T12:00:00')<+now;return(
-            <div key={i.id} style={{fontSize:11,marginBottom:6,lineHeight:1.4}}>
+          {vend.map(i=>{const overdue=+new Date(i.vendor_delivery_date+'T12:00:00')<+now,k='v'+i.id;return(
+            <div key={i.id} onClick={()=>setRailEdit(railEdit===k?null:k)} title="Click to change the vendor date" style={rowStyle(k)}>
               <span style={{color:overdue?'#E74C3C':'#C8973A',fontWeight:700}}>{fmtDt(i.vendor_delivery_date)}{overdue?' ⚠':''}</span> <span style={{color:'#F4F6F8'}}>{rt(i.request_type)} {i.name}</span>
               <div style={{color:'#7A8FA6',fontSize:10}}>{i.item_id}{i.vendor?` · ${i.vendor}`:''}</div>
+              {railEdit===k&&<RailEditor date={i.vendor_delivery_date} onDate={v=>updItem(i,{vendor_delivery_date:v})} extra={<>
+                <button onClick={()=>{updItem(i,{vendor_delivery_date:null});setRailEdit(null)}} title="Delivered / no longer expected" style={reBtn('#2ECC71')}>✓ Delivered</button></>}/>}
             </div>
           )})}
           </>}
