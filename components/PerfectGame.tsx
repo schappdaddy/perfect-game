@@ -8,6 +8,7 @@ import { DependencyLayer, DepHandle, createDependency, deleteDependency, depKey 
 import { InlineSelect, InlineText, InlineDate, InlineEditStyles } from './InlineEdit'
 import { MilestoneTypeSelect } from './MilestoneTypes'
 import { JiraChip } from './JiraLink'
+import { IntakeBubble } from './Intake'
 import { WORK_TYPE_KEYS, WT_LABEL, WT_COLOR, WorkTag, isWorkType, workTypeOfProject, capacityShare, REQUEST_TYPES, isBug, SEVERITIES, sevOf, BugTag, CLOSED_STATUSES, isClosed } from './WorkTypes'
 import { QuarterPlanner, ReleaseCalendar, ReleaseSelect, QuarterSelect, ReleasesManager, releaseOptions, releaseOf, releaseText, fmtMonthKey } from './Releases'
 import { EpicRow, EpicPanel, epicProject, epicWorkType, convertStoryToEpic, convertEpicToStory } from './BacklogEpics'
@@ -1114,6 +1115,7 @@ function ProjectDetail({project,items,setItems,projects,setProjects,milestones,s
         <div style={{flex:1,minWidth:0}}>
           <div style={{fontSize:14,fontWeight:700,color:'#F4F6F8',overflow:'hidden',whiteSpace:'nowrap' as const,textOverflow:'ellipsis'}}>{project.name}</div>
           <div style={{fontSize:11,color:'#7A8FA6',marginTop:1,display:'flex',alignItems:'center',gap:8}}>{projectItems.length} items · {projectMilestones.length} milestones
+            <IntakeBubble x={project} apply={(f:any)=>setProjects((p:any[])=>p.map((r:any)=>r.id===project.id?{...r,...f}:r))}/>
             <JiraChip kind="project" x={project} add apply={(f:any)=>setProjects((p:any[])=>p.map((r:any)=>r.id===project.id?{...r,...f}:r))}/></div>
         </div>
         <span style={{color:ragColor,fontSize:14}}>{project.rag==='Green'?'🟢':project.rag==='Amber'?'🟡':project.rag==='Red'?'🔴':'⚪'}</span>
@@ -1855,6 +1857,9 @@ function Projects({items,setItems,projects,setProjects,milestones,setMilestones,
                       </span>
                       <span style={{color:sc(project.status),fontSize:11,fontWeight:600}}>{project.status}</span>
                       <span style={{fontSize:11,color:'#7A8FA6'}}>{project.team==='Consumer Experience'?'CE':'OE'}</span>
+                      <IntakeBubble x={project} size={13} apply={(f:any)=>setProjects((p:any[])=>p.map((r:any)=>r.id===project.id?{...r,...f}:r))}/>
+                      <ReadinessPips kind="project" x={project} size={13} apply={(f:any)=>setProjects((p:any[])=>p.map((r:any)=>r.id===project.id?{...r,...f}:r))}/>
+                      <JiraChip kind="project" x={project} size={10} apply={(f:any)=>setProjects((p:any[])=>p.map((r:any)=>r.id===project.id?{...r,...f}:r))}/>
                       {violations.length>0&&<span style={{background:'rgba(192,57,43,0.15)',border:'1px solid rgba(192,57,43,0.4)',borderRadius:5,padding:'2px 7px',fontSize:11,color:'#E74C3C'}}>⚠️ {violations.length} violation{violations.length!==1?'s':''}</span>}
                       {projectMilestones.length>0&&<span style={{background:'rgba(200,151,58,0.15)',border:'1px solid rgba(200,151,58,0.3)',borderRadius:5,padding:'2px 7px',fontSize:11,color:'#C8973A'}}>🏁 {projectMilestones.length} milestone{projectMilestones.length!==1?'s':''}</span>}
                     </div>
@@ -4022,7 +4027,7 @@ function Roadmap({items,setItems,projects,setProjects,milestones,setMilestones,t
                           <span onClick={()=>setQuickProject(group)} title="Click to edit this initiative" style={{fontSize:12,fontWeight:700,color:'#F4F6F8',overflow:'hidden',whiteSpace:'nowrap' as const,textOverflow:'ellipsis',minWidth:0,cursor:'pointer'}}>{group.name}{group.ongoing?' ∞':''}</span>
                           <span style={{fontSize:10,color:rc,fontWeight:700,flexShrink:0}}>{group.rag==='Green'?'🟢':group.rag==='Amber'?'🟡':group.rag==='Red'?'🔴':'⚪'}</span>
                           {group.violations.length>0&&<span style={{fontSize:9,color:'#E74C3C',flexShrink:0}}>⚠️</span>}
-                          {relChip('project',group)}<ReadinessPips kind="project" x={group} apply={f=>setProjects((p:any[])=>p.map(r=>r.id===group.id?{...r,...f}:r))} size={11}/><JiraChip kind="project" x={group} apply={f=>setProjects((p:any[])=>p.map(r=>r.id===group.id?{...r,...f}:r))} size={10}/>
+                          {relChip('project',group)}<IntakeBubble x={group} size={11} apply={f=>setProjects((p:any[])=>p.map(r=>r.id===group.id?{...r,...f}:r))}/><ReadinessPips kind="project" x={group} apply={f=>setProjects((p:any[])=>p.map(r=>r.id===group.id?{...r,...f}:r))} size={11}/><JiraChip kind="project" x={group} apply={f=>setProjects((p:any[])=>p.map(r=>r.id===group.id?{...r,...f}:r))} size={10}/>
                         </div>
                         <div style={{fontSize:9,color:'#7A8FA6'}}>{childItems.length} committed · {group.status}</div>
                       </div>

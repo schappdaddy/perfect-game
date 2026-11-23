@@ -5,6 +5,7 @@ import { MilestoneTypeSelect, useMilestoneTypes, typeColor } from './MilestoneTy
 import { WT_LABEL, WorkTag, workTypeOfProject, isBug, BugTag, CLOSED_STATUSES } from './WorkTypes'
 import { ReadinessPips, ReadinessAudit } from './Readiness'
 import { JiraChip } from './JiraLink'
+import { IntakeBubble } from './Intake'
 
 // Monthly releases and quarterly planning of all work (New, Sustain and SaaS deliverable).
 // A release is a month ('2026-11'). Each month can have a release date, or be marked as
@@ -524,7 +525,7 @@ export function QuarterPlanner({items,setItems,projects,setProjects,epics=[],set
           <span style={{fontSize:9,fontWeight:800,color:KIND_CLR.initiative,letterSpacing:1,whiteSpace:'nowrap' as const}}>◈ INITIATIVE{o.goLive?' GO-LIVE':''}</span>
           {workTypeOfProject(p)!=='new'&&<WorkTag compact wt={workTypeOfProject(p)}/>}
           <span style={{marginLeft:'auto',display:'flex',gap:5,alignItems:'center'}}>
-            <ReadinessPips kind="project" x={p} apply={f=>applyLocal('project',p.id,f)} size={12}/><JiraChip kind="project" x={p} apply={f=>applyLocal('project',p.id,f)} size={10}/>
+            <IntakeBubble x={p} size={12} apply={f=>applyLocal('project',p.id,f)}/><ReadinessPips kind="project" x={p} apply={f=>applyLocal('project',p.id,f)} size={12}/><JiraChip kind="project" x={p} apply={f=>applyLocal('project',p.id,f)} size={10}/>
             {p.release_month&&(!o.goLive||o.relBadge)&&<span style={{fontSize:9.5,fontWeight:700,color:'#5DADE2'}}>📦 {fmtMonthKey(p.release_month)}</span>}
             <TeamTag team={p.team}/>
           </span>
