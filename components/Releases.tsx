@@ -442,7 +442,21 @@ export function QuarterPlanner({items,setItems,projects,setProjects,epics=[],set
     const all=[...rest,...p.stories.map(()=>month)].filter(Boolean).sort()
     if(all.length)setEpics((prev:any[])=>prev.map(e=>e.id===en.x.id?{...e,release_month:all[all.length-1]}:e))
   }
+  // Move one story of an epic to another release (dragged out of its epic's card); the epic's
+  // parts and its own release follow
+  async function moveStory(id:any,month:string|null){
+    const st=(items as any[]).find(i=>i.id===id);if(!st)return
+    if(month&&isBlocked(month)){alert(`${fmtMonthKey(month)} has no release. Pick another month, or change it under 📦 Releases.`);return}
+    if((st.release_month||null)===month)return
+    await updItem(id,{release_month:month})
+    const ep=st.epic_id&&epicById(st.epic_id)
+    if(ep){
+      const rels=partStories(ep).map(i=>i.id===id?month:i.release_month).filter(Boolean).sort()
+      if(rels.length)setEpics((prev:any[])=>prev.map(e=>e.id===ep.id?{...e,release_month:rels[rels.length-1]}:e))
+    }
+  }
   async function dropOnRelease(month:string|null){
+    if(dragId?.startsWith('st:')){const id=dragId.slice(3);setDragId(null);setOver(null);await moveStory(id,month);return}
     const en=take();if(!en)return
     if(en.part){await movePart(en,month);return}
     if(en.kind==='project'){await setInitPlan(en,{release:month});return}
@@ -488,7 +502,8 @@ export function QuarterPlanner({items,setItems,projects,setProjects,epics=[],set
       {isEpic&&(()=>{
         // The stories that travel with this epic (same quarter), listed inside it
         const pt=mode==='releases'?en.part:undefined
-        const inside=pt?pt.stories:sts.filter(st=>withItsEpic(st)&&open(st)),shownSt=inside.slice(0,6)
+        const relMode=mode==='releases'
+        const inside=pt?pt.stories:sts.filter(st=>withItsEpic(st)&&open(st)),shownSt=inside.slice(0,relMode?12:6)
         const last=pt&&pt.idx===pt.total-1
         return <div style={{display:'flex',flexDirection:'column',gap:1}}>
           {pt&&<div title="This epic ships in stages: each release lists the stories going out in it" style={{display:'flex',alignItems:'center',gap:5,fontSize:10,fontWeight:800,color:last?'#27AE60':'#5DADE2',margin:'1px 0 2px'}}>
@@ -496,8 +511,11 @@ export function QuarterPlanner({items,setItems,projects,setProjects,epics=[],set
             Part {pt.idx+1} of {pt.total}{last?' · completes epic':''}</div>}
           <div style={{fontSize:10,color:'#7A8FA6'}}>{pt?`${inside.length} of ${partStories(x).length} stories ship here`:`${sts.length} stor${sts.length===1?'y':'ies'}${sts.length?` · ${done} done`:''}`}</div>
           {shownSt.map(st=>(
-            <div key={st.id} onClick={e=>{e.stopPropagation();onOpenItem(st)}} title={`${st.item_id||''} ${st.name} · ${st.status}`}
-              style={{display:'flex',alignItems:'center',gap:5,fontSize:10.5,padding:'2px 5px',borderLeft:`2px solid ${KIND_CLR.story}`,background:'rgba(93,173,226,0.06)',borderRadius:3,cursor:'pointer',opacity:open(st)?1:0.55}}>
+            <div key={st.id} onClick={e=>{e.stopPropagation();onOpenItem(st)}} title={`${st.item_id||''} ${st.name} · ${st.status}${relMode&&open(st)?'\nDrag onto another release to move just this story':''}`}
+              draggable={relMode&&open(st)} onDragStart={relMode&&open(st)?(e=>{e.stopPropagation();setDragId('st:'+st.id);e.dataTransfer.effectAllowed='move';e.dataTransfer.setData('text/plain',st.id)}):undefined}
+              onDragEnd={relMode?(()=>{setDragId(null);setOver(null)}):undefined}
+              style={{display:'flex',alignItems:'center',gap:5,fontSize:10.5,padding:'2px 5px',borderLeft:`2px solid ${KIND_CLR.story}`,background:dragId==='st:'+st.id?'rgba(200,151,58,0.25)':'rgba(93,173,226,0.06)',borderRadius:3,cursor:relMode&&open(st)?'grab':'pointer',opacity:dragId==='st:'+st.id?0.5:open(st)?1:0.55}}>
+              {relMode&&open(st)&&<span style={{color:'#3A4A5E',fontSize:9,flexShrink:0}}>⠿</span>}
               <span style={{color:isBug(st)?'#E74C3C':KIND_CLR.story,fontWeight:800,fontSize:isBug(st)?9:8.5}}>{isBug(st)?'🐞':'▪'}</span>
               <span style={{color:'#7A8FA6',fontFamily:'monospace',fontSize:9.5,flexShrink:0}}>{st.item_id}</span>
               <span style={{color:'#E1E7EE',flex:1,minWidth:0,overflow:'hidden',textOverflow:'ellipsis',whiteSpace:'nowrap' as const,textDecoration:open(st)?undefined:'line-through'}}>{st.name}</span>
