@@ -400,7 +400,7 @@ export default function StrategyTab({projects:mainProjects,setProjects,strategie
     const n=name.trim()
     if(!n)return
     if(projects.some((p:any)=>p.name.toLowerCase()===n.toLowerCase())){alert(`An initiative called "${n}" already exists. Add it to a track from its row instead.`);return}
-    const{data,error}=await supabase.from('projects').insert({name:n,team:team||null,status:'Planning',priority:'P3',rag:'Green',color:PROPOSED,description:'',
+    const{data,error}=await supabase.from('projects').insert({name:n,team:team||null,status:'Backlog',priority:'P3',rag:'Green',color:PROPOSED,description:'',
       sort_order:projects.length,space:'work',planning_state:'proposed',work_type:wt}).select().single()
     if(error){alert('Failed to create initiative: '+error.message);return}
     if(data){

@@ -9,7 +9,7 @@ import { InlineSelect, InlineText, InlineDate, InlineEditStyles } from './Inline
 import { MilestoneTypeSelect } from './MilestoneTypes'
 import { JiraChip } from './JiraLink'
 import { IntakeBubble } from './Intake'
-import { WORK_TYPE_KEYS, WT_LABEL, WT_COLOR, WorkTag, isWorkType, workTypeOfProject, capacityShare, REQUEST_TYPES, isBug, SEVERITIES, sevOf, BugTag, CLOSED_STATUSES, isClosed } from './WorkTypes'
+import { WORK_TYPE_KEYS, WT_LABEL, WT_COLOR, WorkTag, isWorkType, workTypeOfProject, capacityShare, REQUEST_TYPES, isBug, SEVERITIES, sevOf, BugTag, CLOSED_STATUSES, isClosed, INITIATIVE_STATUSES, EPIC_STATUSES, STORY_STATUSES, STATUS_COLOR } from './WorkTypes'
 import { QuarterPlanner, ReleaseCalendar, ReleaseSelect, QuarterSelect, ReleasesManager, releaseOptions, releaseOf, releaseText, fmtMonthKey } from './Releases'
 import { EpicRow, EpicPanel, epicProject, epicWorkType, convertStoryToEpic, convertEpicToStory } from './BacklogEpics'
 import { FullPlanButton } from './FullPlanExport'
@@ -26,13 +26,16 @@ const T = {
 }
 
 const PRIORITIES=['P1','P2','P3','P4','Backlog']
-const STATUSES=['New','Need Requirements','Under Review','Accepted','Ready','In Progress','Testing','Ready for Deployment','Blocked','Done','Awaiting Vendor Deliverable','Will Not Implement']
+const STATUSES=STORY_STATUSES // stories and bugs (work space), as in Jira
 const HOME_STATUSES=['To Do','In Progress','Waiting','Done',"Won't Do"]
 const HOME_PROJECT_STATUSES=['Planning','In Progress','Waiting','Done','Cancelled']
 const spaceOf=(x:any)=>(x?.space||'work')
 const statusesFor=(space:string)=>space==='home'?HOME_STATUSES:STATUSES
+const epicStatusesFor=(space:string)=>space==='home'?HOME_STATUSES:EPIC_STATUSES
+// A new story, bug or epic starts here
+const firstStatus=(space:string)=>space==='home'?'To Do':'Backlog'
 const projectStatusesFor=(space:string)=>space==='home'?HOME_PROJECT_STATUSES:PROJECT_STATUSES
-const PROJECT_STATUSES=['Queued','Planning','In Progress','Testing','On Hold','Complete','Cancelled']
+const PROJECT_STATUSES=INITIATIVE_STATUSES // initiatives (work space), as in Jira
 const TEAMS=['Consumer Experience','Operational Efficiency']
 const EFFORTS=['S','M','L','XL']
 const EFFORT_ALLOC:any={S:25,M:50,L:75,XL:100} // default per-person allocation % this project's size implies
@@ -158,7 +161,7 @@ function useIsMobile(){
 // Request-type glyphs — instant visual ID on item lines
 function rt(t:any){const m:any={'Bug':'🐞','Tech Debt':'🔧','Enhancement':'✨','Strategic Initiative':'🎯','Business Request':'💼','Testing':'🧪'};return m[t]||''}
 function sc(s) {
-  const m={'New':'#5DADE2','Need Requirements':'#E67E22','Under Review':'#E8B95A','Accepted':'#2E86AB','Ready':'#8E44AD','In Progress':'#27AE60','Testing':'#C8973A','Ready for Deployment':'#2ECC71','Blocked':'#E74C3C','Done':'#16A085','Awaiting Vendor Deliverable':'#7F8FA6','Will Not Implement':'#5C6E80','To Do':'#5DADE2','Waiting':'#E8B95A',"Won't Do":'#5C6E80'}
+  const m={...STATUS_COLOR,'New':'#5DADE2','Need Requirements':'#E67E22','Under Review':'#E8B95A','Accepted':'#2E86AB','Ready':'#8E44AD','In Progress':'#27AE60','Testing':'#C8973A','Ready for Deployment':'#2ECC71','Blocked':'#E74C3C','Done':'#16A085','Awaiting Vendor Deliverable':'#7F8FA6','Will Not Implement':'#5C6E80','To Do':'#5DADE2','Waiting':'#E8B95A',"Won't Do":'#5C6E80'}
   return m[s]||'#7A8FA6'
 }
 // Sequential item IDs — max existing RTL number + 1. Random IDs collided with real data.
@@ -1033,7 +1036,7 @@ function ProjectDetail({project,items,setItems,projects,setProjects,milestones,s
   }
   const [addingItem,setAddingItem]=useState(false)
   const [savingItem,setSavingItem]=useState(false)
-  const [newItem,setNewItem]=useState({name:'',priority:'P3',swimlane:'POS',effort:'M',status:'New',request_type:'Enhancement',region:'',vendor:'Deckers',description:''})
+  const [newItem,setNewItem]=useState({name:'',priority:'P3',swimlane:'POS',effort:'M',status:'Backlog',request_type:'Enhancement',region:'',vendor:'Deckers',description:''})
   const [addingMilestone,setAddingMilestone]=useState(false)
   const [savingMilestone,setSavingMilestone]=useState(false)
   const [milestoneForm,setMilestoneForm]=useState({name:'',date:'',type:'Milestone',color:'#C8973A',notes:'',completed:false})
@@ -1069,7 +1072,7 @@ function ProjectDetail({project,items,setItems,projects,setProjects,milestones,s
     if(error){alert('Failed to add item: '+error.message);setSavingItem(false);return}
     if(data) setItems([...items,data])
     setSavingItem(false);setAddingItem(false)
-    setNewItem({name:'',priority:'P3',swimlane:'POS',effort:'M',status:'New',request_type:'Enhancement',region:'',vendor:'Deckers',description:''})
+    setNewItem({name:'',priority:'P3',swimlane:'POS',effort:'M',status:'Backlog',request_type:'Enhancement',region:'',vendor:'Deckers',description:''})
   }
   async function saveMilestone(){
     if(!milestoneForm.name.trim()||!milestoneForm.date) return
@@ -1615,7 +1618,7 @@ function Projects({items,setItems,projects,setProjects,milestones,setMilestones,
   const [milestoneForm,setMilestoneForm]=useState({name:'',date:'',type:'Milestone',color:'#C8973A',notes:'',completed:false})
   const [savingMilestone,setSavingMilestone]=useState(false)
   const COLORS=['#C0392B','#D4820A','#2E86AB','#27AE60','#8E44AD','#E74C3C','#C8973A','#1ABC9C','#2C3E50','#E67E22']
-  const empty={name:'',description:'',priority:'P3',status:'Planning',rag:'Green',team:'Consumer Experience',effort:'',start_date:'',end_date:'',color:'#2E86AB',ongoing:false}
+  const empty={name:'',description:'',priority:'P3',status:space==='home'?'Planning':'Backlog',rag:'Green',team:'Consumer Experience',effort:'',start_date:'',end_date:'',color:'#2E86AB',ongoing:false}
   const [form,setForm]=useState({...empty})
   
 
@@ -1730,7 +1733,7 @@ function Projects({items,setItems,projects,setProjects,milestones,setMilestones,
     const open=items.filter(i=>i.parent_project===project.name&&!ITEM_TERMINAL.includes(i.status))
     if(!open.length) return
     const home=spaceOf(project)==='home'
-    const itemStatus=newStatus==='Cancelled'?(home?"Won't Do":'Will Not Implement'):'Done'
+    const itemStatus=(newStatus==='Cancelled'||newStatus==='Killed')?(home?"Won't Do":'Killed'):'Done'
     const yes=confirm(`"${project.name}" is now ${newStatus}. Also mark its ${open.length} open item${open.length!==1?'s':''} as ${itemStatus}?\n\nOK — close the items (they move to the Done tab)\nCancel — leave them in the backlog`)
     if(yes) await closeItemsForProject(items,setItems,project.name,itemStatus)
   }
@@ -1809,8 +1812,8 @@ function Projects({items,setItems,projects,setProjects,milestones,setMilestones,
             ['🟡 Amber',projects.filter(p=>p.rag==='Amber').length,'#D4820A'],
             ['🔴 Red',projects.filter(p=>p.rag==='Red').length,'#C0392B'],
             ['In Progress',projects.filter(p=>p.status==='In Progress').length,'#2E86AB'],
-            ['Planning',projects.filter(p=>p.status==='Planning').length,'#8E44AD'],
-            ['Queued',projects.filter(p=>p.status==='Queued').length,'#7A8FA6'],
+            ['Ready',projects.filter(p=>p.status==='Ready').length,'#8E44AD'],
+            ['Backlog',projects.filter(p=>p.status==='Backlog').length,'#7A8FA6'],
           ].map(([label,val,color]:[string,number,string])=>(
             <div key={label} style={{background:'#162436',border:'1px solid #243447',borderRadius:8,padding:'8px 14px',display:'flex',gap:8,alignItems:'center'}}>
               <span style={{fontSize:18,fontWeight:700,color}}>{val}</span>
@@ -2134,7 +2137,7 @@ function Backlog({mode='list',items,setItems,projects,setProjects,space,ccrs=[],
   const [ai,setAi]=useState(false)
   const [sav,setSav]=useState(false)
   const [selected,setSelected]=useState(null)
-  const [ni,setNi]=useState({name:'',priority:'P3',swimlane:'POS',team:'Consumer Experience',effort:'M',status:'New',request_type:'Enhancement',region:'',vendor:'Deckers',description:''})
+  const [ni,setNi]=useState({name:'',priority:'P3',swimlane:'POS',team:'Consumer Experience',effort:'M',status:'Backlog',request_type:'Enhancement',region:'',vendor:'Deckers',description:''})
   const [vendors,setVendors]=useState(['Deckers','Salesforce','GreyOrange','Legion','SafeSize','ID.me','Adyen','Agilence','Boomi'])
   const [swimlaneOpts,setSwimOpts]=useState([...SWIMLANES])
   const [statusOpts,setStatusOpts]=useState([...statusesFor(space)])
@@ -2181,13 +2184,24 @@ function Backlog({mode='list',items,setItems,projects,setProjects,space,ccrs=[],
     const exact=statusesFor(space).find(x=>x.toLowerCase()===st.trim().toLowerCase())
     if(exact)return exact
     const x=(st||'').toLowerCase()
+    if(space==='home'){
+      if(/done|closed|resolved|complete/.test(x))return 'Done'
+      if(/progress|development|doing/.test(x))return 'In Progress'
+      if(/block|wait/.test(x))return 'Waiting'
+      if(/won.?t|kill|cancel/.test(x))return "Won't Do"
+      return /to do|todo|open|backlog|new/.test(x)?'To Do':null
+    }
+    if(/kill|won.?t|cancel|will not/.test(x))return 'Killed'
     if(/done|closed|resolved|complete/.test(x))return 'Done'
-    if(/deploy/.test(x))return 'Ready for Deployment'
-    if(/test|qa|verification/.test(x))return 'Testing'
+    if(/release|deploy/.test(x))return 'Ready to Release'
+    if(/accept|uat/.test(x))return 'Ready for Acceptance'
+    if(/ready for test|ready for qa/.test(x))return 'Ready for Test'
+    if(/test|qa|verification/.test(x))return 'In Test'
+    if(/code review|review|pr\b/.test(x))return 'Code Review'
     if(/progress|development|doing/.test(x))return 'In Progress'
-    if(/block|impedi/.test(x))return 'Blocked'
-    if(/review/.test(x))return 'Under Review'
-    if(/to do|todo|open|backlog|new|selected/.test(x))return 'New'
+    if(/block|impedi|vendor/.test(x))return 'Blocked'
+    if(/^ready|selected/.test(x))return 'Ready'
+    if(/to do|todo|open|backlog|new|requirement/.test(x))return 'Backlog'
     return null
   }
   const normEffort=(e:string)=>{const u=e.trim().toUpperCase();return ['XS',...EFFORTS].includes(u)?u:null}
@@ -2262,7 +2276,7 @@ function Backlog({mode='list',items,setItems,projects,setProjects,space,ccrs=[],
       if(!name)return{mode:'skip',key:jira||'(no key)',name:'',reason:'new row without a Summary/Name — nothing to create'}
       if(!fields.parent_project&&defaultProj){fields.parent_project=defaultProj.name;if(defaultProj.team)fields.team=defaultProj.team}
       return{mode:'insert',key:jira||'—',name,fields,notes,
-        summary:[fields.request_type||'Enhancement',fields.priority||'P3',fields.status||'New',fields.parent_project||'no initiative'].join(' · ')}
+        summary:[fields.request_type||'Enhancement',fields.priority||'P3',fields.status||firstStatus(space),fields.parent_project||'no initiative'].join(' · ')}
     }).filter(Boolean)
     if(!(out as any[]).some((r:any)=>r.mode!=='skip')&&(out as any[]).length===0){setJrErr('No usable rows found.');return}
     setJrRows(out as any[])
@@ -2279,7 +2293,7 @@ function Backlog({mode='list',items,setItems,projects,setProjects,space,ccrs=[],
         item_id:`RTL-${String(base+ix).padStart(3,'0')}`,
         name:r.fields.name,description:r.fields.description||null,jira_key:r.fields.jira_key||null,
         request_type:r.fields.request_type||'Enhancement',priority:r.fields.priority||'P3',
-        status:r.fields.status||(space==='home'?'To Do':'New'),effort:r.fields.effort||'M',
+        status:r.fields.status||(firstStatus(space)),effort:r.fields.effort||'M',
         swimlane:'POS',region:'',vendor:r.fields.vendor||'',flagged:false,
         vendor_delivery_date:r.fields.vendor_delivery_date||null,
         parent_project:r.fields.parent_project||null,team:r.fields.team||null,
@@ -2518,7 +2532,7 @@ const sorted=items.filter(i=>!isItemDone(i)).sort((a,b)=>{
   })()
   async function addEpic(){
     const pr=fpp!=='All'?projects.find((p:any)=>p.name===fpp):null
-    const{data,error}=await supabase.from('epics').insert({name:'New epic',project_id:pr?.id||null,team:pr?.team||null,space,status:space==='home'?'To Do':'New',
+    const{data,error}=await supabase.from('epics').insert({name:'New epic',project_id:pr?.id||null,team:pr?.team||null,space,status:firstStatus(space),
       sort_order:(epics as any[]).filter(e=>e.project_id===(pr?.id||null)).length}).select().single()
     if(error||!data){alert('Failed to add epic: '+(error?.message||'no row returned'));return}
     setEpics((prev:any[])=>[...prev,data]);setSelected(null);setSelEpicId(data.id)
@@ -2644,7 +2658,7 @@ const sorted=items.filter(i=>!isItemDone(i)).sort((a,b)=>{
     if(error){alert('Failed to add item: '+error.message);setSav(false);return}
     if(data) setItems([...items,data])
     setSav(false);setAi(false)
-    setNi({name:'',priority:'P3',swimlane:'POS',team:'Consumer Experience',effort:'M',status:'New',request_type:'Enhancement',region:'',vendor:'Deckers',description:''})
+    setNi({name:'',priority:'P3',swimlane:'POS',team:'Consumer Experience',effort:'M',status:'Backlog',request_type:'Enhancement',region:'',vendor:'Deckers',description:''})
   }
   async function deleteItem(id) {
     if(!confirm('Delete this item?')) return
@@ -2899,7 +2913,7 @@ const sorted=items.filter(i=>!isItemDone(i)).sort((a,b)=>{
             </thead>
             <tbody>
               {displayRows.map((item:any,idx:number)=>{
-                if(item.__epic)return <EpicRow key={'epic:'+item.__epic.id} releases={releases} setItems={setItems} setEpics={setEpics} statusOpts={statusOpts} opts={epicOpts} onRank={rankEpic} onDragEpic={setDragEpic} onDropEpic={dropOnEpic} onOverEpic={(e:any)=>dragEpic&&setOverEpic(e.id)} dragOver={!!dragEpic&&overEpic===item.__epic.id} epic={item.__epic} projects={projects} items={items} ccCount={cc.length}
+                if(item.__epic)return <EpicRow key={'epic:'+item.__epic.id} releases={releases} setItems={setItems} setEpics={setEpics} statusOpts={epicStatusesFor(space)} opts={epicOpts} onRank={rankEpic} onDragEpic={setDragEpic} onDropEpic={dropOnEpic} onOverEpic={(e:any)=>dragEpic&&setOverEpic(e.id)} dragOver={!!dragEpic&&overEpic===item.__epic.id} epic={item.__epic} projects={projects} items={items} ccCount={cc.length}
                   isSel={selEpicId===item.__epic.id} onSelect={()=>{setSelected(null);setSelEpicId(selEpicId===item.__epic.id?null:item.__epic.id)}}/>
                 if(item.__hdr)return(
                   <tr key={item.key}>
@@ -3031,7 +3045,7 @@ const sorted=items.filter(i=>!isItemDone(i)).sort((a,b)=>{
         {relMgr&&<ReleasesManager releases={releases} setReleases={setReleases} onClose={()=>setRelMgr(false)}
           counts={(k:string)=>[...items,...projects,...(epics as any[])].filter((x:any)=>x.release_month===k).length}/>}
         {selEpic&&<EpicPanel key={selEpic.id} releases={releases} opts={epicOpts} epic={selEpic} projects={projects} items={items} setItems={setItems} setEpics={setEpics}
-          statusOpts={statusOpts} priorities={['P1','P2','P3','P4']} teams={TEAMS} efforts={EFFORTS}
+          statusOpts={epicStatusesFor(space)} priorities={['P1','P2','P3','P4']} teams={TEAMS} efforts={EFFORTS}
           onClose={()=>setSelEpicId(null)} onDelete={()=>deleteEpic(selEpic)}
           onConvert={async()=>{const it=await convertEpicToStory(selEpic,{projects,items,setItems,setEpics,nextId:nextItemId(items)});if(it){setSelEpicId(null);setSelected(it)}}}/>}
         {selected&&!selEpic&&(
@@ -3296,7 +3310,7 @@ function Roadmap({items,setItems,projects,setProjects,milestones,setMilestones,t
       const open=items.filter((i:any)=>i.parent_project===quickProject.name&&!ITEM_TERMINAL.includes(i.status))
       if(open.length){
         const home=spaceOf(quickProject)==='home'
-        const itemStatus=fields.status==='Cancelled'?(home?"Won't Do":'Will Not Implement'):'Done'
+        const itemStatus=(fields.status==='Cancelled'||fields.status==='Killed')?(home?"Won't Do":'Killed'):'Done'
         const yes=confirm(`"${quickProject.name}" is now ${fields.status}. Also mark its ${open.length} open item${open.length!==1?'s':''} as ${itemStatus}?\n\nOK — close the items (they move to the Done tab)\nCancel — leave them in the backlog`)
         if(yes)await closeItemsForProject(items,setItems,quickProject.name,itemStatus)
       }
@@ -3336,7 +3350,7 @@ function Roadmap({items,setItems,projects,setProjects,milestones,setMilestones,t
     const iid=nextItemId(items)
     const{data,error}=await supabase.from('items').insert({
       item_id:iid,name:qpQiName.trim(),description:'',priority:qpQiPri,request_type:qpQiType,
-      swimlane:'POS',team:quickProject.team||'Consumer Experience',effort:'M',status:spaceOf(quickProject)==='home'?'To Do':'New',
+      swimlane:'POS',team:quickProject.team||'Consumer Experience',effort:'M',status:firstStatus(spaceOf(quickProject)),
       region:'',vendor:'Deckers',parent_project:quickProject.name,flagged:false,sort_order:items.length,space:spaceOf(quickProject),
     }).select().single()
     if(error){alert('Failed to add item: '+error.message);return}
@@ -4140,7 +4154,7 @@ function Roadmap({items,setItems,projects,setProjects,milestones,setMilestones,t
                           <div style={{overflow:'hidden',flex:1,minWidth:0}}>
                             <div style={{fontSize:11,fontWeight:700,color:'#F4F6F8',overflow:'hidden',whiteSpace:'nowrap' as const,textOverflow:'ellipsis'}}><span style={{color:'#E07B2A'}}>◆</span> {e.name}</div>
                             <div style={{display:'flex',alignItems:'center',gap:5,fontSize:9,color:'#7A8FA6',whiteSpace:'nowrap' as const}}>
-                              <span style={{flex:1,minWidth:0,overflow:'hidden',textOverflow:'ellipsis'}}>EPIC · {r.count} stor{r.count===1?'y':'ies'} · <span style={{color:sc(e.status),fontWeight:700}}>{e.status||'New'}</span></span>
+                              <span style={{flex:1,minWidth:0,overflow:'hidden',textOverflow:'ellipsis'}}>EPIC · {r.count} stor{r.count===1?'y':'ies'} · <span style={{color:sc(e.status),fontWeight:700}}>{e.status||'Backlog'}</span></span>
                               <span style={{display:'inline-flex',alignItems:'center',gap:4,flexShrink:0}}>{relChip('epic',e)}<ReadinessPips kind="epic" x={e} apply={f=>setEpics?.((p:any[])=>p.map(r=>r.id===e.id?{...r,...f}:r))} size={11}/><JiraChip kind="epic" x={e} compact size={9}/></span>
                             </div>
                           </div>
@@ -4349,7 +4363,7 @@ function Roadmap({items,setItems,projects,setProjects,milestones,setMilestones,t
                           <div draggable onDragStart={e=>{e.dataTransfer.setData('projectId',group.id);e.dataTransfer.effectAllowed='move'}}
                             onMouseDown={e=>startProjectBarDrag(e,group,'move')}
                             style={{position:'absolute',left:0,right:0,top:0,bottom:0,background:PROJECT_TERMINAL.includes(group.status)?'repeating-linear-gradient(45deg,#2E3D4E,#2E3D4E 8px,#26333F 8px,#26333F 16px)':group.ongoing?`linear-gradient(90deg, ${rc} 0%, ${rc} 55%, ${rc}33 100%)`:rc,borderRadius:6,display:'flex',alignItems:'center',padding:'0 14px',fontSize:11,fontWeight:700,color:PROJECT_TERMINAL.includes(group.status)?'#8FA3B8':'#fff',overflow:'hidden',whiteSpace:'nowrap' as const,opacity:draggingBar===group.id?0.7:PROJECT_TERMINAL.includes(group.status)?0.75:0.9,border:PROJECT_TERMINAL.includes(group.status)?'1px solid #3A4A5E':group.ongoing?'1px dashed rgba(255,255,255,0.45)':group.violations.length>0?'2px dashed rgba(255,255,255,0.5)':'none',boxShadow:PROJECT_TERMINAL.includes(group.status)?'none':`0 2px 8px ${rc}55`,cursor:draggingBar===group.id?'grabbing':'grab'}}>
-                            {PROJECT_TERMINAL.includes(group.status)?(group.status==='Cancelled'?'✕':'✓'):group.rag==='Red'?'🔴':group.rag==='Amber'?'🟡':group.rag==='Green'?'🟢':'⚪'} {group.name}{group.ongoing?' ∞':''}{PROJECT_TERMINAL.includes(group.status)?` — ${group.status}`:''}
+                            {PROJECT_TERMINAL.includes(group.status)?(group.status==='Cancelled'||group.status==='Killed'?'✕':'✓'):group.rag==='Red'?'🔴':group.rag==='Amber'?'🟡':group.rag==='Green'?'🟢':'⚪'} {group.name}{group.ongoing?' ∞':''}{PROJECT_TERMINAL.includes(group.status)?` — ${group.status}`:''}
                             {!PROJECT_TERMINAL.includes(group.status)&&group.violations.length>0&&<span style={{marginLeft:6,fontSize:10}}>⚠️</span>}
                           </div>
                           <div className="pg-rs" onMouseDown={e=>startProjectBarDrag(e,group,'right')} style={{position:'absolute',right:0,top:0,bottom:0,width:10,cursor:'ew-resize',zIndex:5,borderRadius:'0 4px 4px 0'}}/>
@@ -4981,7 +4995,7 @@ function ComposeUpdate({projects,milestones,items,onClose}:{projects:any[],miles
     }
     // Completed this year — project name + completion date (end of timeline)
     const yr=new Date().getFullYear()
-    const closedRecent=projects.filter((p:any)=>p.status==='Complete'&&p.end_date&&new Date(p.end_date+'T12:00:00').getFullYear()===yr)
+    const closedRecent=projects.filter((p:any)=>(p.status==='Complete'||p.status==='Done')&&p.end_date&&new Date(p.end_date+'T12:00:00').getFullYear()===yr)
       .sort((a:any,b:any)=>a.end_date<b.end_date?1:-1)
     const closedHtml=closedRecent.length?`<div style="${H2}">Completed Initiatives — ${yr} (${closedRecent.length})</div>
       <table cellspacing="0" style="border-collapse:collapse;width:100%;table-layout:fixed;">
@@ -5334,7 +5348,7 @@ function Desk({items,setItems,projects,setProjects,milestones,setMilestones,task
       const open=items.filter(i=>i.parent_project===projView.name&&!ITEM_TERMINAL.includes(i.status))
       if(open.length){
         const home=spaceOf(projView)==='home'
-        const itemStatus=fields.status==='Cancelled'?(home?"Won't Do":'Will Not Implement'):'Done'
+        const itemStatus=(fields.status==='Cancelled'||fields.status==='Killed')?(home?"Won't Do":'Killed'):'Done'
         const yes=confirm(`"${projView.name}" is now ${fields.status}. Also mark its ${open.length} open item${open.length!==1?'s':''} as ${itemStatus}?\n\nOK — close the items (they move to the Done tab)\nCancel — leave them in the backlog`)
         if(yes)await closeItemsForProject(items,setItems,projView.name,itemStatus)
       }
@@ -5351,7 +5365,7 @@ function Desk({items,setItems,projects,setProjects,milestones,setMilestones,task
     const iid=nextItemId(items)
     const{data,error}=await supabase.from('items').insert({
       item_id:iid,name:qiName.trim(),description:'',priority:qiPri,request_type:qiType,
-      swimlane:'POS',team:projView.team||'Consumer Experience',effort:'M',status:spaceOf(projView)==='home'?'To Do':'New',
+      swimlane:'POS',team:projView.team||'Consumer Experience',effort:'M',status:firstStatus(spaceOf(projView)),
       region:'',vendor:'Deckers',parent_project:projView.name,flagged:false,sort_order:items.length,space:spaceOf(projView),
     }).select().single()
     if(error){alert('Failed to add item: '+error.message);return}
@@ -7869,7 +7883,7 @@ function DoneTab({items,setItems,projects,setProjects,ccrs,ccrItems,space}:{item
                         setProjects((prev:any[])=>prev.map(x=>x.id===p.id?{...x,status:v}:x))
                         const{error}=await supabase.from('projects').update({status:v}).eq('id',p.id)
                         if(error)alert('Failed to update: '+error.message)
-                      }} style={{background:'#1E3048',border:'1px solid #243447',borderRadius:4,color:p.status==='Complete'?'#16A085':'#7A8FA6',fontSize:11,fontWeight:700,padding:'2px 6px',cursor:'pointer',fontFamily:'inherit'}}>
+                      }} style={{background:'#1E3048',border:'1px solid #243447',borderRadius:4,color:p.status==='Complete'||p.status==='Done'?'#16A085':'#7A8FA6',fontSize:11,fontWeight:700,padding:'2px 6px',cursor:'pointer',fontFamily:'inherit'}}>
                         {projectStatusesFor(spaceOf(p)).map(st=><option key={st} value={st}>{st}</option>)}
                       </select>
                     </td>
@@ -8106,7 +8120,7 @@ function Assistant({open,setOpen,seed,setSeed,items:itemsProp,setItems,projects:
         if(team){const t=TEAMS.find(x=>x.toLowerCase().includes(String(team).toLowerCase()));if(t)team=t}
         const payload:any={item_id:nextItemId(items),name:inp.name,description:inp.description||null,
           request_type:inp.request_type||'Enhancement',priority:inp.priority||'P3',
-          status:space==='home'?'To Do':'New',effort:inp.effort||'M',swimlane:'POS',region:'',vendor:'',
+          status:firstStatus(space),effort:inp.effort||'M',swimlane:'POS',region:'',vendor:'',
           flagged:!!inp.flag_audience,flag_audience:inp.flag_audience||null,notes:inp.flag_notes||null,
           parent_project:parent,team,sort_order:items.length,space}
         const{data,error}=await supabase.from('items').insert(payload).select().single()
@@ -8268,7 +8282,7 @@ function Assistant({open,setOpen,seed,setSeed,items:itemsProp,setItems,projects:
         if(!pr){
           if(!inp.create_if_missing)return{error:`No initiative matched "${inp.project}". Set create_if_missing to add it as a new proposed initiative.`,projects:L.projects.filter((p:any)=>spaceOf(p)==='work'&&!PROJECT_TERMINAL.includes(p.status)).map((p:any)=>p.name)}
           const team=inp.team?TEAMS.find(x=>x.toLowerCase().includes(String(inp.team).toLowerCase()))||null:null
-          const{data,error}=await supabase.from('projects').insert({name:String(inp.project).trim(),team,status:'Planning',priority:'P3',rag:'Green',color:'#E07B2A',description:inp.description||'',
+          const{data,error}=await supabase.from('projects').insert({name:String(inp.project).trim(),team,status:space==='home'?'Planning':'Backlog',priority:'P3',rag:'Green',color:'#E07B2A',description:inp.description||'',
             sort_order:L.projects.length,space:'work',planning_state:'proposed',...own}).select().single()
           if(error)return{error:error.message}
           setProjects((prev:any[])=>[...prev,data]);pushLive('projects',data)
