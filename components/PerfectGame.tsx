@@ -13,7 +13,7 @@ import { BACKLOG_COLS, useBacklogColumns, inColumnOrder } from './BacklogColumns
 import { IntakeBubble } from './Intake'
 import { WORK_TYPE_KEYS, WT_LABEL, WT_COLOR, WorkTag, isWorkType, workTypeOfProject, capacityShare, REQUEST_TYPES, isBug, SEVERITIES, sevOf, BugTag, CLOSED_STATUSES, isClosed, INITIATIVE_STATUSES, EPIC_STATUSES, STORY_STATUSES, STATUS_COLOR } from './WorkTypes'
 import { QuarterPlanner, ReleaseCalendar, ReleaseSelect, QuarterSelect, ReleasesManager, releaseOptions, releaseOf, releaseText, fmtMonthKey } from './Releases'
-import { EpicRow, EpicPanel, epicProject, epicWorkType, convertStoryToEpic, convertEpicToStory } from './BacklogEpics'
+import { EpicRow, EpicPanel, epicProject, epicWorkType, convertStoryToEpic, convertEpicToStory, setEpicRelease } from './BacklogEpics'
 import { FullPlanButton } from './FullPlanExport'
 import TeamPrep from './TeamPrep'
 import { ReadinessPips } from './Readiness'
@@ -3858,6 +3858,7 @@ function Roadmap({items,setItems,projects,setProjects,milestones,setMilestones,t
   async function setReleaseOf(kind:'item'|'epic'|'project',x:any,month:string|null){
     if(month&&releaseOf(releases,month)?.no_release){alert(`${fmtMonthKey(month)} has no release. Pick another month.`);return}
     if((x.release_month||null)===month)return
+    if(kind==='epic'&&setEpics){await setEpicRelease(x,month,{items,setItems,setEpics});return}
     const t=kind==='project'?'projects':kind==='epic'?'epics':'items'
     const apply=(k:string,id:any,f:any)=>k==='project'?setProjects((p:any[])=>p.map(r=>r.id===id?{...r,...f}:r)):k==='epic'?setEpics?.((p:any[])=>p.map(r=>r.id===id?{...r,...f}:r)):setItems((p:any[])=>p.map(r=>r.id===id?{...r,...f}:r))
     apply(kind,x.id,{release_month:month})

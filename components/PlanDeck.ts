@@ -88,15 +88,27 @@ export function planModel(inp:PlanInput){
       meta:[...bks,`${list.length} planned${ini.length?` · ${ini.length} go-live${ini.length!==1?'s':''}`:''} · ${pts(list)} pts`],
       milestones:msIn(qi.qStart,qi.qEnd).map(toMs),cards:[...ini.map(en=>toCard(en,{release:true})),...list.map(en=>toCard(en,{release:true}))]}
   })
-  // Stories planned with their epic but shipping in a different release (an epic released in
-  // stages) also appear in their own release's month
-  const shipsApart=(i:any)=>{if(!i.release_month||!withItsEpic(i))return false;const e=epicById(i.epic_id);return !!e&&i.release_month!==(e.release_month||null)}
-  const staged:Entry[]=items.filter((i:any)=>open(i)&&qkOf('item',i)&&shipsApart(i)&&shown('item',i)).map((i:any)=>ent('item',i))
+  // An epic shipping in stages (its stories in more than one release) appears in each of
+  // those releases as "part 1 of 2"; its own release is its final part. Stories with no
+  // release ship with the final part.
+  const KILLED=['Killed','Will Not Implement',"Won't Do"]
+  const epicMonths=(e:any)=>{
+    const sts=items.filter((i:any)=>i.epic_id===e.id&&!KILLED.includes(i.status))
+    const monthOf=(i:any)=>i.release_month||e.release_month
+    const months=[...new Set([...sts.map(monthOf),e.release_month].filter(Boolean))].sort() as string[]
+    return{months,here:(k:string)=>sts.filter((i:any)=>monthOf(i)===k)}
+  }
+  const inRelease=(en:Entry,k:string)=>en.kind==='epic'?epicMonths(en.x).months.includes(k):en.x.release_month===k
   const monthCol=(k:string):PlanColumn=>{
-    const td=[...planned,...staged].filter(en=>en.x.release_month===k&&inView(en)).sort(rank),ini=inits.filter(en=>en.x.release_month===k),r=releaseOf(releases,k),blocked=isBlocked(k)
+    const td=planned.filter(en=>inRelease(en,k)&&(shownQks.has(en.qk as string)||relMonths.includes(k))).sort(rank),ini=inits.filter(en=>en.x.release_month===k),r=releaseOf(releases,k),blocked=isBlocked(k)
     return{title:`${fmtMonthKey(k)}`,sub:blocked?`No release${r?.notes?' · '+r.notes:''}`:releaseText(releases,k),blocked,slimmable:true,
       meta:blocked?[]:[`${ini.length?`${ini.length} go-live${ini.length!==1?'s':''} · `:''}${td.length} planned · ${pts(td)} pts`],
-      milestones:msIn(`${k}-01`,lastDay(k)).map(toMs),cards:[...ini.map(en=>toCard(en)),...td.map(en=>toCard(en,{quarter:true}))]}
+      milestones:msIn(`${k}-01`,lastDay(k)).map(toMs),cards:[...ini.map(en=>toCard(en)),...td.map(en=>{
+        const c=toCard(en,{quarter:true});if(en.kind!=='epic')return c
+        const{months,here}=epicMonths(en.x);if(months.length<2)return c
+        const ix=months.indexOf(k),n=here(k).length
+        return{...c,name:`${c.name} — part ${ix+1} of ${months.length}${ix===months.length-1?', completes':''} (${n} stor${n===1?'y':'ies'})`}
+      })]}
   }
   const releaseSlides=quarters.map(qi=>{
     const noRel=planned.filter(en=>!en.x.release_month&&en.qk===qi.qk)
@@ -159,10 +171,14 @@ export function planModel(inp:PlanInput){
     const groups=new Map<string,{p:any,goLive:boolean,epics:any[],stories:any[]}>()
     const g=(p:any)=>{const key=p?.id||'__none';if(!groups.has(key))groups.set(key,{p:p||null,goLive:false,epics:[],stories:[]});return groups.get(key)!}
     for(const p of projects)if(p.release_month===k&&work(p)&&!INIT_DONE.includes(p.status)&&(ALL||!p.team||p.team===team)&&wtOk('project',p))g(p).goLive=true
-    for(const e of epics)if(e.release_month===k&&open(e)&&shown('epic',e))g(projects.find((p:any)=>p.id===e.project_id)).epics.push(e)
+    for(const e of epics){
+      if(!open(e)||!shown('epic',e))continue
+      const{months,here}=epicMonths(e);if(!months.includes(k))continue
+      g(projects.find((p:any)=>p.id===e.project_id)).epics.push({...e,__n:here(k).length,__part:months.indexOf(k),__total:months.length})
+    }
     for(const i of items){
       if(i.release_month!==k||!open(i)||!shown('item',i))continue
-      const ep=i.epic_id&&epicById(i.epic_id);if(ep&&ep.release_month===k)continue
+      const ep=i.epic_id&&epicById(i.epic_id);if(ep&&open(ep))continue // listed with its epic
       g(projects.find((p:any)=>p.name===i.parent_project)).stories.push(i)
     }
     return[...groups.values()].sort((a,b)=>(Number(b.goLive)-Number(a.goLive))||(Number(!!a.p?.sustain_quarter)-Number(!!b.p?.sustain_quarter))||(Number(!a.p)-Number(!b.p))||(a.p?.name||'').localeCompare(b.p?.name||''))
@@ -241,7 +257,7 @@ function calendarSlide(pptx:any,m:any,fy:number,releases:any[],sub:string){
       for(const g of m.calendarMonth(k)){
         const name=g.p?.name||'No initiative',td=!!g.p?.sustain_quarter
         lines.push({t:name,kind:g.goLive?'golive':td?'td':'init'})
-        for(const e of g.epics){const n=m.storiesOf(e).length;lines.push({t:`◆ ${e.name}${n?` · ${n} stor${n===1?'y':'ies'}`:''}`,kind:'epic'})}
+        for(const e of g.epics){const n=e.__n;lines.push({t:`◆ ${e.name}${n?` · ${n} stor${n===1?'y':'ies'}`:''}${e.__total>1?` · part ${e.__part+1} of ${e.__total}`:''}`,kind:'epic'})}
         for(const it of g.stories)lines.push({t:`▪ ${it.item_id?it.item_id+' ':''}${it.name}`,kind:'story'})
       }
       const LH=0.155,maxL=Math.floor((H-0.32)/LH)
