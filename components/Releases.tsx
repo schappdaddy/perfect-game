@@ -228,11 +228,13 @@ export function QuarterPlanner({items,setItems,projects,setProjects,epics=[],set
   function relProgress(k:string){
     const effRel=(i:any)=>i.release_month||(i.epic_id?epicById(i.epic_id)?.release_month:null)||null
     const its=(items as any[]).filter(i=>(i.space||'work')==='work'&&!KILLED.includes(i.status)&&shown('item',i)&&effRel(i)===k)
-    const done=its.filter(i=>isClosedStatus(i.status)),fly=its.filter(i=>!isClosedStatus(i.status)&&!NOT_STARTED.includes(i.status))
+    // Ready to Release counts as done for a release: the work is finished and waiting to deploy
+    const deployed=its.filter(i=>isClosedStatus(i.status)),ready=its.filter(i=>i.status==='Ready to Release')
+    const done=[...deployed,...ready],fly=its.filter(i=>!isClosedStatus(i.status)&&i.status!=='Ready to Release'&&!NOT_STARTED.includes(i.status))
     const p=(l:any[])=>l.reduce((s,i)=>s+(EFFORT_POINTS[i.effort]||0),0)
     const date=releaseOf(releases,k)?.release_date||null
     const days=date?Math.ceil((+new Date(date+'T12:00:00')-Date.now())/864e5):null
-    return{n:its.length,done:done.length,fly:fly.length,pct:its.length?Math.round(done.length/its.length*100):0,pts:p(its),ptsDone:p(done),days}
+    return{n:its.length,done:done.length,deployed:deployed.length,ready:ready.length,fly:fly.length,pct:its.length?Math.round(done.length/its.length*100):0,pts:p(its),ptsDone:p(done),days}
   }
   const progressBar=(k:string)=>{
     const r=relProgress(k);if(!r.n)return null
@@ -241,7 +243,7 @@ export function QuarterPlanner({items,setItems,projects,setProjects,epics=[],set
     // under 75% done, or within 4 weeks under 40% done
     const late=r.days!=null&&r.days<0&&r.pct<100
     const risk=late||(r.days!=null&&((r.days<=14&&r.pct<75)||(r.days<=28&&r.pct<40)))?'#E74C3C':r.days!=null&&r.days<=42&&r.pct<50?'#E8B95A':r.pct===100?'#27AE60':'#C8D4E0'
-    const tip=`${r.done} of ${r.n} stories and bugs done (${r.pct}%) · ${r.fly} in flight · ${r.n-r.done-r.fly} not started${r.pts?`\nPoints: ${r.ptsDone} of ${r.pts} done`:''}${r.days!=null?`\n${late?`Release date passed ${-r.days} day${r.days===-1?'':'s'} ago`:`${r.days} day${r.days===1?'':'s'} to the release`}`:'\nRelease date not set'}`
+    const tip=`${r.done} of ${r.n} stories and bugs done (${r.pct}%): ${r.deployed} deployed, ${r.ready} ready to release · ${r.fly} in flight · ${r.n-r.done-r.fly} not started${r.pts?`\nPoints: ${r.ptsDone} of ${r.pts} done`:''}${r.days!=null?`\n${late?`Release date passed ${-r.days} day${r.days===-1?'':'s'} ago`:`${r.days} day${r.days===1?'':'s'} to the release`}`:'\nRelease date not set'}`
     return(
       <div title={tip} style={{marginTop:5}}>
         <div style={{display:'flex',alignItems:'baseline',gap:6}}>
@@ -249,7 +251,8 @@ export function QuarterPlanner({items,setItems,projects,setProjects,epics=[],set
           <span style={{fontSize:9.5,color:'#7A8FA6'}}>done · {r.done}/{r.n}{r.days!=null?` · ${late?`${-r.days}d late`:`${r.days}d to go`}`:''}</span>
         </div>
         <div style={{display:'flex',height:5,borderRadius:3,overflow:'hidden',background:'#243447',marginTop:3}}>
-          <div style={{width:`${r.pct}%`,background:'#27AE60'}}/>
+          <div title="Deployed (Done)" style={{width:`${r.deployed/r.n*100}%`,background:'#27AE60'}}/>
+          <div title="Ready to Release" style={{width:`${r.ready/r.n*100}%`,background:'#7DCEA0'}}/>
           <div style={{width:`${flyPct}%`,background:'#5DADE2'}}/>
         </div>
       </div>)
