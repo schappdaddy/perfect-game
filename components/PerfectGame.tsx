@@ -8,6 +8,7 @@ import { DependencyLayer, DepHandle, createDependency, deleteDependency, depKey 
 import { InlineSelect, InlineText, InlineDate, InlineEditStyles } from './InlineEdit'
 import { MilestoneTypeSelect } from './MilestoneTypes'
 import { JiraChip } from './JiraLink'
+import { BACKLOG_COLS, useBacklogColumns, inColumnOrder } from './BacklogColumns'
 import { IntakeBubble } from './Intake'
 import { WORK_TYPE_KEYS, WT_LABEL, WT_COLOR, WorkTag, isWorkType, workTypeOfProject, capacityShare, REQUEST_TYPES, isBug, SEVERITIES, sevOf, BugTag, CLOSED_STATUSES, isClosed, INITIATIVE_STATUSES, EPIC_STATUSES, STORY_STATUSES, STATUS_COLOR } from './WorkTypes'
 import { QuarterPlanner, ReleaseCalendar, ReleaseSelect, QuarterSelect, ReleasesManager, releaseOptions, releaseOf, releaseText, fmtMonthKey } from './Releases'
@@ -2141,6 +2142,9 @@ function Backlog({mode='list',items,setItems,projects,setProjects,space,ccrs=[],
   const [vendors,setVendors]=useState(['Deckers','Salesforce','GreyOrange','Legion','SafeSize','ID.me','Adyen','Agilence','Boomi'])
   const [swimlaneOpts,setSwimOpts]=useState([...SWIMLANES])
   const [statusOpts,setStatusOpts]=useState([...statusesFor(space)])
+  // Column order (drag the headers); saved per browser
+  const {order:colOrder,move:moveCol,reset:resetCols,isDefault:colsDefault}=useBacklogColumns()
+  const [dragCol,setDragCol]=useState<string|null>(null),[overCol,setOverCol]=useState<string|null>(null)
   // ── Universal CSV import: upsert by RTL id or Jira key; any provided column updates; blank cells never touch
   const [jrOpen,setJrOpen]=useState(false)
   const [jrRows,setJrRows]=useState<any[]>([])
@@ -2881,19 +2885,16 @@ const sorted=items.filter(i=>!isItemDone(i)).sort((a,b)=>{
           <table style={{width:'100%',borderCollapse:'collapse',minWidth:1400}}>
             <thead style={{position:'sticky',top:0,zIndex:10,background:'#162436'}}>
           <tr>
-                <th style={{...TH,width:32}}></th>
-                {[
-                  ['item_id','ID',85],['name','Item Name',200],['parent_project','Initiative',130],['epic','Epic',130],['work_type','Work',80],['release_month','Release',95],
-                  ['priority','Priority',70],['committed_priority','Rank',55],
-                  ['swimlane','Swimlane',110],['status','Status',130],['team','Team',50],
-                  ['effort','Effort',55],
-                  ['request_type','Request Type',110],['region','Region',100],
-                  ['vendor','Vendor',90],['vendor_delivery_date','Vendor Date',100],
-                  ['wsjf','WSJF',65],['rice','RICE',65],['reach','Reach',55],
-                  ['impact','Impact',55],['confidence','Confidence',80],
-                  ['owner','Owner',90],['start_date','Start Date',95],['end_date','End Date',95],
-                ].map(([col,label,w]:[string,string,number])=>(
-                  <th key={col} style={{...TH,width:w,cursor:'pointer',userSelect:'none' as const}}
+                <th style={{...TH,width:32,padding:0,textAlign:'center' as const}}>{!colsDefault&&<button onClick={resetCols} title="Put the columns back in their original order" style={{background:'none',border:'none',color:'#C8973A',cursor:'pointer',fontSize:12,padding:0}}>↺</button>}</th>
+                {colOrder.map(k=>BACKLOG_COLS.find(c=>c[0]===k)!).map(([col,label,w]:[string,string,number])=>(
+                  <th key={col} draggable title="Click to sort · drag to move this column"
+                    onDragStart={e=>{setDragCol(col);e.dataTransfer.effectAllowed='move';e.dataTransfer.setData('text/plain',col)}}
+                    onDragOver={e=>{if(dragCol){e.preventDefault();if(overCol!==col)setOverCol(col)}}}
+                    onDragLeave={()=>setOverCol(o=>o===col?null:o)}
+                    onDrop={e=>{e.preventDefault();if(dragCol)moveCol(dragCol,col);setDragCol(null);setOverCol(null)}}
+                    onDragEnd={()=>{setDragCol(null);setOverCol(null)}}
+                    style={{...TH,width:w,cursor:dragCol?'grabbing':'pointer',userSelect:'none' as const,opacity:dragCol===col?0.4:1,
+                      boxShadow:overCol===col&&dragCol!==col?'inset 3px 0 0 #C8973A':undefined}}
                     onClick={()=>{
                       if(sortCol===col) setSortDir(d=>d==='asc'?'desc':'asc')
                       else{setSortCol(col);setSortDir('asc')}
@@ -2913,7 +2914,7 @@ const sorted=items.filter(i=>!isItemDone(i)).sort((a,b)=>{
             </thead>
             <tbody>
               {displayRows.map((item:any,idx:number)=>{
-                if(item.__epic)return <EpicRow key={'epic:'+item.__epic.id} releases={releases} setItems={setItems} setEpics={setEpics} statusOpts={epicStatusesFor(space)} opts={epicOpts} onRank={rankEpic} onDragEpic={setDragEpic} onDropEpic={dropOnEpic} onOverEpic={(e:any)=>dragEpic&&setOverEpic(e.id)} dragOver={!!dragEpic&&overEpic===item.__epic.id} epic={item.__epic} projects={projects} items={items} ccCount={cc.length}
+                if(item.__epic)return <EpicRow key={'epic:'+item.__epic.id} colOrder={colOrder} releases={releases} setItems={setItems} setEpics={setEpics} statusOpts={epicStatusesFor(space)} opts={epicOpts} onRank={rankEpic} onDragEpic={setDragEpic} onDropEpic={dropOnEpic} onOverEpic={(e:any)=>dragEpic&&setOverEpic(e.id)} dragOver={!!dragEpic&&overEpic===item.__epic.id} epic={item.__epic} projects={projects} items={items} ccCount={cc.length}
                   isSel={selEpicId===item.__epic.id} onSelect={()=>{setSelected(null);setSelEpicId(selEpicId===item.__epic.id?null:item.__epic.id)}}/>
                 if(item.__hdr)return(
                   <tr key={item.key}>
@@ -2956,8 +2957,9 @@ const sorted=items.filter(i=>!isItemDone(i)).sort((a,b)=>{
                         )}
                       </div>
                     </td>
-                    <td style={{...TD,color:'#7A8FA6',fontFamily:'monospace',fontSize:10}}>{item.item_id}</td>
-                    <td style={{...TD,minWidth:240,paddingLeft:item.__indent?30:12,borderLeft:item.__indent?'2px solid rgba(224,123,42,0.35)':undefined}}>
+                    {inColumnOrder(colOrder,{
+                      item_id:<td style={{...TD,color:'#7A8FA6',fontFamily:'monospace',fontSize:10}}>{item.item_id}</td>,
+                      name:<td style={{...TD,minWidth:240,paddingLeft:item.__indent?30:12,borderLeft:item.__indent?'2px solid rgba(224,123,42,0.35)':undefined}}>
                       <div style={{fontSize:12,color:'#F4F6F8',fontWeight:isSel?700:400,lineHeight:1.35,marginBottom:3,display:'flex',alignItems:'flex-start',gap:4}}>{rt(item.request_type)&&<span style={{flexShrink:0}}>{rt(item.request_type)}</span>}<span style={{minWidth:0}}><InlineText value={item.name} width={220} onSave={v=>v&&upd(item.id,'name',v)}>{item.name}</InlineText></span></div>
                       <div style={{display:'flex',alignItems:'center',gap:6,flexWrap:'wrap' as const}}>
                         <ReadinessPips kind="item" x={item} apply={f=>setItems((p:any[])=>p.map(r=>r.id===item.id?{...r,...f}:r))} size={12}/><JiraChip kind="item" x={item} apply={f=>setItems((p:any[])=>p.map(r=>r.id===item.id?{...r,...f}:r))} size={10}/>
@@ -2984,48 +2986,49 @@ const sorted=items.filter(i=>!isItemDone(i)).sort((a,b)=>{
                         </div>
                       )}
                       {item.description&&<div style={{color:'#7A8FA6',fontSize:10,marginTop:1,maxWidth:220,overflow:'hidden',whiteSpace:'nowrap',textOverflow:'ellipsis'}}>{item.description}</div>}
-                    </td>
-                    <td style={{...TD,fontSize:11,color:item.parent_project?'#F4F6F8':'#7A8FA6',minWidth:110}}>
-                      <InlineSelect value={item.parent_project||''} options={[{value:'',label:'No initiative'},...[...parentOpts].sort().map((n:string)=>({value:n,label:n}))]} onChange={v=>upd(item.id,'parent_project',v)}>{item.parent_project||'—'}</InlineSelect></td>
-                    <td style={TD}>{(()=>{const ep=epicOf(item);const proj=projects.find((p:any)=>p.name===item.parent_project)
+                    </td>,
+                      parent_project:<td style={{...TD,fontSize:11,color:item.parent_project?'#F4F6F8':'#7A8FA6',minWidth:110}}>
+                      <InlineSelect value={item.parent_project||''} options={[{value:'',label:'No initiative'},...[...parentOpts].sort().map((n:string)=>({value:n,label:n}))]} onChange={v=>upd(item.id,'parent_project',v)}>{item.parent_project||'—'}</InlineSelect></td>,
+                      epic:<td style={TD}>{(()=>{const ep=epicOf(item);const proj=projects.find((p:any)=>p.name===item.parent_project)
                       const opts=epicChoices(proj,ep)
                       return <InlineSelect value={ep?.id||''} title="Click to change the epic. Picking one links the item to the epic's initiative."
                         options={[{value:'',label:'No epic'},...opts.map((e:any)=>({value:e.id,label:epicLabel(e,proj)}))]} onChange={v=>upd(item.id,'epic_id',v||null)}>{ep
                       ?<span title={`Epic: ${ep.name}`} style={{display:'inline-flex',alignItems:'center',gap:4,fontSize:11,color:'#E07B2A',border:'1px solid rgba(224,123,42,0.45)',background:'rgba(224,123,42,0.1)',borderRadius:4,padding:'1px 6px',maxWidth:150,overflow:'hidden',whiteSpace:'nowrap' as const,textOverflow:'ellipsis'}}>◆ {ep.name}</span>
-                      :<span style={{fontSize:11,color:'#3A4A5E'}}>—</span>}</InlineSelect>})()}</td>
-                    <td style={TD}><InlineSelect value={item.work_type||''} title="Work type: automatic follows the initiative or request type"
-                      options={[{value:'',label:`Automatic (${WT_LABEL[wtOf({...item,work_type:null}) as 'new']})`},...WORK_TYPE_KEYS.map(k=>({value:k,label:WT_LABEL[k]}))]} onChange={v=>upd(item.id,'work_type',v)}><WorkTag wt={wtOf(item)}/></InlineSelect></td>
-                    <td style={TD}><InlineSelect value={item.release_month||''} options={releaseOptions(releases,item.release_month)} onChange={v=>upd(item.id,'release_month',v)}>{item.release_month?<span title={`${fmtMonthKey(item.release_month)} release · ${releaseText(releases,item.release_month)}`} style={{fontSize:10,fontWeight:700,color:releaseOf(releases,item.release_month)?.no_release?'#D4820A':'#5DADE2',border:'1px solid rgba(93,173,226,0.4)',borderRadius:4,padding:'1px 6px',whiteSpace:'nowrap' as const}}>📦 {fmtMonthKey(item.release_month)}</span>:<span style={{fontSize:11,color:'#3A4A5E'}}>—</span>}</InlineSelect></td>
-                    <td style={TD}><InlineSelect value={item.priority} options={PRIORITIES} onChange={v=>v&&upd(item.id,'priority',v)}><span style={{background:pclr.bg,color:pclr.text,borderRadius:4,padding:'2px 8px',fontSize:10,fontWeight:700,whiteSpace:'nowrap' as const}}>{item.priority}</span></InlineSelect></td>
-                    <td style={{...TD,textAlign:'center' as const,padding:'0 4px'}} onClick={e=>e.stopPropagation()}>
+                      :<span style={{fontSize:11,color:'#3A4A5E'}}>—</span>}</InlineSelect>})()}</td>,
+                      work_type:<td style={TD}><InlineSelect value={item.work_type||''} title="Work type: automatic follows the initiative or request type"
+                      options={[{value:'',label:`Automatic (${WT_LABEL[wtOf({...item,work_type:null}) as 'new']})`},...WORK_TYPE_KEYS.map(k=>({value:k,label:WT_LABEL[k]}))]} onChange={v=>upd(item.id,'work_type',v)}><WorkTag wt={wtOf(item)}/></InlineSelect></td>,
+                      release_month:<td style={TD}><InlineSelect value={item.release_month||''} options={releaseOptions(releases,item.release_month)} onChange={v=>upd(item.id,'release_month',v)}>{item.release_month?<span title={`${fmtMonthKey(item.release_month)} release · ${releaseText(releases,item.release_month)}`} style={{fontSize:10,fontWeight:700,color:releaseOf(releases,item.release_month)?.no_release?'#D4820A':'#5DADE2',border:'1px solid rgba(93,173,226,0.4)',borderRadius:4,padding:'1px 6px',whiteSpace:'nowrap' as const}}>📦 {fmtMonthKey(item.release_month)}</span>:<span style={{fontSize:11,color:'#3A4A5E'}}>—</span>}</InlineSelect></td>,
+                      priority:<td style={TD}><InlineSelect value={item.priority} options={PRIORITIES} onChange={v=>v&&upd(item.id,'priority',v)}><span style={{background:pclr.bg,color:pclr.text,borderRadius:4,padding:'2px 8px',fontSize:10,fontWeight:700,whiteSpace:'nowrap' as const}}>{item.priority}</span></InlineSelect></td>,
+                      committed_priority:<td style={{...TD,textAlign:'center' as const,padding:'0 4px'}} onClick={e=>e.stopPropagation()}>
                       {(item.priority==='P1'||item.priority==='P2')
                         ? <span style={{fontSize:11,color:'#7A8FA6'}}>—</span>
                         : <input key={`rk-${item.id}-${item.committed_priority}`} type="number" min={0} defaultValue={item.committed_priority??''}
                             onKeyDown={e=>{if(e.key==='Enter'){setRank(item,parseInt(e.currentTarget.value,10));e.currentTarget.blur()}}}
                             onBlur={e=>{const v=parseInt(e.target.value,10);if(!isNaN(v)&&v!==item.committed_priority)setRank(item,v)}}
                             style={{width:44,background:'transparent',border:'1px solid #243447',borderRadius:4,color:'#C8973A',fontWeight:700,fontSize:11,textAlign:'center' as const,padding:'2px 0'}}/>}
-                    </td>
-                    <td style={{...TD,fontSize:11,color:'#7A8FA6'}}><InlineSelect value={item.swimlane||''} options={[{value:'',label:'—'},...swimlaneOpts.map((o:string)=>({value:o,label:o}))]} onChange={v=>upd(item.id,'swimlane',v)}>{item.swimlane||'—'}</InlineSelect></td>
-                    <td style={TD}><InlineSelect value={item.status} options={statusOpts} onChange={v=>v&&upd(item.id,'status',v)}><span style={{color:sc(item.status),fontSize:11,fontWeight:600}}>{item.status}</span></InlineSelect></td>
-                    <td style={{...TD,fontSize:10,color:'#7A8FA6'}}><InlineSelect value={item.team||''} options={[{value:'',label:'—'},...TEAMS.map(t=>({value:t,label:t}))]} onChange={v=>upd(item.id,'team',v)}>{item.team==='Consumer Experience'?'CE':item.team==='Operational Efficiency'?'OE':'—'}</InlineSelect></td>
-                    <td style={{...TD,textAlign:'center' as const,fontSize:11}}><InlineSelect value={item.effort||''} options={[{value:'',label:'—'},...EFFORTS.map(o=>({value:o,label:o}))]} onChange={v=>upd(item.id,'effort',v)}>{item.effort||'—'}</InlineSelect></td>
-                    <td style={{...TD,fontSize:11,color:'#7A8FA6'}}><span style={{display:'inline-flex',alignItems:'center',gap:5}}>
+                    </td>,
+                      swimlane:<td style={{...TD,fontSize:11,color:'#7A8FA6'}}><InlineSelect value={item.swimlane||''} options={[{value:'',label:'—'},...swimlaneOpts.map((o:string)=>({value:o,label:o}))]} onChange={v=>upd(item.id,'swimlane',v)}>{item.swimlane||'—'}</InlineSelect></td>,
+                      status:<td style={TD}><InlineSelect value={item.status} options={statusOpts} onChange={v=>v&&upd(item.id,'status',v)}><span style={{color:sc(item.status),fontSize:11,fontWeight:600}}>{item.status}</span></InlineSelect></td>,
+                      team:<td style={{...TD,fontSize:10,color:'#7A8FA6'}}><InlineSelect value={item.team||''} options={[{value:'',label:'—'},...TEAMS.map(t=>({value:t,label:t}))]} onChange={v=>upd(item.id,'team',v)}>{item.team==='Consumer Experience'?'CE':item.team==='Operational Efficiency'?'OE':'—'}</InlineSelect></td>,
+                      effort:<td style={{...TD,textAlign:'center' as const,fontSize:11}}><InlineSelect value={item.effort||''} options={[{value:'',label:'—'},...EFFORTS.map(o=>({value:o,label:o}))]} onChange={v=>upd(item.id,'effort',v)}>{item.effort||'—'}</InlineSelect></td>,
+                      request_type:<td style={{...TD,fontSize:11,color:'#7A8FA6'}}><span style={{display:'inline-flex',alignItems:'center',gap:5}}>
                       <InlineSelect value={item.request_type||''} options={[{value:'',label:'—'},...rtOpts.map((o:string)=>({value:o,label:o}))]} onChange={v=>upd(item.id,'request_type',v)}>{isBug(item)?<BugTag item={{request_type:'Bug'}}/>:(item.request_type||'—')}</InlineSelect>
                       {isBug(item)&&<InlineSelect value={item.severity||''} title="Severity" options={[{value:'',label:'No severity'},...SEVERITIES.map(sv=>({value:sv.key,label:sv.label}))]} onChange={v=>upd(item.id,'severity',v)}>
                         {sevOf(item.severity)?<span style={{fontSize:10,fontWeight:800,color:sevOf(item.severity)!.color,border:`1px solid ${sevOf(item.severity)!.color}`,borderRadius:4,padding:'0 5px'}}>{sevOf(item.severity)!.label}</span>:<span style={{fontSize:10,color:'#E74C3C',border:'1px dashed #E74C3C',borderRadius:4,padding:'0 5px'}}>+ severity</span>}
                       </InlineSelect>}
-                    </span></td>
-                    <td style={{...TD,fontSize:11,color:'#7A8FA6'}}><InlineSelect value={item.region||''} options={[{value:'',label:'—'},...regionOpts.map((o:string)=>({value:o,label:o}))]} onChange={v=>upd(item.id,'region',v)}>{item.region||'—'}</InlineSelect></td>
-                    <td style={{...TD,fontSize:11,color:'#7A8FA6'}}><InlineSelect value={item.vendor||''} options={[{value:'',label:'—'},...vendors.map((o:string)=>({value:o,label:o}))]} onChange={v=>upd(item.id,'vendor',v)}>{item.vendor||'—'}</InlineSelect></td>
-                    <td style={{...TD,fontSize:11,color:'#7A8FA6'}}><InlineDate value={item.vendor_delivery_date} onSave={v=>upd(item.id,'vendor_delivery_date',v)}/></td>
-                    <td style={{...TD,color:item.wsjf?'#E8B95A':'#7A8FA6',fontWeight:item.wsjf?700:400,fontSize:11}}>{item.wsjf?parseFloat(item.wsjf).toFixed(1):'—'}</td>
-                    <td style={{...TD,color:r?'#27AE60':'#7A8FA6',fontWeight:r?700:400,fontSize:11}}>{r||'—'}</td>
-                    <td style={{...TD,textAlign:'center' as const,fontSize:11,color:'#7A8FA6'}}>{item.reach||'—'}</td>
-                    <td style={{...TD,textAlign:'center' as const,fontSize:11,color:'#7A8FA6'}}>{item.impact||'—'}</td>
-                    <td style={{...TD,textAlign:'center' as const,fontSize:11,color:'#7A8FA6'}}>{item.confidence?`${Math.round(item.confidence*100)}%`:'—'}</td>
-                    <td style={{...TD,fontSize:11,color:'#7A8FA6'}}><InlineText value={item.owner} width={110} onSave={v=>upd(item.id,'owner',v)}>{item.owner||'—'}</InlineText></td>
-                    <td style={{...TD,fontSize:11,color:'#7A8FA6'}}><InlineDate value={item.start_date} onSave={v=>upd(item.id,'start_date',v)}/></td>
-                    <td style={{...TD,fontSize:11,color:'#7A8FA6'}}><InlineDate value={item.end_date} onSave={v=>upd(item.id,'end_date',v)}/></td>
+                    </span></td>,
+                      region:<td style={{...TD,fontSize:11,color:'#7A8FA6'}}><InlineSelect value={item.region||''} options={[{value:'',label:'—'},...regionOpts.map((o:string)=>({value:o,label:o}))]} onChange={v=>upd(item.id,'region',v)}>{item.region||'—'}</InlineSelect></td>,
+                      vendor:<td style={{...TD,fontSize:11,color:'#7A8FA6'}}><InlineSelect value={item.vendor||''} options={[{value:'',label:'—'},...vendors.map((o:string)=>({value:o,label:o}))]} onChange={v=>upd(item.id,'vendor',v)}>{item.vendor||'—'}</InlineSelect></td>,
+                      vendor_delivery_date:<td style={{...TD,fontSize:11,color:'#7A8FA6'}}><InlineDate value={item.vendor_delivery_date} onSave={v=>upd(item.id,'vendor_delivery_date',v)}/></td>,
+                      wsjf:<td style={{...TD,color:item.wsjf?'#E8B95A':'#7A8FA6',fontWeight:item.wsjf?700:400,fontSize:11}}>{item.wsjf?parseFloat(item.wsjf).toFixed(1):'—'}</td>,
+                      rice:<td style={{...TD,color:r?'#27AE60':'#7A8FA6',fontWeight:r?700:400,fontSize:11}}>{r||'—'}</td>,
+                      reach:<td style={{...TD,textAlign:'center' as const,fontSize:11,color:'#7A8FA6'}}>{item.reach||'—'}</td>,
+                      impact:<td style={{...TD,textAlign:'center' as const,fontSize:11,color:'#7A8FA6'}}>{item.impact||'—'}</td>,
+                      confidence:<td style={{...TD,textAlign:'center' as const,fontSize:11,color:'#7A8FA6'}}>{item.confidence?`${Math.round(item.confidence*100)}%`:'—'}</td>,
+                      owner:<td style={{...TD,fontSize:11,color:'#7A8FA6'}}><InlineText value={item.owner} width={110} onSave={v=>upd(item.id,'owner',v)}>{item.owner||'—'}</InlineText></td>,
+                      start_date:<td style={{...TD,fontSize:11,color:'#7A8FA6'}}><InlineDate value={item.start_date} onSave={v=>upd(item.id,'start_date',v)}/></td>,
+                      end_date:<td style={{...TD,fontSize:11,color:'#7A8FA6'}}><InlineDate value={item.end_date} onSave={v=>upd(item.id,'end_date',v)}/></td>
+                    })}
                     <td style={{...TD,textAlign:'center' as const}}>
                       {violation&&<span title="Outside initiative timeline" style={{fontSize:14}}>⚠️</span>}
                     </td>
