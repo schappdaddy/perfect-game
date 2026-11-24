@@ -227,7 +227,14 @@ export function QuarterPlanner({items,setItems,projects,setProjects,epics=[],set
   const NOT_STARTED=['Backlog','Ready','To Do','New']
   function relProgress(k:string){
     const effRel=(i:any)=>i.release_month||(i.epic_id?epicById(i.epic_id)?.release_month:null)||null
-    const its=(items as any[]).filter(i=>(i.space||'work')==='work'&&!KILLED.includes(i.status)&&shown('item',i)&&effRel(i)===k)
+    const stories=(items as any[]).filter(i=>(i.space||'work')==='work'&&!KILLED.includes(i.status)&&shown('item',i)&&effRel(i)===k)
+    // Work with nothing under it still counts, by its own status: an epic with no stories, and
+    // an initiative going live with no epics or stories
+    const live=(i:any)=>!KILLED.includes(i.status)
+    const bareEpics=(epics as any[]).filter(e=>(e.space||'work')==='work'&&live(e)&&e.release_month===k&&shown('epic',e)&&!storiesOf(e).some(live))
+    const bareInits=(projects as any[]).filter(p=>(p.space||'work')==='work'&&!p.sustain_quarter&&live(p)&&p.release_month===k&&(ALL||!poolTeam||!p.team||p.team===team)&&wtOk('project',p)
+      &&!(epics as any[]).some(e=>e.project_id===p.id&&live(e))&&!(items as any[]).some(i=>i.parent_project===p.name&&live(i)))
+    const its=[...stories,...bareEpics.map(e=>({...e,status:e.status==='Hypercare'?'Done':e.status})),...bareInits.map(p=>({...p,status:p.status==='Hypercare'?'Done':p.status}))]
     // Ready to Release counts as done for a release: the work is finished and waiting to deploy
     const deployed=its.filter(i=>isClosedStatus(i.status)),ready=its.filter(i=>i.status==='Ready to Release')
     const done=[...deployed,...ready],fly=its.filter(i=>!isClosedStatus(i.status)&&i.status!=='Ready to Release'&&!NOT_STARTED.includes(i.status))
@@ -243,7 +250,7 @@ export function QuarterPlanner({items,setItems,projects,setProjects,epics=[],set
     // under 75% done, or within 4 weeks under 40% done
     const late=r.days!=null&&r.days<0&&r.pct<100
     const risk=late||(r.days!=null&&((r.days<=14&&r.pct<75)||(r.days<=28&&r.pct<40)))?'#E74C3C':r.days!=null&&r.days<=42&&r.pct<50?'#E8B95A':r.pct===100?'#27AE60':'#C8D4E0'
-    const tip=`${r.done} of ${r.n} stories and bugs done (${r.pct}%): ${r.deployed} deployed, ${r.ready} ready to release · ${r.fly} in flight · ${r.n-r.done-r.fly} not started${r.pts?`\nPoints: ${r.ptsDone} of ${r.pts} done`:''}${r.days!=null?`\n${late?`Release date passed ${-r.days} day${r.days===-1?'':'s'} ago`:`${r.days} day${r.days===1?'':'s'} to the release`}`:'\nRelease date not set'}`
+    const tip=`${r.done} of ${r.n} done (${r.pct}%): ${r.deployed} deployed, ${r.ready} ready to release · ${r.fly} in flight · ${r.n-r.done-r.fly} not started${r.pts?`\nPoints: ${r.ptsDone} of ${r.pts} done`:''}${r.days!=null?`\n${late?`Release date passed ${-r.days} day${r.days===-1?'':'s'} ago`:`${r.days} day${r.days===1?'':'s'} to the release`}`:'\nRelease date not set'}\n(Stories and bugs; an epic or go-live with nothing under it counts by its own status.)`
     return(
       <div title={tip} style={{marginTop:5}}>
         <div style={{display:'flex',alignItems:'baseline',gap:6}}>
@@ -523,13 +530,13 @@ export function QuarterPlanner({items,setItems,projects,setProjects,epics=[],set
       onDragOver={o.idx!=null?e=>{e.preventDefault();e.stopPropagation();setOver('pool:'+en.key)}:undefined}
       onDrop={o.idx!=null?e=>{e.preventDefault();e.stopPropagation();dropOnPool(en.key)}:undefined}
       onClick={()=>isEpic?onOpenEpic?.(x):onOpenItem(x)}
-      style={{background:isEpic?'rgba(224,123,42,0.10)':isBug(x)?'rgba(231,76,60,0.08)':'rgba(93,173,226,0.07)',border:`1px solid ${isEpic?'rgba(224,123,42,0.45)':isBug(x)?'rgba(231,76,60,0.45)':'rgba(93,173,226,0.35)'}`,borderLeft:`3px solid ${isBug(x)?'#E74C3C':clr}`,borderTop:over==='pool:'+en.key?'2px solid #C8973A':undefined,borderRadius:6,padding:'6px 8px',cursor:'grab',opacity:dragId===en.key?0.4:1,display:'flex',flexDirection:'column',gap:3}}>
-      <div style={{display:'flex',alignItems:'center',gap:6,flexWrap:'wrap' as const,whiteSpace:'nowrap' as const}}>
+      style={{background:isEpic?'rgba(224,123,42,0.10)':isBug(x)?'rgba(231,76,60,0.08)':'rgba(93,173,226,0.07)',border:`1px solid ${isEpic?'rgba(224,123,42,0.45)':isBug(x)?'rgba(231,76,60,0.45)':'rgba(93,173,226,0.35)'}`,borderLeft:`3px solid ${isBug(x)?'#E74C3C':clr}`,borderTop:over==='pool:'+en.key?'2px solid #C8973A':undefined,borderRadius:6,padding:'6px 8px',cursor:'grab',opacity:dragId===en.key?0.4:1,display:'flex',flexDirection:'column',gap:3,minWidth:0,overflow:'hidden',flexShrink:0}}>
+      <div style={{display:'flex',alignItems:'center',gap:6,flexWrap:'wrap' as const,rowGap:4,minWidth:0}}>
         {o.idx!=null&&<span style={{fontSize:10,fontWeight:800,color:'#C8973A',minWidth:16}}>{o.idx+1}</span>}
         {isEpic?<span style={{fontSize:9,fontWeight:800,color:KIND_CLR.epic,letterSpacing:1}}>◆ EPIC</span>
           :isBug(x)?<><BugTag item={x}/><span style={{fontSize:10,color:'#7A8FA6',fontFamily:'monospace'}}>{x.item_id}</span></>
           :<><span style={{fontSize:9,fontWeight:800,color:KIND_CLR.story,letterSpacing:1}}>▪ STORY</span><span style={{fontSize:10,color:'#7A8FA6',fontFamily:'monospace'}}>{x.item_id}</span><span title={x.request_type} style={{fontSize:11}}>{RT_ICON[x.request_type]||''}</span></>}
-        <span style={{marginLeft:'auto',display:'flex',gap:4,alignItems:'center'}}><ReadinessPips kind={en.kind==='epic'?'epic':'item'} x={x} apply={f=>applyLocal(en.kind==='epic'?'epic':'item',x.id,f)} size={12}/><JiraChip kind={en.kind==='epic'?'epic':'item'} x={x} apply={f=>applyLocal(en.kind==='epic'?'epic':'item',x.id,f)} size={10}/>{wtF==='all'&&<WorkTag compact wt={wtOf(en.kind,x)}/>}<TeamTag team={teamOf(en.kind,x)}/></span>
+        <span style={{marginLeft:'auto',display:'flex',gap:4,alignItems:'center',flexWrap:'wrap' as const,justifyContent:'flex-end',minWidth:0}}><ReadinessPips kind={en.kind==='epic'?'epic':'item'} x={x} apply={f=>applyLocal(en.kind==='epic'?'epic':'item',x.id,f)} size={12}/><JiraChip compact kind={en.kind==='epic'?'epic':'item'} x={x} apply={f=>applyLocal(en.kind==='epic'?'epic':'item',x.id,f)} size={10}/>{wtF==='all'&&<WorkTag compact wt={wtOf(en.kind,x)}/>}<TeamTag team={teamOf(en.kind,x)}/></span>
         <span style={{fontSize:10,fontWeight:700,color:x.priority==='P1'?'#E74C3C':x.priority==='P2'?'#D4820A':'#7A8FA6'}}>{x.priority}</span>
         {(isEpic?ptsOf(en)>0:!!x.effort)&&<span title={isEpic&&!x.effort?'Effort points of its open stories':undefined} style={{fontSize:10,color:'#7A8FA6',border:'1px solid #3A4A5E',borderRadius:3,padding:'0 4px'}}>{isEpic&&!x.effort?ptsOf(en)+' pts':x.effort}</span>}
       </div>
@@ -635,12 +642,12 @@ export function QuarterPlanner({items,setItems,projects,setProjects,epics=[],set
     return(
       <div key={en.key} draggable onDragStart={e=>{setDragId(en.key);e.dataTransfer.effectAllowed='move'}} onDragEnd={()=>{setDragId(null);setOver(null)}}
         title="Drag onto a quarter to plan when it's worked, or onto a release for its go-live"
-        style={{background:'rgba(200,151,58,0.10)',border:'1px solid rgba(200,151,58,0.5)',borderLeft:'3px solid #C8973A',borderRadius:6,padding:'6px 8px',cursor:'grab',opacity:dragId===en.key?0.4:1,display:'flex',flexDirection:'column',gap:3}}>
+        style={{background:'rgba(200,151,58,0.10)',border:'1px solid rgba(200,151,58,0.5)',borderLeft:'3px solid #C8973A',borderRadius:6,padding:'6px 8px',cursor:'grab',minWidth:0,overflow:'hidden',flexShrink:0,opacity:dragId===en.key?0.4:1,display:'flex',flexDirection:'column',gap:3}}>
         <div style={{display:'flex',alignItems:'center',gap:6,flexWrap:'wrap' as const,rowGap:3}}>
           <span style={{fontSize:9,fontWeight:800,color:KIND_CLR.initiative,letterSpacing:1,whiteSpace:'nowrap' as const}}>◈ INITIATIVE{o.goLive?' GO-LIVE':''}</span>
           {workTypeOfProject(p)!=='new'&&<WorkTag compact wt={workTypeOfProject(p)}/>}
           <span style={{marginLeft:'auto',display:'flex',gap:5,alignItems:'center',flexWrap:'wrap' as const,justifyContent:'flex-end',minWidth:0}}>
-            <IntakeBubble x={p} size={12} maxName={110} apply={f=>applyLocal('project',p.id,f)}/><ReadinessPips kind="project" x={p} apply={f=>applyLocal('project',p.id,f)} size={12}/><JiraChip kind="project" x={p} apply={f=>applyLocal('project',p.id,f)} size={10}/>
+            <IntakeBubble x={p} size={12} maxName={80} apply={f=>applyLocal('project',p.id,f)}/><ReadinessPips kind="project" x={p} apply={f=>applyLocal('project',p.id,f)} size={12}/><JiraChip compact kind="project" x={p} apply={f=>applyLocal('project',p.id,f)} size={10}/>
             {p.release_month&&(!o.goLive||o.relBadge)&&<span style={{fontSize:9.5,fontWeight:700,color:'#5DADE2'}}>📦 {fmtMonthKey(p.release_month)}</span>}
             <TeamTag team={p.team}/>
           </span>
