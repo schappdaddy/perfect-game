@@ -1,4 +1,5 @@
 'use client'
+import { teamShort, teamColor, teamInk, teamOf } from './Teams'
 import { useState } from 'react'
 import { supabase } from '../lib/supabase'
 import { MilestoneTypeSelect, useMilestoneTypes, typeColor } from './MilestoneTypes'
@@ -17,15 +18,14 @@ import { IntakeBubble } from './Intake'
 const MONTHS=['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec']
 const TERMINAL=CLOSED_STATUSES
 const EFFORT_POINTS:any={XS:0.5,S:1,M:2,L:3,XL:5}
-const TEAM_SHORT:any={'Consumer Experience':'CX','Operational Efficiency':'OE','Retail Program':'RP'}
 const PRI_ORDER:any={P1:1,P2:2,P3:3,P4:4}
 // Each kind of work has its own colour on the planning boards, and each team its own tag
 const KIND_CLR={initiative:'#C8973A',epic:'#E07B2A',story:'#5DADE2',milestone:'#B07CE0'}
 const TEAM_TAG:any={'Consumer Experience':{bg:'#D9E2EC',fg:'#14233A'},'Operational Efficiency':{bg:'#6FA6CB',fg:'#0D1B2A'},'Retail Program':{bg:'#76C7A9',fg:'#0D1B2A'}}
 function TeamTag({team}:{team?:string|null}){
   if(!team)return <span title="No team" style={{fontSize:9.5,fontWeight:800,color:'#7A8FA6',border:'1px dashed #3A4A5E',borderRadius:10,padding:'0 6px',flexShrink:0}}>NO TEAM</span>
-  const c=TEAM_TAG[team]||{bg:'#3A4A5E',fg:'#F4F6F8'}
-  return <span title={team} style={{fontSize:9.5,fontWeight:800,color:c.fg,background:c.bg,borderRadius:10,padding:'1px 7px',flexShrink:0,letterSpacing:0.3}}>{TEAM_SHORT[team]||team}</span>
+  const c=TEAM_TAG[team]||(teamOf(team)?{bg:teamColor(team),fg:teamInk(team)}:{bg:'#3A4A5E',fg:'#F4F6F8'})
+  return <span title={team} style={{fontSize:9.5,fontWeight:800,color:c.fg,background:c.bg,borderRadius:10,padding:'1px 7px',flexShrink:0,letterSpacing:0.3}}>{teamShort(team)||team}</span>
 }
 const RT_ICON:any={'Tech Debt':'🔧','Enhancement':'✨','Bug':'🐞'}
 const pad=(n:number)=>String(n).padStart(2,'0')
@@ -163,8 +163,8 @@ export function QuarterPlanner({items,setItems,projects,setProjects,epics=[],set
 
   // team '__all' shows every team: each quarter then has one Tech Debt initiative per team
   const ALL=team==='__all'||!teams.includes(team)
-  const short=ALL?'all teams':TEAM_SHORT[team]||team
-  const shortOf=(t:string)=>TEAM_SHORT[t]||t
+  const short=ALL?'all teams':teamShort(team)||team
+  const shortOf=(t:string)=>teamShort(t)||t
   const quarters=[0,1,2,3].map(n=>{const{fy,q}=nextQ(fq.fy,fq.q,n);return qInfo(fy,q)})
   const allBuckets=(projects as any[]).filter(p=>p.sustain_quarter)
   const bucketFor=(qk:string,t:string)=>allBuckets.find(p=>p.sustain_quarter===qk&&p.team===t)

@@ -1,4 +1,5 @@
 'use client'
+import { TEAM_NAMES, useTeams, teamShort, teamColor, teamInk, teamOf } from './Teams'
 import { useState, useEffect, useRef, Fragment } from 'react'
 import { supabase } from '../lib/supabase'
 import * as XLSX from 'xlsx'
@@ -37,7 +38,7 @@ const epicStatusesFor=(space:string)=>space==='home'?HOME_STATUSES:EPIC_STATUSES
 const firstStatus=(space:string)=>space==='home'?'To Do':'Backlog'
 const projectStatusesFor=(space:string)=>space==='home'?HOME_PROJECT_STATUSES:PROJECT_STATUSES
 const PROJECT_STATUSES=INITIATIVE_STATUSES // initiatives (work space), as in Jira
-const TEAMS=['Consumer Experience','Operational Efficiency']
+const TEAMS=TEAM_NAMES // delivery teams, kept up to date from the teams table (Strategy settings)
 const EFFORTS=['S','M','L','XL']
 const EFFORT_ALLOC:any={S:25,M:50,L:75,XL:100} // default per-person allocation % this project's size implies
 const SWIMLANES=['POS','Pricing','Tax','Loyalty','WFM','Inventory','Reporting','SafeSize','Product','Clienteling','Integrations']
@@ -1860,7 +1861,7 @@ function Projects({items,setItems,projects,setProjects,milestones,setMilestones,
                         {project.rag==='Green'?'🟢':project.rag==='Amber'?'🟡':project.rag==='Red'?'🔴':'⚪'} {project.rag}
                       </span>
                       <span style={{color:sc(project.status),fontSize:11,fontWeight:600}}>{project.status}</span>
-                      <span style={{fontSize:11,color:'#7A8FA6'}}>{project.team==='Consumer Experience'?'CE':'OE'}</span>
+                      <span style={{fontSize:11,color:'#7A8FA6'}}>{teamShort(project.team)||'—'}</span>
                       <IntakeBubble x={project} size={13} apply={(f:any)=>setProjects((p:any[])=>p.map((r:any)=>r.id===project.id?{...r,...f}:r))}/>
                       <ReadinessPips kind="project" x={project} size={13} apply={(f:any)=>setProjects((p:any[])=>p.map((r:any)=>r.id===project.id?{...r,...f}:r))}/>
                       <JiraChip kind="project" x={project} size={10} apply={(f:any)=>setProjects((p:any[])=>p.map((r:any)=>r.id===project.id?{...r,...f}:r))}/>
@@ -3009,7 +3010,7 @@ const sorted=items.filter(i=>!isItemDone(i)).sort((a,b)=>{
                     </td>,
                       swimlane:<td style={{...TD,fontSize:11,color:'#7A8FA6'}}><InlineSelect value={item.swimlane||''} options={[{value:'',label:'—'},...swimlaneOpts.map((o:string)=>({value:o,label:o}))]} onChange={v=>upd(item.id,'swimlane',v)}>{item.swimlane||'—'}</InlineSelect></td>,
                       status:<td style={TD}><InlineSelect value={item.status} options={statusOpts} onChange={v=>v&&upd(item.id,'status',v)}><span style={{color:sc(item.status),fontSize:11,fontWeight:600}}>{item.status}</span></InlineSelect></td>,
-                      team:<td style={{...TD,fontSize:10,color:'#7A8FA6'}}><InlineSelect value={item.team||''} options={[{value:'',label:'—'},...TEAMS.map(t=>({value:t,label:t}))]} onChange={v=>upd(item.id,'team',v)}>{item.team==='Consumer Experience'?'CE':item.team==='Operational Efficiency'?'OE':'—'}</InlineSelect></td>,
+                      team:<td style={{...TD,fontSize:10,color:'#7A8FA6'}}><InlineSelect value={item.team||''} options={[{value:'',label:'—'},...TEAMS.map(t=>({value:t,label:t}))]} onChange={v=>upd(item.id,'team',v)}>{teamShort(item.team)||'—'}</InlineSelect></td>,
                       effort:<td style={{...TD,textAlign:'center' as const,fontSize:11}}><InlineSelect value={item.effort||''} options={[{value:'',label:'—'},...EFFORTS.map(o=>({value:o,label:o}))]} onChange={v=>upd(item.id,'effort',v)}>{item.effort||'—'}</InlineSelect></td>,
                       request_type:<td style={{...TD,fontSize:11,color:'#7A8FA6'}}><span style={{display:'inline-flex',alignItems:'center',gap:5}}>
                       <InlineSelect value={item.request_type||''} options={[{value:'',label:'—'},...rtOpts.map((o:string)=>({value:o,label:o}))]} onChange={v=>upd(item.id,'request_type',v)}>{isBug(item)?<BugTag item={{request_type:'Bug'}}/>:(item.request_type||'—')}</InlineSelect>
@@ -3490,7 +3491,6 @@ function Roadmap({items,setItems,projects,setProjects,milestones,setMilestones,t
   const trackOfProj=new Map<string,string>()
   if(promoted)(strategyItems as any[]).forEach((r:any)=>{if(r.strategy_id===promoted.id&&r.item_type==='project'&&r.track_id)trackOfProj.set(r.item_id,r.track_id)})
   const grouping=groupBy==='tracks'&&!pTracks.length?'none':groupBy
-  const TEAM_BAND:any={'Consumer Experience':'#C9D6E3','Operational Efficiency':'#6FA6CB'}
   const bandOf=(g:any):string=>{
     if(grouping==='teams')return g.team?'team:'+g.team:'team:'
     if(g.sustain_quarter)return 'sustain'
@@ -3502,7 +3502,7 @@ function Roadmap({items,setItems,projects,setProjects,milestones,setMilestones,t
   if(grouping!=='none')groups.sort((a:any,b:any)=>bandOrder.indexOf(bandOf(a))-bandOrder.indexOf(bandOf(b)))
   const bandInfo=(key:string)=>{
     if(key.startsWith('track:')){const t=pTracks.find((x:any)=>x.id===key.slice(6));return{name:t?.name||'Track',desc:t?.description||'',color:t?.color||'#7A8FA6',dark:true,track:t}}
-    if(key.startsWith('team:')){const t=key.slice(5);return{name:t||'No team',desc:'',color:TEAM_BAND[t]||'#3A4A5E',dark:!!TEAM_BAND[t]}}
+    if(key.startsWith('team:')){const t=key.slice(5),tm=teamOf(t);return{name:t||'No team',desc:tm?.status==='proposed'?`Proposed team${tm.start_fy?` · from FY${String(tm.start_fy).slice(2)}`:''}`:'',color:t?teamColor(t,'#3A4A5E'):'#3A4A5E',dark:!!t&&teamInk(t)==='#0D1B2A'}}
     if(key==='sustain')return{name:'Tech debt & quarter plans',desc:'Each quarter’s tech debt / sustain work',color:'#3A4A5E',dark:false}
     return{name:'Not on a track',desc:promoted?`Not placed on a track in ${promoted.name}`:'',color:'#3A4A5E',dark:false}
   }
@@ -5146,7 +5146,7 @@ function Stakeholder({items,projects,milestones}:{items:any[],projects:any[],mil
                 <span style={{background:pclr.bg,color:'#fff',padding:'2px 8px',borderRadius:4,fontSize:11,fontWeight:700}}>{project.priority}</span>
                 <div style={{flex:1}}>
                   <div style={{fontSize:13,fontWeight:600,color:'#F4F6F8'}}>{project.name}</div>
-                  <div style={{fontSize:11,color:'#7A8FA6'}}>{project.status} · {project.team==='Consumer Experience'?'CE':'OE'} · {project.start_date} → {project.end_date}</div>
+                  <div style={{fontSize:11,color:'#7A8FA6'}}>{project.status} · {teamShort(project.team)||'—'} · {project.start_date} → {project.end_date}</div>
                 </div>
                 <span style={{fontSize:11,color:ragColor,fontWeight:700}}>{project.rag}</span>
               </div>
@@ -8441,6 +8441,7 @@ function Assistant({open,setOpen,seed,setSeed,items:itemsProp,setItems,projects:
 }
 
 export default function PerfectGame() {
+  useTeams() // re-render when teams are added or changed
   const [items,setItems]=useState([])
   const [projects,setProjects]=useState([])
   const [milestones,setMilestones]=useState([])
