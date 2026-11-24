@@ -3256,7 +3256,7 @@ const sorted=items.filter(i=>!isItemDone(i)).sort((a,b)=>{
 }
 
 // ── ROADMAP ───────────────────────────────────────────────────────────────
-function Roadmap({items,setItems,projects,setProjects,milestones,setMilestones,tasks=[],setTasks,sprints=[],itemAssignments=[],projectRoles=[],people=[],roles=[],onOpenProject,deps=[],setDeps,releases=[],setReleases,epics=[],setEpics}:{items:any[],projects:any[],setItems:any,setProjects:any,milestones:any[],setMilestones?:any,tasks?:any[],setTasks?:any,sprints?:any[],itemAssignments?:any[],projectRoles?:any[],people?:any[],roles?:any[],onOpenProject?:(p:any)=>void,deps?:any[],setDeps?:any,releases?:any[],setReleases?:any,epics?:any[],setEpics?:any}) {
+function Roadmap({items,setItems,projects,setProjects,milestones,setMilestones,tasks=[],setTasks,sprints=[],itemAssignments=[],projectRoles=[],people=[],roles=[],onOpenProject,deps=[],setDeps,releases=[],setReleases,epics=[],setEpics,strategies=[],tracks=[],trackGoals=[],strategyItems=[]}:{strategies?:any[],tracks?:any[],trackGoals?:any[],strategyItems?:any[],items:any[],projects:any[],setItems:any,setProjects:any,milestones:any[],setMilestones?:any,tasks?:any[],setTasks?:any,sprints?:any[],itemAssignments?:any[],projectRoles?:any[],people?:any[],roles?:any[],onOpenProject?:(p:any)=>void,deps?:any[],setDeps?:any,releases?:any[],setReleases?:any,epics?:any[],setEpics?:any}) {
   const [showSprints,setShowSprints]=useState(false)
   const [showReleases,setShowReleasesState]=useState<boolean>(()=>{try{return localStorage.getItem('pg_rm_releases')!=='0'}catch{return true}})
   const setShowReleases=(v:boolean)=>{setShowReleasesState(v);try{localStorage.setItem('pg_rm_releases',v?'1':'0')}catch{}}
@@ -3372,6 +3372,9 @@ function Roadmap({items,setItems,projects,setProjects,milestones,setMilestones,t
   const [saving,setSaving]=useState(false)
   const [sortBy,setSortBy]=useState('start_date')
   const [sortDir,setSortDir]=useState('asc')
+  // Group the roadmap by the promoted strategy's tracks, by team, or not at all
+  const [groupBy,setGroupByS]=useState<'tracks'|'teams'|'none'>(()=>{try{return (localStorage.getItem('pg_rm_group') as any)||'tracks'}catch{return 'tracks'}})
+  const setGroupBy=(v:any)=>{setGroupByS(v);try{localStorage.setItem('pg_rm_group',v)}catch{}}
   const [collapsed,setCollapsed]=useState(null)
   const [showSettings,setShowSettings]=useState(false)
   const [codeFreezeStart,setCodeFreezeStart]=useState('2026-10-01')
@@ -3464,6 +3467,60 @@ function Roadmap({items,setItems,projects,setProjects,milestones,setMilestones,t
     return 0
   })
 
+  // ── Bands from the promoted strategy (read-only here; edit them on the Strategy tab) ──
+  const promoted=(strategies as any[]).filter((s:any)=>s.promoted_at).sort((a:any,b:any)=>String(b.promoted_at).localeCompare(String(a.promoted_at)))[0]||null
+  const pTracks=promoted?(tracks as any[]).filter((t:any)=>t.strategy_id===promoted.id).sort((a:any,b:any)=>(a.sort_order??0)-(b.sort_order??0)):[]
+  const trackOfProj=new Map<string,string>()
+  if(promoted)(strategyItems as any[]).forEach((r:any)=>{if(r.strategy_id===promoted.id&&r.item_type==='project'&&r.track_id)trackOfProj.set(r.item_id,r.track_id)})
+  const grouping=groupBy==='tracks'&&!pTracks.length?'none':groupBy
+  const TEAM_BAND:any={'Consumer Experience':'#C9D6E3','Operational Efficiency':'#6FA6CB'}
+  const bandOf=(g:any):string=>{
+    if(grouping==='teams')return g.team?'team:'+g.team:'team:'
+    if(g.sustain_quarter)return 'sustain'
+    const t=trackOfProj.get(g.id);return t&&pTracks.some((x:any)=>x.id===t)?'track:'+t:'none'
+  }
+  const bandOrder=grouping==='teams'
+    ?[...TEAMS.map(t=>'team:'+t),...[...new Set(groups.map((g:any)=>g.team).filter((t:any)=>t&&!TEAMS.includes(t)))].map(t=>'team:'+t),'team:']
+    :[...pTracks.map((t:any)=>'track:'+t.id),'sustain','none']
+  if(grouping!=='none')groups.sort((a:any,b:any)=>bandOrder.indexOf(bandOf(a))-bandOrder.indexOf(bandOf(b)))
+  const bandInfo=(key:string)=>{
+    if(key.startsWith('track:')){const t=pTracks.find((x:any)=>x.id===key.slice(6));return{name:t?.name||'Track',desc:t?.description||'',color:t?.color||'#7A8FA6',dark:true,track:t}}
+    if(key.startsWith('team:')){const t=key.slice(5);return{name:t||'No team',desc:'',color:TEAM_BAND[t]||'#3A4A5E',dark:!!TEAM_BAND[t]}}
+    if(key==='sustain')return{name:'Tech debt & quarter plans',desc:'Each quarter’s tech debt / sustain work',color:'#3A4A5E',dark:false}
+    return{name:'Not on a track',desc:promoted?`Not placed on a track in ${promoted.name}`:'',color:'#3A4A5E',dark:false}
+  }
+  const BAND_H=26
+  const bandCount=(key:string)=>groups.filter((g:any)=>bandOf(g)===key).length
+  function bandHeader(key:string,side:'label'|'bars'){
+    const b=bandInfo(key),closed=!!getCollapsed()['band:'+key],ink=b.dark?'#0D1B2A':'#E1E7EE'
+    if(side==='label')return(
+      <div key={'bh-'+key} onClick={()=>toggleCollapse('band:'+key)} title={`${b.name}${b.desc?' — '+b.desc:''}${grouping==='tracks'&&promoted?`\nFrom ${promoted.name} (the promoted strategy). Edit tracks on the Strategy tab.`:''}`}
+        style={{height:BAND_H,boxSizing:'border-box' as const,background:b.color,display:'flex',alignItems:'center',gap:6,padding:'0 10px',cursor:'pointer',color:ink,borderBottom:'1px solid #0D1B2A'}}>
+        <span style={{fontSize:10}}>{closed?'▸':'▾'}</span>
+        <span style={{fontSize:11,fontWeight:800,letterSpacing:1,whiteSpace:'nowrap' as const,overflow:'hidden',textOverflow:'ellipsis'}}>{b.name.toUpperCase()}</span>
+        <span style={{fontSize:10,fontWeight:700,opacity:0.7,flexShrink:0}}>· {bandCount(key)}</span>
+      </div>)
+    // Bars side: the band's colour across the timeline, with the track's goal for each fiscal year
+    const goals=b.track?(trackGoals as any[]).filter((g:any)=>g.track_id===b.track.id&&g.goal).sort((a:any,c:any)=>a.fy-c.fy):[]
+    return(
+      <div key={'bb-'+key} onClick={()=>toggleCollapse('band:'+key)} style={{height:BAND_H,boxSizing:'border-box' as const,background:b.color,position:'relative',cursor:'pointer',borderBottom:'1px solid #0D1B2A',overflowX:'clip' as any}}>
+        {b.desc&&!goals.length&&<span style={{position:'sticky',left:10,top:0,display:'inline-block',lineHeight:`${BAND_H}px`,fontSize:10.5,fontWeight:600,color:ink,opacity:0.85,whiteSpace:'nowrap' as const}}>{b.desc}</span>}
+        {goals.map((g:any)=>{
+          const x0=pct(`${g.fy-1}-04-01`),x1=pct(`${g.fy}-03-31`)
+          if(x1<0||x0>TOTAL_W)return null
+          const l=Math.max(0,x0),w=Math.min(TOTAL_W,x1)-l
+          return <span key={g.fy} title={`FY${String(g.fy).slice(2)} goal: ${g.goal}`} style={{position:'absolute',left:l,width:w,top:0,bottom:0,display:'flex',alignItems:'center',padding:'0 10px',boxSizing:'border-box' as const,borderLeft:'1px solid rgba(13,27,42,0.25)',fontSize:10.5,color:ink,whiteSpace:'nowrap' as const,overflowX:'clip' as any}}>
+            {/* stays in view while the year is on screen */}
+            <span style={{position:'sticky',left:10,overflow:'hidden',textOverflow:'ellipsis',maxWidth:'100%'}}><b style={{marginRight:5}}>FY{String(g.fy).slice(2)}</b>{g.goal}</span></span>
+        })}
+      </div>)
+  }
+  // Wrap one initiative's rows with its band header (when it's the first in its band)
+  function withBand(group:any,gi:number,side:'label'|'bars',render:()=>any){
+    if(grouping==='none')return render()
+    const key=bandOf(group),first=gi===0||bandOf(groups[gi-1])!==key
+    return <Fragment key={'w'+side+group.id}>{first&&bandHeader(key,side)}{!getCollapsed()['band:'+key]&&render()}</Fragment>
+  }
   const orphans=withDates.filter(i=>!i.parent_project||!projects.find(p=>p.name===i.parent_project))
   // An initiative's rows: each epic (its own dates, or the span of its dated stories) with its
   // stories under it, then stories with no epic. Done epics show only while they have stories here.
@@ -3925,6 +3982,13 @@ function Roadmap({items,setItems,projects,setProjects,milestones,setMilestones,t
           </div>
         </div>
         {!mobileR&&<div style={{display:'flex',alignItems:'center',gap:6}}>
+          <span style={{fontSize:11,color:'#7A8FA6'}}>Group</span>
+          <select value={grouping} onChange={e=>setGroupBy(e.target.value)} title={promoted?`Tracks and teams from ${promoted.name}, the promoted strategy${promoted.promoted_at?` (promoted ${new Date(promoted.promoted_at).toLocaleDateString()})`:''}. Edit them on the Strategy tab.`:'Promote a strategy to group by its tracks'}
+            style={{...sel,fontSize:11,padding:'4px 8px'}}>
+            <option value="tracks" disabled={!pTracks.length}>{promoted?`Tracks · ${promoted.name}`:'Tracks (no promoted strategy)'}</option>
+            <option value="teams">Teams</option>
+            <option value="none">No grouping</option>
+          </select>
           <span style={{fontSize:11,color:'#7A8FA6'}}>Sort</span>
           <select value={sortBy} onChange={e=>setSortBy(e.target.value)} style={{...sel,fontSize:11,padding:'4px 8px'}}>
             <option value="start_date">Start Date</option>
@@ -4043,7 +4107,7 @@ function Roadmap({items,setItems,projects,setProjects,milestones,setMilestones,t
             {/* Same for the releases strip */}
             {showReleases&&relMarks.length>0&&<div style={{height:REL_H,flexShrink:0,background:'#0D1B2A',borderBottom:'1px solid #243447',display:'flex',alignItems:'center',padding:'0 12px',fontSize:9.5,fontWeight:700,color:'#5DADE2',letterSpacing:0.8}}>📦 RELEASES</div>}
             <div ref={labelRef} style={{flex:1,overflowY:'hidden'}}>
-              {groups.map((group:any)=>{
+              {groups.map((group:any,gi:number)=>withBand(group,gi,'label',()=>{
                 const isCollapsed=getCollapsed()[group.id]
                 const childItems=[...group.items].sort((a,b)=>(!a.start_date?1:!b.start_date?-1:new Date(a.start_date+'T12:00:00').getTime()-new Date(b.start_date+'T12:00:00').getTime()))
                 const rc=ragColor(group.rag)
@@ -4102,7 +4166,7 @@ function Roadmap({items,setItems,projects,setProjects,milestones,setMilestones,t
                     })}
                   </div>
                 )
-              })}
+              }))}
               {orphans.length>0&&(
                 <div>
                   <div style={{height:PARENT_H,background:'rgba(122,143,166,0.08)',borderBottom:'1px solid #243447',borderTop:'2px solid #243447',display:'flex',alignItems:'center',padding:'0 8px',gap:8}}>
@@ -4257,7 +4321,7 @@ function Roadmap({items,setItems,projects,setProjects,milestones,setMilestones,t
                 counts={(k:string)=>[...items,...projects,...(epics as any[])].filter((x:any)=>x.release_month===k).length}/>}
 
               {/* Project groups */}
-              {groups.map((group:any)=>{
+              {groups.map((group:any,gi:number)=>withBand(group,gi,'bars',()=>{
                 const isCollapsed=getCollapsed()[group.id]
                 const childItems=[...group.items].sort((a,b)=>(!a.start_date?1:!b.start_date?-1:new Date(a.start_date+'T12:00:00').getTime()-new Date(b.start_date+'T12:00:00').getTime()))
                 const rc=ragColor(group.rag)
@@ -4362,7 +4426,7 @@ function Roadmap({items,setItems,projects,setProjects,milestones,setMilestones,t
                     })}
                   </div>
                 )
-              })}
+              }))}
 
               {/* Orphans */}
               {orphans.length>0&&(
@@ -8539,7 +8603,7 @@ useEffect(()=>{
           onOpenProject={(p:any)=>{setSelectedProject(p);setActiveTab('projects')}} openAssistant={(t:string)=>{setAsstSeed(t);setAsstOpen(true)}}
           items={items.filter(inSpace)} epics={epics} setEpics={setEpics}/>}
         {activeTab==='projects'&&<Projects items={sItems} setItems={setSItems} projects={sProjects} setProjects={setSProjects} milestones={sMilestones} setMilestones={setSMilestones} tasks={tasks} setTasks={setTasks} space={space} ccrs={ccrs} ccrItems={ccrItems} roles={roles} people={people} projectRoles={projectRoles} setProjectRoles={setProjectRoles} itemAssignments={itemAssignments} setItemAssignments={setItemAssignments} sprints={sprints} selectedProject={selectedProject} setSelectedProject={setSelectedProject} epics={epics} setEpics={setEpics} releases={releases}/>}
-{activeTab==='roadmap'&&<Roadmap releases={releases} setReleases={setReleases} epics={epics} setEpics={setEpics} deps={projectDeps.filter((d:any)=>!d.strategy_id)} setDeps={setProjectDeps} items={sItems} setItems={setSItems} projects={sProjects} setProjects={setSProjects} milestones={sMilestones} setMilestones={setSMilestones} tasks={tasks} setTasks={setTasks} sprints={sprints} itemAssignments={itemAssignments} projectRoles={projectRoles} people={people} roles={roles} onOpenProject={(p:any)=>{setSelectedProject(p);setActiveTab('projects')}}/>}
+{activeTab==='roadmap'&&<Roadmap strategies={strategies} tracks={tracks} trackGoals={trackGoals} strategyItems={strategyItems} releases={releases} setReleases={setReleases} epics={epics} setEpics={setEpics} deps={projectDeps.filter((d:any)=>!d.strategy_id)} setDeps={setProjectDeps} items={sItems} setItems={setSItems} projects={sProjects} setProjects={setSProjects} milestones={sMilestones} setMilestones={setSMilestones} tasks={tasks} setTasks={setTasks} sprints={sprints} itemAssignments={itemAssignments} projectRoles={projectRoles} people={people} roles={roles} onOpenProject={(p:any)=>{setSelectedProject(p);setActiveTab('projects')}}/>}
         {activeTab==='teams'&&<TeamPrep teams={TEAMS} strategies={strategies} projects={projects} items={items} epics={epics} releases={releases} milestones={milestones} sprints={sprints}
           strategyItems={strategyItems} tracks={tracks} goals={trackGoals} deps={projectDeps} strategyRoles={strategyRoles} projectRoles={projectRoles} people={people} roles={roles}
           workTypeOf={(i:any)=>workTypeOfItem(i,projects)} epicWorkTypeOf={(e:any)=>epicWorkType(e,projects)} onOpenProject={(p:any)=>{setSelectedProject(p);setActiveTab('projects')}}/>}
