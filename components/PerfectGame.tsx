@@ -2339,7 +2339,8 @@ function Backlog({mode='list',items,setItems,projects,setProjects,space,ccrs=[],
   const [regionOpts,setRegionOpts]=useState(['North America','EMEA','Japan','China','Global','NA/EMEA/JP'])
 
   // Parent options driven by projects table
-  const parentOpts=projects.map(p=>p.name)
+  // Initiatives to pick from: open ones, A–Z (an item already on a closed one keeps showing it)
+  const parentOpts=projects.filter((p:any)=>!PROJECT_TERMINAL.includes(p.status)).map((p:any)=>p.name).sort((a:string,b:string)=>a.localeCompare(b))
 
   const fc=items.filter(i=>i.flagged&&!isClosed(i)).length
 
@@ -2714,6 +2715,20 @@ const sorted=items.filter(i=>!isItemDone(i)).sort((a,b)=>{
                 style={{width:'100%',background:'#1E3048',color:'#F4F6F8',border:'1px solid #243447',borderRadius:5,padding:'5px 8px',fontSize:12,boxSizing:'border-box' as const}}/>
             </div>
             <div style={{overflowY:'auto',maxHeight:160}}>
+              {value&&!['status','priority','request_type'].includes(field)&&!search&&(
+                <div onClick={()=>{
+                    // Clearing the initiative also takes the item out of an epic that belongs to it
+                    if(field==='parent_project'&&selected.epic_id){
+                      const ep=(epics as any[]).find((e:any)=>e.id===selected.epic_id),pr=ep?.project_id&&projects.find((p:any)=>p.id===ep.project_id)
+                      if(pr&&pr.name===value&&!confirm(`Remove "${selected.name}" from ${value}?\n\nIt also leaves the epic "${ep.name}", which belongs to that initiative.`))return
+                    }
+                    upd(selected.id,field,null);setOpen(false);setSearch('')}}
+                  style={{padding:'8px 12px',fontSize:12.5,color:'#7A8FA6',fontStyle:'italic',cursor:'pointer',borderBottom:'1px solid #243447'}}
+                  onMouseEnter={e=>(e.currentTarget.style.background='rgba(255,255,255,0.06)')}
+                  onMouseLeave={e=>(e.currentTarget.style.background='transparent')}>
+                  ✕ {field==='parent_project'?'No initiative':field==='team'?'No team':'None'}
+                </div>
+              )}
               {filtered2.map(o=>(
                 <div key={o} onClick={()=>{upd(selected.id,field,o);setOpen(false);setSearch('')}}
                   style={{padding:'8px 12px',fontSize:13,color:o===value?'#C8973A':'#F4F6F8',background:o===value?'rgba(200,151,58,0.12)':'transparent',cursor:'pointer',fontWeight:o===value?700:400,borderLeft:o===value?'3px solid #C8973A':'3px solid transparent'}}
@@ -2999,7 +3014,7 @@ const sorted=items.filter(i=>!isItemDone(i)).sort((a,b)=>{
                       {item.description&&<div style={{color:'#7A8FA6',fontSize:10,marginTop:1,maxWidth:220,overflow:'hidden',whiteSpace:'nowrap',textOverflow:'ellipsis'}}>{item.description}</div>}
                     </td>,
                       parent_project:<td style={{...TD,fontSize:11,color:item.parent_project?'#F4F6F8':'#7A8FA6',minWidth:110}}>
-                      <InlineSelect value={item.parent_project||''} options={[{value:'',label:'No initiative'},...[...parentOpts].sort().map((n:string)=>({value:n,label:n}))]} onChange={v=>upd(item.id,'parent_project',v)}>{item.parent_project||'—'}</InlineSelect></td>,
+                      <InlineSelect value={item.parent_project||''} options={[{value:'',label:'No initiative'},...[...parentOpts].sort().map((n:string)=>({value:n,label:n}))]} onChange={v=>upd(item.id,'parent_project',v||null)}>{item.parent_project||'—'}</InlineSelect></td>,
                       epic:<td style={TD}>{(()=>{const ep=epicOf(item);const proj=projects.find((p:any)=>p.name===item.parent_project)
                       const opts=epicChoices(proj,ep)
                       return <InlineSelect value={ep?.id||''} title="Click to change the epic. Picking one links the item to the epic's initiative."
