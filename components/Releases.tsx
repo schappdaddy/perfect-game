@@ -210,7 +210,9 @@ export function QuarterPlanner({items,setItems,projects,setProjects,epics=[],set
   // stories ("Part 1 of 2", "completes epic"). Stories with no release of their own ship with
   // the epic's final part. An epic shipping in one release is a single card as before.
   const KILLED=['Killed','Will Not Implement',"Won't Do"]
-  const partStories=(e:any)=>storiesOf(e).filter(st=>!KILLED.includes(st.status)&&withItsEpic(st))
+  // In the Releases view a story always sits in its epic, whatever quarter it's worked in
+  // (only the release matters here); one worked in another quarter is tagged with it
+  const partStories=(e:any)=>storiesOf(e).filter(st=>!KILLED.includes(st.status)&&(withItsEpic(st)||(open(st)&&!!qkOf('item',st))))
   function epicParts(en:Entry):Entry[]{
     const e=en.x,sts=partStories(e)
     const own=sts.map(st=>st.release_month).filter(Boolean).sort()
@@ -265,7 +267,8 @@ export function QuarterPlanner({items,setItems,projects,setProjects,epics=[],set
       </div>)
   }
   const relOf=(en:Entry)=>en.relMonth!==undefined?en.relMonth:(en.x.release_month||null)
-  const relPlanned:Entry[]=[...planned.filter(en=>en.kind!=='epic'),...planned.filter(en=>en.kind==='epic').flatMap(epicParts)].sort(rank)
+  const plannedEpicIds=new Set(planned.filter(en=>en.kind==='epic').map(en=>en.x.id))
+  const relPlanned:Entry[]=[...planned.filter(en=>en.kind!=='epic'&&!(en.x.epic_id&&plannedEpicIds.has(en.x.epic_id))),...planned.filter(en=>en.kind==='epic').flatMap(epicParts)].sort(rank)
   // Initiatives go live in a release
   const INIT_DONE=CLOSED_STATUSES
   const inits=(projects as any[]).filter(p=>!p.sustain_quarter&&(p.space||'work')==='work'&&!INIT_DONE.includes(p.status)&&(ALL||!poolTeam||!p.team||p.team===team)&&wtOk('project',p))
@@ -549,7 +552,7 @@ export function QuarterPlanner({items,setItems,projects,setProjects,epics=[],set
         // The stories that travel with this epic (same quarter), listed inside it
         const pt=mode==='releases'?en.part:undefined
         const relMode=mode==='releases'
-        const inside=pt?pt.stories:sts.filter(st=>withItsEpic(st)&&open(st)),shownSt=inside.slice(0,relMode?12:6)
+        const inside=pt?pt.stories:relMode?partStories(x).filter(open):sts.filter(st=>withItsEpic(st)&&open(st)),shownSt=inside.slice(0,relMode?12:6)
         const last=pt&&pt.idx===pt.total-1
         return <div style={{display:'flex',flexDirection:'column',gap:1}}>
           {pt&&<div title="This epic ships in stages: each release lists the stories going out in it" style={{display:'flex',alignItems:'center',gap:5,fontSize:10,fontWeight:800,color:last?'#27AE60':'#5DADE2',margin:'1px 0 2px'}}>
@@ -565,6 +568,7 @@ export function QuarterPlanner({items,setItems,projects,setProjects,epics=[],set
               <span style={{color:isBug(st)?'#E74C3C':KIND_CLR.story,fontWeight:800,fontSize:isBug(st)?9:8.5}}>{isBug(st)?'🐞':'▪'}</span>
               <span style={{color:'#7A8FA6',fontFamily:'monospace',fontSize:9.5,flexShrink:0}}>{st.item_id}</span>
               <span style={{color:'#E1E7EE',flex:1,minWidth:0,overflow:'hidden',textOverflow:'ellipsis',whiteSpace:'nowrap' as const,textDecoration:open(st)?undefined:'line-through'}}>{st.name}</span>
+              {relMode&&qkOf('item',st)&&qkOf('item',st)!==en.qk&&<span title={`Worked in ${qkOf('item',st)?.replace('-',' ')}, unlike its epic`} style={{color:'#E8B95A',fontSize:8.5,fontWeight:800,border:'1px solid rgba(232,185,90,0.5)',borderRadius:3,padding:'0 3px',flexShrink:0}}>{String(qkOf('item',st)).split('-')[1]}</span>}
               <span style={{color:'#7A8FA6',fontSize:9,flexShrink:0}}>{st.status}</span>
             </div>
           ))}
