@@ -568,13 +568,26 @@ export function QuarterPlanner({items,setItems,projects,setProjects,epics=[],set
               <span style={{color:isBug(st)?'#E74C3C':KIND_CLR.story,fontWeight:800,fontSize:isBug(st)?9:8.5}}>{isBug(st)?'🐞':'▪'}</span>
               <span style={{color:'#7A8FA6',fontFamily:'monospace',fontSize:9.5,flexShrink:0}}>{st.item_id}</span>
               <span style={{color:'#E1E7EE',flex:1,minWidth:0,overflow:'hidden',textOverflow:'ellipsis',whiteSpace:'nowrap' as const,textDecoration:open(st)?undefined:'line-through'}}>{st.name}</span>
-              {relMode&&qkOf('item',st)&&qkOf('item',st)!==en.qk&&<span title={`Worked in ${qkOf('item',st)?.replace('-',' ')}, unlike its epic`} style={{color:'#E8B95A',fontSize:8.5,fontWeight:800,border:'1px solid rgba(232,185,90,0.5)',borderRadius:3,padding:'0 3px',flexShrink:0}}>{String(qkOf('item',st)).split('-')[1]}</span>}
+              {relMode&&qkOf('item',st)&&qkOf('item',st)!==en.qk&&<span title={`Worked in ${qkOf('item',st)?.replace('-',' ')}, unlike its epic`} style={{color:'#E8B95A',fontSize:8.5,fontWeight:800,border:'1px solid rgba(232,185,90,0.5)',borderRadius:3,padding:'0 3px',flexShrink:0,whiteSpace:'nowrap' as const}}>Worked {String(qkOf('item',st)).split('-')[1]}</span>}
               <span style={{color:'#7A8FA6',fontSize:9,flexShrink:0}}>{st.status}</span>
             </div>
           ))}
           {inside.length>shownSt.length&&<div style={{fontSize:9.5,color:'#7A8FA6',paddingLeft:7}}>+ {inside.length-shownSt.length} more</div>}
+          {!relMode&&(()=>{
+            // Stories of this epic deliberately worked in another quarter
+            const elsewhere=sts.filter(st=>open(st)&&!withItsEpic(st)&&qkOf('item',st)&&qkOf('item',st)!==en.qk)
+            if(!elsewhere.length)return null
+            const by=[...new Set(elsewhere.map(st=>qkOf('item',st) as string))].sort().map(k=>{const n=elsewhere.filter(st=>qkOf('item',st)===k).length;return `${n} stor${n===1?'y':'ies'} worked in ${k.replace('-',' ')}`})
+            return <div title={elsewhere.map(st=>`${st.item_id} ${st.name}`).join('\n')} style={{fontSize:9.5,color:'#E8B95A',paddingLeft:7}}>⏩ +{by.join(' · ')}</div>
+          })()}
           {pt&&pt.others.length>0&&<div style={{fontSize:9.5,color:'#7A8FA6',paddingLeft:7}}>{pt.others.map(o=>`${o.month<pt.month?'✓':'→'} ${o.n} ship${o.n===1?'s':''} in ${fmtMonthKey(o.month)}`).join(' · ')}</div>}
         </div>
+      })()}
+      {!isEpic&&ep&&en.qk&&qkOf('epic',ep)&&qkOf('epic',ep)!==en.qk&&(()=>{
+        const later=String(en.qk)>String(qkOf('epic',ep))
+        return <div title={`Its epic "${ep.name}" is worked in ${String(qkOf('epic',ep)).replace('-',' ')}; this story is planned separately in ${String(en.qk).replace('-',' ')}.`}
+          style={{display:'inline-flex',alignSelf:'flex-start',alignItems:'center',gap:4,fontSize:9.5,fontWeight:800,color:'#E8B95A',border:'1px solid rgba(232,185,90,0.5)',background:'rgba(232,185,90,0.1)',borderRadius:4,padding:'1px 6px'}}>
+          {later?'⏩ Later':'⏪ Earlier'} than its epic · epic is {String(qkOf('epic',ep)).split('-')[1]}</div>
       })()}
       {o.grouped?(ep&&!isEpic?<div style={{fontSize:10,color:KIND_CLR.epic}}>◆ in epic {ep.name}</div>:null):home?<div style={{fontSize:10,color:'#C8973A',overflow:'hidden',textOverflow:'ellipsis',whiteSpace:'nowrap' as const}}>◈ {home.name}{ep?` › ${ep.name}`:''}</div>
         :bk?<div style={{fontSize:10,color:'#8FA6BC'}}>🔧 {bk.name}</div>
