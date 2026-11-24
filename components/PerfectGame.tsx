@@ -2439,6 +2439,18 @@ const sorted=items.filter(i=>!isItemDone(i)).sort((a,b)=>{
   }
 
 
+  // Filter choices: only open work (closed items aren't in this list, so neither are closed
+  // initiatives, epics or statuses)
+  const filterInits=[...new Set(sorted.map((i:any)=>i.parent_project).filter(Boolean))]
+    .filter(n=>{const p=projects.find((x:any)=>x.name===n);return !p||!PROJECT_TERMINAL.includes(p.status)}).sort((a:any,b:any)=>String(a).localeCompare(String(b)))
+  const filterEpics=(()=>{
+    const list=(epics as any[]).filter(e=>spaceOf(e)===space&&!ITEM_TERMINAL.includes(e.status))
+      .map(e=>({e,pn:projects.find((p:any)=>p.id===e.project_id)?.name||''}))
+      .filter(({pn})=>fpp==='All'||pn===fpp)
+    const dup=new Set(list.map(x=>x.e.name).filter((n,i,a)=>a.indexOf(n)!==i))
+    return list.map(x=>({e:x.e,label:dup.has(x.e.name)?`${x.e.name} (${x.pn||'no initiative'})`:x.e.name}))
+      .sort((a,b)=>a.label.localeCompare(b.label))
+  })()
   const preSeg=sorted.filter(item=>{
     if(ft!=='All'&&item.team!==ft) return false
     if(fp!=='All'&&item.priority!==fp) return false
@@ -2819,14 +2831,12 @@ const sorted=items.filter(i=>!isItemDone(i)).sort((a,b)=>{
         <input placeholder="Search..." value={srch} onChange={e=>setSrch(e.target.value)} style={{...sel,width:160}}/>
         <select value={ft} onChange={e=>setFt(e.target.value)} style={{...sel,maxWidth:150}}><option value="All">All Teams</option>{TEAMS.map(t=><option key={t}>{t}</option>)}</select>
         <select value={fp} onChange={e=>setFp(e.target.value)} style={sel}><option value="All">All Priorities</option>{PRIORITIES.map(p=><option key={p}>{p}</option>)}</select>
-        <select value={fst} onChange={e=>setFst(e.target.value)} style={{...sel,maxWidth:150}}><option value="All">All Statuses</option>{statusOpts.map(s=><option key={s}>{s}</option>)}</select>
-        <select value={fpp} onChange={e=>{setFpp(e.target.value);setFep('All')}} style={{...sel,maxWidth:170}}><option value="All">All Initiatives</option>{[...new Set(items.map(i=>i.parent_project).filter(Boolean))].sort().map(p=><option key={p}>{p}</option>)}</select>
+        <select value={fst} onChange={e=>setFst(e.target.value)} style={{...sel,maxWidth:150}}><option value="All">All Statuses</option>{statusOpts.filter(s=>!ITEM_TERMINAL.includes(s)).map(s=><option key={s}>{s}</option>)}</select>
+        <select value={fpp} onChange={e=>{setFpp(e.target.value);setFep('All')}} style={{...sel,maxWidth:170}}><option value="All">All Initiatives</option>{filterInits.map(p=><option key={p}>{p}</option>)}</select>
         <select value={fep} onChange={e=>setFep(e.target.value)} style={{...sel,maxWidth:170}}>
           <option value="All">All Epics</option>
           <option value="__none">No epic</option>
-          {(epics as any[]).filter(e=>spaceOf(e)===space).map(e=>({e,pn:projects.find((p:any)=>p.id===e.project_id)?.name||''})).filter(({e,pn})=>(fpp==='All'||pn===fpp)&&(!e.project_id||pn))
-            .sort((a,b)=>(a.pn||'~').localeCompare(b.pn||'~')||(a.e.sort_order??0)-(b.e.sort_order??0))
-            .map(({e,pn})=><option key={e.id} value={e.id}>{fpp==='All'?`${pn||'No initiative'} › ${e.name}`:e.name}</option>)}
+          {filterEpics.map(({e,label})=><option key={e.id} value={e.id}>{label}</option>)}
         </select>
         <button onClick={()=>setSf(f=>!f)} style={{...sel,background:sf?'#7D2D00':'#1E3048',color:sf?'#FF8C42':'#7A8FA6',border:`1px solid ${sf?'#FF8C42':'#243447'}`}}>
           🚩{fc>0&&<span style={{background:'#C8973A',color:'#0D1B2A',borderRadius:10,padding:'0 5px',fontSize:10,fontWeight:700,marginLeft:3}}>{fc}</span>}
@@ -2858,7 +2868,7 @@ const sorted=items.filter(i=>!isItemDone(i)).sort((a,b)=>{
         <select value={frl} onChange={e=>setFrl(e.target.value)} style={{...sel,color:frl==='All'?undefined:'#5DADE2'}}>
           <option value="All">All Releases</option>
           <option value="__none">No release</option>
-          {[...new Set([...items.map((i:any)=>i.release_month),...(releases as any[]).filter((r:any)=>!r.no_release).map((r:any)=>r.month)].filter(Boolean))].sort().map((k:any)=><option key={k} value={k}>📦 {fmtMonthKey(k)} · {releaseText(releases,k)}</option>)}
+          {[...new Set([...sorted.map((i:any)=>i.release_month),...(releases as any[]).filter((r:any)=>!r.no_release).map((r:any)=>r.month)].filter(Boolean))].sort().map((k:any)=><option key={k} value={k}>📦 {fmtMonthKey(k)} · {releaseText(releases,k)}</option>)}
         </select>
         <select value={fef} onChange={e=>setFef(e.target.value)} style={sel}><option value="All">All Efforts</option>{EFFORTS.map(e=><option key={e}>{e}</option>)}</select>
         <select value={fsev} onChange={e=>setFsev(e.target.value)} title="Bugs by severity" style={{...sel,color:fsev==='All'?undefined:'#E74C3C'}}><option value="All">All Severities</option>{SEVERITIES.map(sv=><option key={sv.key} value={sv.key}>🐞 {sv.label}</option>)}<option value="__none">🐞 No severity set</option></select>
