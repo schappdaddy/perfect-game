@@ -3,7 +3,7 @@ import { teamShort, teamColor, teamInk, teamOf } from './Teams'
 import { useState } from 'react'
 import { supabase } from '../lib/supabase'
 import { MilestoneTypeSelect, useMilestoneTypes, typeColor } from './MilestoneTypes'
-import { WT_LABEL, WorkTag, workTypeOfProject, isBug, BugTag, CLOSED_STATUSES, isClosedStatus } from './WorkTypes'
+import { WT_LABEL, WorkTag, workTypeOfProject, isBug, BugTag, CLOSED_STATUSES, isClosedStatus, STATUS_COLOR, STORY_STATUSES, INITIATIVE_STATUSES } from './WorkTypes'
 import { ReadinessPips, ReadinessAudit } from './Readiness'
 import { JiraChip } from './JiraLink'
 import { IntakeBubble } from './Intake'
@@ -498,7 +498,10 @@ export function QuarterPlanner({items,setItems,projects,setProjects,epics=[],set
         {(isEpic?ptsOf(en)>0:!!x.effort)&&<span title={isEpic&&!x.effort?'Effort points of its open stories':undefined} style={{fontSize:10,color:'#7A8FA6',border:'1px solid #3A4A5E',borderRadius:3,padding:'0 4px'}}>{isEpic&&!x.effort?ptsOf(en)+' pts':x.effort}</span>}
       </div>
       <div style={{fontSize:12,color:'#F4F6F8',lineHeight:1.3,fontWeight:isEpic?700:400}}>{x.name}</div>
-      {o.showQuarter&&qi&&<div style={{fontSize:10,color:'#C8D4E0'}}>🗓 Worked in <b>{qi.label}</b>{later?<span style={{color:'#5DADE2'}}> · ships after</span>:''}</div>}
+      <div style={{display:'flex',alignItems:'center',gap:6,flexWrap:'wrap' as const,rowGap:3}}>
+        {statusPill(en.kind,x)}
+        {o.showQuarter&&qi&&<span style={{fontSize:10,color:'#C8D4E0'}}>🗓 Worked in <b>{qi.label}</b>{later?<span style={{color:'#5DADE2'}}> · ships after</span>:''}</span>}
+      </div>
       {isEpic&&(()=>{
         // The stories that travel with this epic (same quarter), listed inside it
         const pt=mode==='releases'?en.part:undefined
@@ -569,6 +572,27 @@ export function QuarterPlanner({items,setItems,projects,setProjects,epics=[],set
     </div>
   ))
   // An initiative card: releasing the initiative means its go-live is in that release
+  // A card's status, colour-coded; click it to change the status right there
+  async function setStatus(kind:'item'|'epic'|'project',x:any,status:string){
+    if(!status||status===x.status)return
+    if(kind==='item')await updItem(x.id,{status})
+    else if(kind==='epic')await updEpic(x.id,{status})
+    else await updProject(x.id,{status})
+  }
+  const statusPill=(kind:'item'|'epic'|'project',x:any)=>{
+    const home=(x.space||'work')==='home'
+    const opts:string[]=home?(kind==='project'?['Planning','In Progress','Waiting','Done','Cancelled']:['To Do','In Progress','Waiting','Done',"Won't Do"]):(kind==='item'?STORY_STATUSES:INITIATIVE_STATUSES)
+    const c=STATUS_COLOR[x.status]||'#7A8FA6'
+    return(
+      <span onClick={e=>e.stopPropagation()} onMouseDown={e=>e.stopPropagation()} title={`Status: ${x.status||'not set'} · click to change`}
+        style={{position:'relative',display:'inline-flex',alignItems:'center',gap:4,fontSize:9.5,fontWeight:800,color:c,border:`1px solid ${c}66`,background:`${c}1F`,borderRadius:9,padding:'1px 7px',whiteSpace:'nowrap' as const,flexShrink:0}}>
+        <span style={{width:6,height:6,borderRadius:'50%',background:c}}/>{x.status||'No status'}
+        <select value={x.status||''} onChange={e=>setStatus(kind,x,e.target.value)} style={{position:'absolute',inset:0,opacity:0,cursor:'pointer',width:'100%'}}>
+          {!opts.includes(x.status)&&<option value={x.status||''}>{x.status||'—'}</option>}
+          {opts.map(o=><option key={o} value={o}>{o}</option>)}
+        </select>
+      </span>)
+  }
   function initCard(en:Entry,o:any){
     const p=en.x,eps=(epics as any[]).filter(e=>e.project_id===p.id&&open(e)),sts=(items as any[]).filter(i=>i.parent_project===p.name&&open(i))
     const fmtD=(d:string)=>fmtMonthKey(d.slice(0,7))
@@ -586,6 +610,7 @@ export function QuarterPlanner({items,setItems,projects,setProjects,epics=[],set
           </span>
         </div>
         <div style={{fontSize:12,fontWeight:800,color:'#F4F6F8',lineHeight:1.3}}>{p.name}</div>
+        <div style={{display:'flex'}}>{statusPill('project',p)}</div>
         <div style={{fontSize:10,color:'#7A8FA6'}}>{p.start_date?`${fmtD(p.start_date)} – ${p.ongoing||!p.end_date?'ongoing':fmtD(p.end_date)}`:'No dates'} · {eps.length} epic{eps.length!==1?'s':''} · {sts.length} stor{sts.length===1?'y':'ies'}</div>
       </div>
     )
