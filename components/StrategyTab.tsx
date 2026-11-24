@@ -1,4 +1,5 @@
 'use client'
+import { teamShort as tShortOf, teamColor, teamInk, useTeams, addTeam, updateTeam, deleteTeam, moveTeam, teamUsage, TEAM_COLORS_PICK, type Team } from './Teams'
 import { useState, useEffect, useRef, Fragment } from 'react'
 import { supabase } from '../lib/supabase'
 import { DependencyLayer, DepHandle, createDependency, deleteDependency, depKey } from './DependencyLayer'
@@ -22,7 +23,6 @@ const MONTH_W=34          // px per month; a quarter is 3× this
 const LABEL_W_DESKTOP=250
 const ROW_H=26
 const MONTHS=['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec']
-const TEAM_COLORS:any={'Consumer Experience':'#D9E2EC','Operational Efficiency':'#6FA6CB'}
 const PROPOSED='#E07B2A'
 const GROUP='#C8973A'
 const STATE_LABEL:any={planned:'Planned',proposed:'Proposed'}
@@ -49,7 +49,7 @@ const monthEndISO=(abs:number)=>{const y=Math.floor(abs/12),m=abs-y*12+1;return 
 const fmtDate=(iso:string)=>{const{y,m,d}=parts(iso);return `${MONTHS[m-1]} ${d}, ${y}`}
 const fmtMonth=(iso:string)=>{const{y,m}=parts(iso);return `${MONTHS[m-1]} ${y}`}
 const todayISO=()=>{const t=new Date();return `${t.getFullYear()}-${pad(t.getMonth()+1)}-${pad(t.getDate())}`}
-const teamShort=(t:string)=>t?t.split(/\s+/).map(w=>w[0]).join('').toUpperCase():''
+const teamShort=(t:string)=>t?tShortOf(t):''
 
 // The FY27–FY30 example the user brought in: two tracks, a goal for each year.
 const TEMPLATE={
@@ -61,6 +61,7 @@ const TEMPLATE={
 }
 
 export default function StrategyTab({projects:mainProjects,setProjects,strategies,setStrategies,tracks,setTracks,goals,setGoals,deps:allDeps,setDeps,people,teams,onOpenProject,openAssistant,items=[],epics:mainEpics=[],setEpics,strategyItems=[],setStrategyItems,roles=[],projectRoles=[],setProjectRoles,strategyRoles=[],setStrategyRoles}:any){
+  const allTeams=useTeams() // delivery teams, incl. proposed ones (Strategy settings › Teams)
   const [stratId,setStratId]=useState<any>(()=>{try{return localStorage.getItem('pg_strategy')}catch{return null}})
   const strategy=(strategies as any[]).find(s=>s.id===stratId)||strategies[0]||null
   // ── Sandbox: this strategy's own placement of projects and epics (track, dates, planning
@@ -618,8 +619,9 @@ export default function StrategyTab({projects:mainProjects,setProjects,strategie
     names.forEach((tn:string,ti:number)=>{
       const list=groupTogether(sortProjects(all.filter(p=>p.team===tn)))
       const key='team:'+tn,closed=!!view.collapsed[key]
-      rows.push({kind:'track',track:{id:key,name:tn,color:tn==='Consumer Experience'?'#C9D6E3':tn==='Operational Efficiency'?'#6FA6CB':'#7A8FA6',
-        description:`${list.length} initiative${list.length!==1?'s':''}`},index:ti,count:list.length,closed,teamRow:true,h:24})
+      const tm=allTeams.find(t=>t.name===tn)
+      rows.push({kind:'track',track:{id:key,name:tn,color:teamColor(tn),
+        description:`${tm?.status==='proposed'?`Proposed team${tm.start_fy?` · from FY${String(tm.start_fy).slice(2)}`:''} · `:''}${list.length} initiative${list.length!==1?'s':''}`},index:ti,count:list.length,closed,teamRow:true,h:24})
       if(closed)return
       pushList(list)
       if(!list.length)rows.push({kind:'hint',text:'No initiatives for this team yet.',h:ROW_H})
@@ -1011,7 +1013,7 @@ export default function StrategyTab({projects:mainProjects,setProjects,strategie
                 // Project row
                 const p=r.p,ex=extent(p),st=state(p)
                 const isSel=sel?.id===p.id
-                const color=st==='proposed'?PROPOSED:workType(p)==='sustain'?SUSTAIN:workType(p)==='saas'?SAAS:(TEAM_COLORS[p.team]||'#7A8FA6')
+                const color=st==='proposed'?PROPOSED:workType(p)==='sustain'?SUSTAIN:workType(p)==='saas'?SAAS:teamColor(p.team)
                 const done=PROJECT_TERMINAL.includes(p.status)
                 return(
                   <div key={ri} style={{display:'flex',height:r.h,position:'relative',zIndex:1}}>
@@ -1051,8 +1053,7 @@ export default function StrategyTab({projects:mainProjects,setProjects,strategie
           </div>
           {/* Legend */}
           <div style={{display:'flex',gap:16,flexWrap:'wrap' as const,padding:'12px 16px',fontSize:11,color:'#7A8FA6',position:'sticky',left:0}}>
-            <Legend swatch={{background:TEAM_COLORS['Consumer Experience']}} label="Consumer Experience (planned)"/>
-            <Legend swatch={{background:TEAM_COLORS['Operational Efficiency']}} label="Operational Efficiency (planned)"/>
+            {allTeams.map(t=><Legend key={t.name} swatch={{background:t.color}} label={`${t.name} (${t.status==='proposed'?`proposed team${t.start_fy?`, from FY${String(t.start_fy).slice(2)}`:''}`:'planned'})`}/>)}
             <Legend swatch={{background:'rgba(224,123,42,0.28)',border:`1.5px solid ${PROPOSED}`}} label="Proposed, not yet planned"/>
             <Legend swatch={{background:SUSTAIN}} label="Sustain: tech debt, stabilization & enhancements"/>
             <Legend swatch={{background:SAAS}} label="SaaS deliverable"/>
@@ -1334,6 +1335,7 @@ function SettingsPanel({strategy,tracks,projects,teams,issues,setSelId,updStrate
             style={{background:'#C8973A',border:'none',borderRadius:5,color:'#0D1B2A',fontWeight:700,fontSize:11,padding:'0 12px',cursor:'pointer',opacity:addPid&&addTid?1:0.5}}>Add</button>
         </div>
       </div>}
+      <TeamsSection fyOpts={fyOpts} startFy={strategy.start_fy}/>
       <div style={SECTION}>
         <div style={H}>NEW PROPOSED INITIATIVE</div>
         <input placeholder="Initiative name, e.g. Clienteling launch" value={np.name} onChange={e=>setNp({...np,name:e.target.value})} style={INPUT}/>
@@ -1395,6 +1397,65 @@ function NewStrategy({onCreate,onCancel,first}:any){
         <div style={{fontSize:12,color:'#7A8FA6',lineHeight:1.6}}>A strategy spans fiscal years and has tracks, like Foundation and Revenue, each with a goal per year. Your initiatives become the bars, and dependencies become the arrows.</div>
         {body}
       </div>
+    </div>
+  )
+}
+
+// Delivery teams: add a proposed team to plan for (it can start in a later fiscal year),
+// rename, recolour, reorder, mark active once it exists, or delete one nothing uses
+function TeamsSection({fyOpts,startFy}:{fyOpts:number[],startFy:number}){
+  const list=useTeams()
+  const [nt,setNt]=useState({name:'',start_fy:''})
+  const [busy,setBusy]=useState(false)
+  async function add(){
+    if(!nt.name.trim())return
+    setBusy(true)
+    await addTeam({name:nt.name,status:'proposed',start_fy:nt.start_fy?Number(nt.start_fy):null})
+    setBusy(false);setNt({name:'',start_fy:''})
+  }
+  async function rename(t:Team,v:string){
+    if(!v.trim()||v.trim()===t.name)return
+    const n=await teamUsage(t.name)
+    if(n&&!confirm(`Rename "${t.name}" to "${v.trim()}"?\n\nThe ${n} initiative${n!==1?'s':''}, stories, people and sprints on it move with it.`))return
+    if(await updateTeam(t,{name:v.trim()}))window.location.reload()
+  }
+  const sm={...INPUT,padding:'4px 6px',fontSize:11}
+  return(
+    <div style={SECTION}>
+      <div style={H}>TEAMS</div>
+      <div style={{fontSize:10.5,color:'#7A8FA6',lineHeight:1.4,marginTop:-2}}>Add a proposed team to plan a team you may spin up. Give it initiatives and people here and its load shows like any team. Mark it active once it exists.</div>
+      {list.map((t,i)=>(
+        <div key={t.id||t.name} style={{display:'flex',flexDirection:'column' as const,gap:4,padding:'6px 8px',border:`1px solid ${t.status==='proposed'?'rgba(224,123,42,0.5)':'#243447'}`,borderStyle:t.status==='proposed'?'dashed':'solid',borderRadius:6}}>
+          <div style={{display:'flex',alignItems:'center',gap:5}}>
+            <span style={{display:'flex',flexDirection:'column' as const}}>
+              <button onClick={()=>moveTeam(t,-1)} disabled={i===0} title="Move up" style={{background:'none',border:'none',color:'#7A8FA6',fontSize:8,cursor:'pointer',padding:0,lineHeight:1,opacity:i===0?0.3:1}}>▲</button>
+              <button onClick={()=>moveTeam(t,1)} disabled={i===list.length-1} title="Move down" style={{background:'none',border:'none',color:'#7A8FA6',fontSize:8,cursor:'pointer',padding:0,lineHeight:1,opacity:i===list.length-1?0.3:1}}>▼</button>
+            </span>
+            <button onClick={()=>updateTeam(t,{color:TEAM_COLORS_PICK[(TEAM_COLORS_PICK.indexOf(t.color)+1)%TEAM_COLORS_PICK.length]})} title="Change colour"
+              style={{width:16,height:16,borderRadius:4,background:t.color,border:'1px solid #3A4A5E',cursor:'pointer',flexShrink:0}}/>
+            <input defaultValue={t.name} onBlur={e=>{if(e.target.value.trim()!==t.name)rename(t,e.target.value).then(()=>{e.target.value=t.name})}} onKeyDown={e=>{if(e.key==='Enter')(e.target as HTMLInputElement).blur()}}
+              title="Team name" style={{...sm,flex:1,minWidth:0}}/>
+            <input defaultValue={t.short||''} onBlur={e=>{const v=e.target.value.trim().toUpperCase();if(v!==(t.short||''))updateTeam(t,{short:v||null})}} title="Short code, shown on cards (e.g. CX)"
+              style={{...sm,width:44,textAlign:'center' as const}}/>
+          </div>
+          <div style={{display:'flex',alignItems:'center',gap:5,fontSize:10.5,color:'#7A8FA6'}}>
+            <select value={t.status} onChange={e=>updateTeam(t,{status:e.target.value as any})} style={{...sm,width:'auto',color:t.status==='proposed'?'#E07B2A':'#27AE60'}}>
+              <option value="active">Active</option><option value="proposed">Proposed</option>
+            </select>
+            {t.status==='proposed'&&<>starts
+              <select value={t.start_fy||''} onChange={e=>updateTeam(t,{start_fy:e.target.value?Number(e.target.value):null})} style={{...sm,width:'auto'}}>
+                <option value="">not set</option>{fyOpts.filter(f=>f>=startFy-1).map(f=><option key={f} value={f}>FY{String(f).slice(-2)}</option>)}
+              </select></>}
+            <button onClick={()=>deleteTeam(t)} title="Delete (only when nothing uses it)" style={{marginLeft:'auto',background:'none',border:'none',color:'#E74C3C',cursor:'pointer',fontSize:11,padding:0}}>🗑</button>
+          </div>
+        </div>))}
+      <div style={{display:'flex',gap:5}}>
+        <input value={nt.name} onChange={e=>setNt({...nt,name:e.target.value})} onKeyDown={e=>{if(e.key==='Enter')add()}} placeholder="New team, e.g. Retail Platforms" style={{...INPUT,flex:1,minWidth:0}}/>
+        <select value={nt.start_fy} onChange={e=>setNt({...nt,start_fy:e.target.value})} title="The fiscal year it would start" style={{...INPUT,width:78}}>
+          <option value="">start?</option>{fyOpts.filter(f=>f>=startFy-1).map(f=><option key={f} value={f}>FY{String(f).slice(-2)}</option>)}
+        </select>
+      </div>
+      <button onClick={add} disabled={!nt.name.trim()||busy} style={{background:'#C8973A',border:'none',borderRadius:5,color:'#0D1B2A',fontWeight:700,fontSize:11,padding:'6px 0',cursor:'pointer',opacity:nt.name.trim()?1:0.5}}>+ Add proposed team</button>
     </div>
   )
 }

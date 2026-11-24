@@ -1,4 +1,5 @@
 'use client'
+import { TEAM_NAMES } from './Teams'
 import { BACKLOG_COLS, inColumnOrder } from './BacklogColumns'
 import { CLOSED_STATUSES, STATUS_COLOR, EPIC_STATUSES, toEpicStatus, toStoryStatus } from './WorkTypes'
 import { useState } from 'react'
@@ -96,7 +97,7 @@ export function EpicRow({colOrder=BACKLOG_COLS.map(c=>c[0]),epic,projects,items,
       </td>,
         swimlane:<td style={{...TD,fontSize:11,color:'#7A8FA6'}}><InlineSelect value={epic.swimlane||''} options={blank(opts.swimlanes||[])} onChange={v=>upd({swimlane:v})}>{epic.swimlane||'—'}</InlineSelect></td>,
         status:<td style={TD}><InlineSelect value={epic.status||'Backlog'} options={statusOpts.length?statusOpts:EPIC_STATUSES} onChange={v=>v&&upd({status:v})}><span style={{color:STATUS_CLR[epic.status]||'#7A8FA6',fontSize:11,fontWeight:600}}>{epic.status||'New'}</span></InlineSelect></td>,
-        team:<td style={{...TD,fontSize:10,color:'#7A8FA6'}}><InlineSelect value={epic.team||''} options={blank(['Consumer Experience','Operational Efficiency'])} onChange={v=>upd({team:v})}>{epic.team==='Consumer Experience'?'CE':epic.team==='Operational Efficiency'?'OE':'—'}</InlineSelect></td>,
+        team:<td style={{...TD,fontSize:10,color:'#7A8FA6'}}><InlineSelect value={epic.team||''} options={blank(TEAM_NAMES)} onChange={v=>upd({team:v})}>{epic.team==='Consumer Experience'?'CE':epic.team==='Operational Efficiency'?'OE':'—'}</InlineSelect></td>,
         effort:<td style={{...TD,textAlign:'center' as const,fontSize:11}}><InlineSelect value={epic.effort||''} options={blank(['S','M','L','XL'])} onChange={v=>upd({effort:v})}>{epic.effort||'—'}</InlineSelect></td>,
         request_type:<td style={{...TD,fontSize:11,color:EPIC,fontWeight:700}}><InlineSelect value={epic.request_type||''} options={[{value:'',label:'Epic'},...(opts.requestTypes||[]).map((o:string)=>({value:o,label:o}))]} onChange={v=>upd({request_type:v})}>{epic.request_type?`Epic · ${epic.request_type}`:'Epic'}</InlineSelect></td>,
         region:<td style={{...TD,fontSize:11,color:'#7A8FA6'}}><InlineSelect value={epic.region||''} options={blank(opts.regions||[])} onChange={v=>upd({region:v})}>{epic.region||'—'}</InlineSelect></td>,

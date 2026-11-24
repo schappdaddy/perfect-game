@@ -4,6 +4,7 @@
 //   strategy (roadmap by track and team, budget) → quarter plan → release plan (one slide
 //   per quarter) → sprints (one slide per release: each team's sprints and what's left to
 //   schedule) → not planned (initiatives with no dates, epics and stories with no quarter).
+import { teamShort } from './Teams'
 import { quarterMonths, quarterKey, quarterLabel, fyQuarterOf, fmtMonthKey, releaseOf, releaseText, monthKeyOf } from './Releases'
 import { drawBoard, type PlanColumn, type PlanCard } from './PlanningPptx'
 import { addStrategySlides } from './StrategyPptx'
@@ -15,9 +16,8 @@ const TERMINAL=CLOSED_STATUSES
 const INIT_DONE=CLOSED_STATUSES
 const EFFORT_POINTS:any={XS:0.5,S:1,M:2,L:3,XL:5}
 const PRI:any={P1:1,P2:2,P3:3,P4:4}
-const TEAM_SHORT:any={'Consumer Experience':'CX','Operational Efficiency':'OE','Retail Program':'RP'}
 const WTS:any={new:'New',sustain:'Sustain',saas:'SaaS'}
-const shortOf=(t:any)=>t?TEAM_SHORT[t]||t:null
+const shortOf=(t:any)=>t?teamShort(t)||t:null
 const pad=(n:number)=>String(n).padStart(2,'0')
 const lastDay=(k:string)=>{const[y,m]=k.split('-').map(Number);return `${k}-${pad(new Date(y,m,0).getDate())}`}
 const fmtDay=(iso:string)=>{const[,m,d]=iso.split('-').map(Number);return `${MONTHS[m-1]} ${d}`}

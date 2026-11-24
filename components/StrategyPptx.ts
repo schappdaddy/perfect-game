@@ -4,6 +4,7 @@
 // and notes), the same roadmap by team, then the budget report: summary, budget by team and
 // team cost vs assigned, budget by initiative, and capacity by person. Each strategy is drawn
 // from its own sandbox (strategy_items), like the Strategy tab.
+import { teamShort as tShort, teamColor } from './Teams'
 import { strategyBudget, reportData } from './StrategyData'
 import { CLOSED_STATUSES } from './WorkTypes'
 
@@ -12,8 +13,8 @@ const BAD='E74C3C',GROUP='C8973A',NAVY='1F2A3C',STEEL='87A5BF',ORANGE='E07B2A',P
 const TEAM_FILL:any={'Consumer Experience':NAVY,'Operational Efficiency':STEEL}
 const MONTHS=['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec']
 const hex=(c:string|null|undefined,d:string)=>(c||d).replace('#','').toUpperCase()
-const TEAM_SHORT:any={'Consumer Experience':'CX','Operational Efficiency':'OE','Retail Program':'RP'}
-const teamShort=(t:string)=>t?TEAM_SHORT[t]||t.split(/\s+/).map(w=>w[0]).join('').toUpperCase():''
+const teamShort=(t:string)=>t?tShort(t):''
+const teamFill=(t:any)=>TEAM_FILL[t]||teamColor(t,'#9AA5B1').slice(1)
 const parts=(iso:string)=>{const[y,m,d]=iso.split('-').map(Number);return{y,m,d}}
 const daysIn=(y:number,m:number)=>new Date(y,m,0).getDate()
 // PowerPoint only shrinks text to fit its box once someone edits it, so labels are sized here
@@ -118,7 +119,7 @@ function drawSlide(pptx:any,strategy:any,{projects,strategyItems,tracks,goals,de
     for(const tn of names){
       const list=all.filter(p=>p.team===tn)
       if(!list.length)continue
-      rows.push({kind:'section',text:`${tn.toUpperCase()} · ${list.length} initiative${list.length!==1?'s':''}`,color:TEAM_FILL[tn]||'5B7A99',style:'band'})
+      rows.push({kind:'section',text:`${tn.toUpperCase()} · ${list.length} initiative${list.length!==1?'s':''}`,color:TEAM_FILL[tn]||teamColor(tn,'#5B7A99').slice(1),style:'band'})
       pushList(list)
     }
     // Initiatives without a team wait in a backlog section at the bottom
@@ -234,7 +235,7 @@ function drawSlide(pptx:any,strategy:any,{projects,strategyItems,tracks,goals,de
       const x0=xStart(p.start_date),x1=p.ongoing||!p.end_date?xAt(endAbs+1):xEnd(p.end_date)
       if(x1<=x0)return
       const proposed=p.planning_state==='proposed'
-      const fill=proposed?PROPOSED_FILL:TEAM_FILL[p.team]||'9AA5B1'
+      const fill=proposed?PROPOSED_FILL:teamFill(p.team)
       slide.addShape(pptx.ShapeType.rect,{x:x0,y:y+rowH*0.2,w:x1-x0,h:rowH*0.6,fill:{color:fill},line:{color:proposed?ORANGE:fill,width:proposed?1.25:0}})
       yOf.set(p.id,y+rowH/2);barOf.set(p.id,{x0,x1,s:p.start_date,e:p.ongoing?null:p.end_date||null})
     })
