@@ -56,6 +56,26 @@ export async function setEpicProject(epic:any,projectId:string|null,{projects,it
 }
 
 // opts: {swimlanes, requestTypes, regions, vendors}; rank: drag an epic onto another, or type a position
+// An epic ships when its last story ships, so its release is its final stage: changing it
+// moves the open stories going out with it (no release of their own, or the epic's), and the
+// database keeps the epic in step with its latest story.
+export async function setEpicRelease(epic:any,month:string|null,{items,setItems,setEpics}:any){
+  if((epic.release_month||null)===month)return
+  const sts=(items as any[]).filter((i:any)=>i.epic_id===epic.id&&!ITEM_TERMINAL.includes(i.status)&&(!i.release_month||i.release_month===epic.release_month))
+  setEpics((prev:any[])=>prev.map((e:any)=>e.id===epic.id?{...e,release_month:month}:e))
+  const{error}=await supabase.from('epics').update({release_month:month}).eq('id',epic.id)
+  if(error){alert('Failed to save the release: '+error.message);return}
+  if(sts.length){
+    setItems((prev:any[])=>prev.map((i:any)=>sts.some((z:any)=>z.id===i.id)?{...i,release_month:month}:i))
+    const{error:e2}=await supabase.from('items').update({release_month:month}).in('id',sts.map((z:any)=>z.id))
+    if(e2)alert('Failed to move its stories: '+e2.message)
+  }
+  // The epic follows its latest story (mirrors the database rule)
+  const rels=(items as any[]).filter((i:any)=>i.epic_id===epic.id&&!['Killed','Will Not Implement',"Won't Do"].includes(i.status))
+    .map((i:any)=>sts.some((z:any)=>z.id===i.id)?month:i.release_month).filter(Boolean).sort()
+  if(rels.length&&rels[rels.length-1]!==month)setEpics((prev:any[])=>prev.map((e:any)=>e.id===epic.id?{...e,release_month:rels[rels.length-1]}:e))
+}
+
 export function EpicRow({colOrder=BACKLOG_COLS.map(c=>c[0]),epic,projects,items,isSel,onSelect,ccCount=0,releases=[],setItems,setEpics,statusOpts=[],opts={},onRank,onDragEpic,onDropEpic,onOverEpic,dragOver=false}:any){
   const upd=(f:any)=>updateEpic(epic.id,f,setEpics)
   const blank=(list:string[])=>[{value:'',label:'—'},...list.map(o=>({value:o,label:o}))]
@@ -87,7 +107,7 @@ export function EpicRow({colOrder=BACKLOG_COLS.map(c=>c[0]),epic,projects,items,
         epic:<td style={dim}>—</td>,
         work_type:<td style={TD}><InlineSelect value={epic.work_type||''} title="Work type: automatic follows the initiative"
         options={[{value:'',label:`Automatic (${WT_LABEL[epicWorkType({...epic,work_type:null},projects) as 'new']})`},...WORK_TYPE_KEYS.map(k=>({value:k,label:WT_LABEL[k]}))]} onChange={v=>upd({work_type:v})}><WorkTag wt={wt}/></InlineSelect></td>,
-        release_month:<td style={TD}><InlineSelect value={epic.release_month||''} options={releaseOptions(releases,epic.release_month)} onChange={v=>upd({release_month:v})}>{epic.release_month?<span title={`${fmtMonthKey(epic.release_month)} release · ${releaseText(releases,epic.release_month)}`} style={{fontSize:10,fontWeight:700,color:'#5DADE2',border:'1px solid rgba(93,173,226,0.4)',borderRadius:4,padding:'1px 6px',whiteSpace:'nowrap' as const}}>📦 {fmtMonthKey(epic.release_month)}</span>:<span style={{fontSize:11,color:'#3A4A5E'}}>—</span>}</InlineSelect></td>,
+        release_month:<td style={TD}><InlineSelect value={epic.release_month||''} options={releaseOptions(releases,epic.release_month)} onChange={v=>setEpicRelease(epic,v||null,{items,setItems,setEpics})}>{epic.release_month?<span title={`${fmtMonthKey(epic.release_month)} release · ${releaseText(releases,epic.release_month)}`} style={{fontSize:10,fontWeight:700,color:'#5DADE2',border:'1px solid rgba(93,173,226,0.4)',borderRadius:4,padding:'1px 6px',whiteSpace:'nowrap' as const}}>📦 {fmtMonthKey(epic.release_month)}</span>:<span style={{fontSize:11,color:'#3A4A5E'}}>—</span>}</InlineSelect></td>,
         priority:<td style={TD}><InlineSelect value={epic.priority||'P3'} options={['P1','P2','P3','P4']} onChange={v=>v&&upd({priority:v})}><span style={{background:PRIORITY_BG[epic.priority]||'#1E3048',color:PRIORITY_BG[epic.priority]?'#fff':'#7A8FA6',borderRadius:4,padding:'2px 8px',fontSize:10,fontWeight:700}}>{epic.priority||'P3'}</span></InlineSelect></td>,
         committed_priority:<td style={{...TD,textAlign:'center' as const,padding:'0 4px'}} onClick={e=>e.stopPropagation()}>
         {onRank&&<input key={`erk-${epic.id}-${epic.manual_rank}`} type="number" min={1} defaultValue={epic.manual_rank??''} placeholder="—" title="Epic rank: type a position, or drag the epic onto another"
@@ -218,7 +238,7 @@ export function EpicPanel({epic,projects,items,setItems,setEpics,statusOpts,prio
           <div style={{flex:1}}><div style={LABEL}>QUARTER</div>
             <QuarterSelect value={epic.plan_quarter} onChange={(v:any)=>upd({plan_quarter:v})} style={{...INPUT,cursor:'pointer'}}/></div>
           <div style={{flex:1}}><div style={LABEL}>RELEASE</div>
-            <ReleaseSelect value={epic.release_month} releases={releases} onChange={(v:any)=>upd({release_month:v})} style={{...INPUT,cursor:'pointer'}}/></div>
+            <ReleaseSelect value={epic.release_month} releases={releases} onChange={(v:any)=>setEpicRelease(epic,v||null,{items,setItems,setEpics})} style={{...INPUT,cursor:'pointer'}}/></div>
         </div>
         <div><div style={LABEL}>WORK TYPE</div>
           <select value={epic.work_type||''} onChange={e=>upd({work_type:e.target.value||null})} style={{...INPUT,cursor:'pointer'}}>

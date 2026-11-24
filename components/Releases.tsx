@@ -178,7 +178,9 @@ export function QuarterPlanner({items,setItems,projects,setProjects,epics=[],set
   // Planning says when work is done (its quarter) and when it ships (its release). It never
   // moves work out of its initiative. Only tech debt with no initiative of its own is filed
   // into the quarter's Tech Debt initiative, so it's costed with the team's OpEx.
-  type Entry={kind:'item'|'epic'|'project',x:any,key:string,qk:string|null}
+  // A staged epic (its stories ship in more than one release) shows as one part per release
+  type Part={month:string,idx:number,total:number,stories:any[],others:{month:string,n:number}[]}
+  type Entry={kind:'item'|'epic'|'project',x:any,key:string,qk:string|null,relMonth?:string|null,part?:Part}
   const bucketOf=(kind:string,x:any)=>kind==='epic'?bucketById(x.project_id):kind==='item'?bucketByName(x.parent_project):null
   const qkOf=(kind:string,x:any):string|null=>kind==='project'?(x.plan_quarter||null):(x.plan_quarter||bucketOf(kind,x)?.sustain_quarter||null)
   const ent=(kind:'item'|'epic'|'project',x:any):Entry=>({kind,x,key:`${kind}:${x.id}`,qk:qkOf(kind,x)})
@@ -204,18 +206,30 @@ export function QuarterPlanner({items,setItems,projects,setProjects,epics=[],set
   // Closed work drops off the board (it's on the Done tab)
   const planned:Entry[]=[...(epics as any[]).filter(e=>open(e)&&qkOf('epic',e)&&shown('epic',e)).map(e=>ent('epic',e)),
     ...(items as any[]).filter(i=>open(i)&&qkOf('item',i)&&!withItsEpic(i)&&shown('item',i)).map(i=>ent('item',i))].sort(rank)
-  // A story planned with its epic but shipping in a different release than the epic (an epic
-  // released in stages). In the Releases view it shows on its own in its release's column,
-  // and its epic's card lists only the stories going out with the epic.
-  const shipsApart=(i:any)=>{if(!i.release_month||!withItsEpic(i))return false;const e=epicById(i.epic_id);return !!e&&i.release_month!==(e.release_month||null)}
-  const staged:Entry[]=(items as any[]).filter(i=>open(i)&&qkOf('item',i)&&shipsApart(i)&&shown('item',i)).map(i=>ent('item',i))
-  const relPlanned:Entry[]=[...planned,...staged].sort(rank)
+  // Releases view: an epic appears in every release its stories ship in, with just those
+  // stories ("Part 1 of 2", "completes epic"). Stories with no release of their own ship with
+  // the epic's final part. An epic shipping in one release is a single card as before.
+  const KILLED=['Killed','Will Not Implement',"Won't Do"]
+  const partStories=(e:any)=>storiesOf(e).filter(st=>!KILLED.includes(st.status)&&withItsEpic(st))
+  function epicParts(en:Entry):Entry[]{
+    const e=en.x,sts=partStories(e)
+    const own=sts.map(st=>st.release_month).filter(Boolean).sort()
+    const final=own.length?own[own.length-1]:(e.release_month||null)
+    const monthOf=(st:any)=>st.release_month||final
+    const months=[...new Set(sts.map(monthOf).filter(Boolean))].sort() as string[]
+    if(months.length<=1)return[{...en,relMonth:months[0]??(e.release_month||null)}]
+    return months.map((m,idx)=>({...en,key:`${en.key}@${m}`,relMonth:m,part:{month:m,idx,total:months.length,
+      stories:sts.filter(st=>monthOf(st)===m),others:months.filter(k=>k!==m).map(k=>({month:k,n:sts.filter(st=>monthOf(st)===k).length}))}}))
+  }
+  const relOf=(en:Entry)=>en.relMonth!==undefined?en.relMonth:(en.x.release_month||null)
+  const relPlanned:Entry[]=[...planned.filter(en=>en.kind!=='epic'),...planned.filter(en=>en.kind==='epic').flatMap(epicParts)].sort(rank)
   // Initiatives go live in a release
   const INIT_DONE=CLOSED_STATUSES
   const inits=(projects as any[]).filter(p=>!p.sustain_quarter&&(p.space||'work')==='work'&&!INIT_DONE.includes(p.status)&&(ALL||!poolTeam||!p.team||p.team===team)&&wtOk('project',p))
     .sort((a,b)=>(a.start_date||'9999').localeCompare(b.start_date||'9999')||a.name.localeCompare(b.name))
   const initEntries:Entry[]=inits.map(p=>ent('project',p))
-  const ptsOf=(en:Entry):number=>en.kind==='item'?(EFFORT_POINTS[en.x.effort]||0)
+  const ptsOf=(en:Entry):number=>en.part?en.part.stories.filter(open).reduce((s:number,i:any)=>s+(EFFORT_POINTS[i.effort]||0),0)
+    :en.kind==='item'?(EFFORT_POINTS[en.x.effort]||0)
     :en.kind==='project'?(items as any[]).filter(i=>i.parent_project===en.x.name&&open(i)).reduce((s,i)=>s+(EFFORT_POINTS[i.effort]||0),0)
     :(EFFORT_POINTS[en.x.effort]||storiesOf(en.x).filter(open).reduce((s,i)=>s+(EFFORT_POINTS[i.effort]||0),0))
   const pts=(list:Entry[])=>list.reduce((s,en)=>s+ptsOf(en),0)
@@ -275,7 +289,7 @@ export function QuarterPlanner({items,setItems,projects,setProjects,epics=[],set
   }
   const findEntry=(key:string|null):Entry|null=>{
     if(!key)return null
-    return [...pool,...planned,...initEntries].find(e=>e.key===key)||null
+    return [...pool,...planned,...relPlanned,...initEntries].find(e=>e.key===key)||null
   }
   // Put work in a quarter (null = back to the backlog) and/or a release (undefined = keep).
   async function setPlan(en:Entry,{qi,release}:{qi?:any,release?:string|null}){
@@ -418,8 +432,19 @@ export function QuarterPlanner({items,setItems,projects,setProjects,epics=[],set
       </div>
     )
   }
+  // Move one part of a staged epic: its stories go to the new release; the epic's own release
+  // follows its last story (the database keeps it in step; mirrored here)
+  async function movePart(en:Entry,month:string|null){
+    const p=en.part!;if(month===p.month)return
+    if(month&&isBlocked(month)){alert(`${fmtMonthKey(month)} has no release. Pick another month, or change it under 📦 Releases.`);return}
+    for(const st of p.stories)await updItem(st.id,{release_month:month})
+    const rest=partStories(en.x).filter(st=>!p.stories.some((z:any)=>z.id===st.id)).map(st=>st.release_month)
+    const all=[...rest,...p.stories.map(()=>month)].filter(Boolean).sort()
+    if(all.length)setEpics((prev:any[])=>prev.map(e=>e.id===en.x.id?{...e,release_month:all[all.length-1]}:e))
+  }
   async function dropOnRelease(month:string|null){
     const en=take();if(!en)return
+    if(en.part){await movePart(en,month);return}
     if(en.kind==='project'){await setInitPlan(en,{release:month});return}
     if(!en.qk){
       // From the backlog straight to a release: it's worked in the quarter the release is in
@@ -462,13 +487,14 @@ export function QuarterPlanner({items,setItems,projects,setProjects,epics=[],set
       {o.showQuarter&&qi&&<div style={{fontSize:10,color:'#C8D4E0'}}>🗓 Worked in <b>{qi.label}</b>{later?<span style={{color:'#5DADE2'}}> · ships after</span>:''}</div>}
       {isEpic&&(()=>{
         // The stories that travel with this epic (same quarter), listed inside it
-        const rel=mode==='releases'
-        const inside=sts.filter(st=>withItsEpic(st)&&open(st)&&!(rel&&shipsApart(st))),shownSt=inside.slice(0,6)
-        // Stories of this epic shipping in other releases, by month
-        const apart=rel?sts.filter(st=>open(st)&&shipsApart(st)):[]
-        const byMonth=[...new Set(apart.map(st=>st.release_month))].sort().map(k=>`${fmtMonthKey(k)} (${apart.filter(st=>st.release_month===k).length})`)
+        const pt=mode==='releases'?en.part:undefined
+        const inside=pt?pt.stories:sts.filter(st=>withItsEpic(st)&&open(st)),shownSt=inside.slice(0,6)
+        const last=pt&&pt.idx===pt.total-1
         return <div style={{display:'flex',flexDirection:'column',gap:1}}>
-          <div style={{fontSize:10,color:'#7A8FA6'}}>{sts.length} stor{sts.length===1?'y':'ies'}{sts.length?` · ${done} done`:''}</div>
+          {pt&&<div title="This epic ships in stages: each release lists the stories going out in it" style={{display:'flex',alignItems:'center',gap:5,fontSize:10,fontWeight:800,color:last?'#27AE60':'#5DADE2',margin:'1px 0 2px'}}>
+            <span style={{display:'inline-flex',gap:2}}>{Array.from({length:pt.total}).map((_,i)=><span key={i} style={{width:10,height:4,borderRadius:2,background:i<=pt.idx?(last?'#27AE60':'#5DADE2'):'#3A4A5E'}}/>)}</span>
+            Part {pt.idx+1} of {pt.total}{last?' · completes epic':''}</div>}
+          <div style={{fontSize:10,color:'#7A8FA6'}}>{pt?`${inside.length} of ${partStories(x).length} stories ship here`:`${sts.length} stor${sts.length===1?'y':'ies'}${sts.length?` · ${done} done`:''}`}</div>
           {shownSt.map(st=>(
             <div key={st.id} onClick={e=>{e.stopPropagation();onOpenItem(st)}} title={`${st.item_id||''} ${st.name} · ${st.status}`}
               style={{display:'flex',alignItems:'center',gap:5,fontSize:10.5,padding:'2px 5px',borderLeft:`2px solid ${KIND_CLR.story}`,background:'rgba(93,173,226,0.06)',borderRadius:3,cursor:'pointer',opacity:open(st)?1:0.55}}>
@@ -479,7 +505,7 @@ export function QuarterPlanner({items,setItems,projects,setProjects,epics=[],set
             </div>
           ))}
           {inside.length>shownSt.length&&<div style={{fontSize:9.5,color:'#7A8FA6',paddingLeft:7}}>+ {inside.length-shownSt.length} more</div>}
-          {apart.length>0&&<div title="These stories ship in a different release than the epic" style={{fontSize:9.5,color:'#5DADE2',paddingLeft:7}}>📦 Also ships: {byMonth.join(' · ')}</div>}
+          {pt&&pt.others.length>0&&<div style={{fontSize:9.5,color:'#7A8FA6',paddingLeft:7}}>{pt.others.map(o=>`${o.month<pt.month?'✓':'→'} ${o.n} ship${o.n===1?'s':''} in ${fmtMonthKey(o.month)}`).join(' · ')}</div>}
         </div>
       })()}
       {o.grouped?(ep&&!isEpic?<div style={{fontSize:10,color:KIND_CLR.epic}}>◆ in epic {ep.name}</div>:null):home?<div style={{fontSize:10,color:'#C8973A',overflow:'hidden',textOverflow:'ellipsis',whiteSpace:'nowrap' as const}}>◈ {home.name}{ep?` › ${ep.name}`:''}</div>
@@ -555,9 +581,9 @@ export function QuarterPlanner({items,setItems,projects,setProjects,epics=[],set
 
   // Releases view: the months from the first quarter shown through the quarter after the last
   const relMonths=(()=>{const out:string[]=[];for(let n=0;n<15;n++)out.push(addMonths(quarters[0].months[0],n));return out})()
-  const relCols=relMonths.filter(k=>!(hideNoRel&&isBlocked(k)&&![...relPlanned,...initEntries].some(en=>en.x.release_month===k)))
+  const relCols=relMonths.filter(k=>!(hideNoRel&&isBlocked(k)&&![...relPlanned,...initEntries].some(en=>(en.kind==='project'?en.x.release_month:relOf(en))===k)))
   const shownQks=new Set(quarters.map(q=>q.qk))
-  const inView=(en:Entry)=>shownQks.has(en.qk as string)||relMonths.includes(en.x.release_month)
+  const inView=(en:Entry)=>shownQks.has(en.qk as string)||relMonths.includes(en.kind==='project'?en.x.release_month:relOf(en))
 
   // ── PowerPoint: both views as the board shows them (team, work type tab, quarters) ──
   const [exporting,setExporting]=useState(false)
@@ -671,7 +697,7 @@ export function QuarterPlanner({items,setItems,projects,setProjects,epics=[],set
             })}
           </div>
         ):(
-          <div style={{flex:1,display:'grid',gridTemplateColumns:`minmax(200px,1fr) ${relCols.map(k=>isBlocked(k)&&![...relPlanned,...initEntries].some(en=>en.x.release_month===k)?'84px':'minmax(210px,1fr)').join(' ')}`,gap:8,padding:12,minHeight:0,overflowX:'auto'}}>
+          <div style={{flex:1,display:'grid',gridTemplateColumns:`minmax(200px,1fr) ${relCols.map(k=>isBlocked(k)&&![...relPlanned,...initEntries].some(en=>(en.kind==='project'?en.x.release_month:relOf(en))===k)?'84px':'minmax(210px,1fr)').join(' ')}`,gap:8,padding:12,minHeight:0,overflowX:'auto'}}>
             {(()=>{const list=planned.filter(en=>!en.x.release_month&&shownQks.has(en.qk as string));return(
               <div onDragOver={e=>{e.preventDefault();setOver('r:none')}} onDragLeave={()=>setOver(o=>o==='r:none'?null:o)} onDrop={e=>{e.preventDefault();dropOnRelease(null)}} style={colBox('r:none',false)}>
                 <div style={colHead}>
@@ -683,7 +709,7 @@ export function QuarterPlanner({items,setItems,projects,setProjects,epics=[],set
               </div>
             )})()}
             {relCols.map(k=>{
-              const td=relPlanned.filter(en=>en.x.release_month===k&&inView(en))
+              const td=relPlanned.filter(en=>relOf(en)===k&&inView(en))
               const ini=initEntries.filter(en=>en.x.release_month===k)
               const list=[...ini,...td],blocked=isBlocked(k),slim=blocked&&!list.length
               const r=releaseOf(releases,k),{fy,q}=fyQuarterOf(k)
@@ -743,11 +769,21 @@ export function ReleaseCalendar({releases,projects,epics=[],items,team='All',onO
     const g=(p:any)=>{const key=p?.id||'__none';if(!groups.has(key))groups.set(key,{p,goLive:false,epics:[],stories:[]});return groups.get(key)!}
     // Closed work and finished initiatives are left out (they're on the Done tab)
     for(const p of projects as any[])if(p.release_month===k&&work(p)&&!TERMINAL.includes(p.status)&&inTeam(p))g(p).goLive=true
-    for(const e of epics as any[])if(e.release_month===k&&work(e)&&!TERMINAL.includes(e.status)&&inTeam({team:e.team||projById(e.project_id)?.team}))g(projById(e.project_id)).epics.push(e)
+    // An epic shows in each month its stories ship in (a staged epic: "part 1 of 2"); its own
+    // release is its final part. Stories with no release ship with the final part.
+    const KILLED=['Killed','Will Not Implement',"Won't Do"]
+    for(const e of epics as any[]){
+      if(!work(e)||TERMINAL.includes(e.status)||!inTeam({team:e.team||projById(e.project_id)?.team}))continue
+      const sts=(items as any[]).filter(i=>i.epic_id===e.id&&!KILLED.includes(i.status))
+      const monthOf=(i:any)=>i.release_month||e.release_month
+      const months=[...new Set([...sts.map(monthOf),e.release_month].filter(Boolean))].sort() as string[]
+      if(!months.includes(k))continue
+      const here=sts.filter(i=>monthOf(i)===k)
+      g(projById(e.project_id)).epics.push({e,here,part:months.indexOf(k),total:months.length,final:k===months[months.length-1]})
+    }
     for(const i of items as any[]){
       if(i.release_month!==k||!work(i)||TERMINAL.includes(i.status)||!inTeam(i))continue
-      const ep=i.epic_id&&epicById(i.epic_id)
-      if(ep&&ep.release_month===k)continue // goes out with its epic
+      if(i.epic_id&&epicById(i.epic_id))continue // listed with its epic
       g(projByName(i.parent_project)).stories.push(i)
     }
     // Go-lives first, then initiatives, then tech debt, then work with no initiative
@@ -811,9 +847,17 @@ export function ReleaseCalendar({releases,projects,epics=[],items,team='All',onO
                                   style={{fontSize:12,fontWeight:700,color:x.p?'#F4F6F8':'#7A8FA6',cursor:x.p&&onOpenProject?'pointer':'default'}}>{x.p?.name||'No initiative'}</span>
                                 {x.goLive&&x.p&&mover('project',x.p)}
                               </div>
-                              {x.epics.map((e:any)=>{const n=storiesOf(e).length;return(
-                                <div key={e.id} {...dragProps('epic',e)} style={{fontSize:11,color:'#C8C8D4',cursor:movable?'grab':undefined}}><span style={{color:'#E07B2A'}}>◆</span> {e.name}{n?<span style={{color:'#7A8FA6'}}> · {n} stor{n===1?'y':'ies'}</span>:''}{mover('epic',e)}</div>
-                              )})}
+                              {x.epics.map(({e,here,part,total,final}:any)=>(
+                                <div key={e.id}>
+                                  <div {...(final?dragProps('epic',e):{})} title={total>1?(final?'Its final part: drag to move the stories going out with it':'An earlier part: move its stories one by one'):undefined}
+                                    style={{fontSize:11,color:'#C8C8D4',cursor:movable&&final?'grab':undefined}}><span style={{color:'#E07B2A'}}>◆</span> {e.name}
+                                    <span style={{color:'#7A8FA6'}}> · {here.length} stor{here.length===1?'y':'ies'}</span>
+                                    {total>1&&<span style={{color:final?'#27AE60':'#5DADE2',fontWeight:700}}> · part {part+1} of {total}{final?' · completes':''}</span>}
+                                    {final&&mover('epic',e)}</div>
+                                  {total>1&&!final&&here.map((i:any)=>(
+                                    <div key={i.id} {...dragProps('item',i)} style={{fontSize:10.5,color:'#A9B8C9',paddingLeft:14,cursor:movable?'grab':undefined}}><span style={{color:'#7A8FA6',fontFamily:'monospace',fontSize:9.5}}>{i.item_id}</span> {i.name}{mover('item',i)}</div>))}
+                                </div>
+                              ))}
                               {x.stories.map((i:any)=>(
                                 <div key={i.id} {...dragProps('item',i)} style={{fontSize:11,color:'#A9B8C9',cursor:movable?'grab':undefined}}><span style={{color:'#7A8FA6',fontFamily:'monospace',fontSize:10}}>{i.item_id}</span> {i.name}{mover('item',i)}</div>
                               ))}
