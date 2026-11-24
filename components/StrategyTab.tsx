@@ -37,7 +37,7 @@ const pad=(n:number)=>String(n).padStart(2,'0')
 const CLIP={overflow:'hidden',whiteSpace:'nowrap' as const,textOverflow:'ellipsis',minWidth:0}
 const HANDLE={position:'absolute' as const,top:-2,bottom:-2,width:12,cursor:'ew-resize',zIndex:1}
 function DragLabel({s,e}:{s:string,e:string|null}){
-  return <span style={{position:'absolute',left:0,bottom:'calc(100% + 4px)',whiteSpace:'nowrap',background:'#C8973A',color:'#0D1B2A',fontSize:10,fontWeight:700,borderRadius:4,padding:'2px 6px',pointerEvents:'none',zIndex:6}}>
+  return <span style={{position:'absolute',left:0,bottom:'calc(100% + 4px)',whiteSpace:'nowrap',background:'#0D1B2A',color:'#F4F6F8',border:'1px solid #C8973A',boxShadow:'0 2px 8px rgba(0,0,0,0.5)',fontSize:10.5,fontWeight:700,borderRadius:4,padding:'2px 7px',pointerEvents:'none',zIndex:6}}>
     {fmtDate(s)} → {e?fmtDate(e):'ongoing'}
   </span>
 }
@@ -965,7 +965,7 @@ export default function StrategyTab({projects:mainProjects,setProjects,strategie
                 if(r.kind==='epic'){
                   const ep=r.e,ex=epicExtent(ep),isSelE=selId==='epic:'+ep.id,done=ITEM_TERMINAL.includes(ep.status)
                   return(
-                    <div key={ri} style={{display:'flex',height:r.h,position:'relative',zIndex:1}}>
+                    <div key={ri} style={{display:'flex',height:r.h,position:'relative',zIndex:drag?.id===ep.id?8:1}}>
                       <div onClick={()=>setSelId('epic:'+ep.id)} style={{...cellLabel,padding:r.itemCount?'0 12px 0 14px':'0 12px 0 28px',display:'flex',alignItems:'center',gap:5,cursor:'pointer',background:isSelE?'#2A2418':'#0D1B2A'}}>
                         {r.itemCount>0&&<button onClick={e=>{e.stopPropagation();toggleCollapsed('es:'+ep.id)}} title={`${view.collapsed['es:'+ep.id]?'Show':'Hide'} ${r.itemCount} stor${r.itemCount!==1?'ies':'y'} and bugs`}
                           style={{...HDR_BTN,color:STORY,fontSize:8,padding:0,width:10}}>{view.collapsed['es:'+ep.id]?'▸':'▾'}</button>}
@@ -1016,7 +1016,7 @@ export default function StrategyTab({projects:mainProjects,setProjects,strategie
                 const color=st==='proposed'?PROPOSED:workType(p)==='sustain'?SUSTAIN:workType(p)==='saas'?SAAS:teamColor(p.team)
                 const done=PROJECT_TERMINAL.includes(p.status)
                 return(
-                  <div key={ri} style={{display:'flex',height:r.h,position:'relative',zIndex:1}}>
+                  <div key={ri} style={{display:'flex',height:r.h,position:'relative',zIndex:drag?.id===p.id?8:1}}>
                     <div onClick={()=>setSelId(p.id)} style={{...cellLabel,padding:r.epicCount?'0 12px 0 6px':'0 12px',display:'flex',alignItems:'center',gap:6,cursor:'pointer',background:isSel?'#1E3048':'#0D1B2A',borderLeft:r.inGroup?`3px solid ${GROUP}`:undefined}}>
                       {r.epicCount>0&&<button onClick={e=>{e.stopPropagation();toggleCollapsed('pe:'+p.id)}} title={`${view.collapsed['pe:'+p.id]?'Show':'Hide'} its ${r.epicCount} epic${r.epicCount!==1?'s':''}, stories and bugs`}
                         style={{...HDR_BTN,color:EPIC,fontSize:9}}>{view.collapsed['pe:'+p.id]?'▸':'▾'}</button>}
