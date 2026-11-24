@@ -2,7 +2,7 @@
 import { useState } from 'react'
 import { supabase } from '../lib/supabase'
 import { MilestoneTypeSelect, useMilestoneTypes, typeColor } from './MilestoneTypes'
-import { WT_LABEL, WorkTag, workTypeOfProject, isBug, BugTag, CLOSED_STATUSES } from './WorkTypes'
+import { WT_LABEL, WorkTag, workTypeOfProject, isBug, BugTag, CLOSED_STATUSES, isClosedStatus } from './WorkTypes'
 import { ReadinessPips, ReadinessAudit } from './Readiness'
 import { JiraChip } from './JiraLink'
 import { IntakeBubble } from './Intake'
@@ -266,7 +266,7 @@ export function QuarterPlanner({items,setItems,projects,setProjects,epics=[],set
     const name=`${qi.label} Tech Debt (${shortOf(t)})`
     const ex=(projects as any[]).find(p=>p.name.toLowerCase()===name.toLowerCase())
     if(ex){alert(`An initiative called "${name}" already exists.`);return null}
-    const{data,error}=await supabase.from('projects').insert({name,team:t,status:'Planning',priority:'P2',rag:'Green',color:'#4A5D72',
+    const{data,error}=await supabase.from('projects').insert({name,team:t,status:'Ready',priority:'P2',rag:'Green',color:'#4A5D72',
       description:`Tech debt for ${t}, ${qi.label}. Planned for the quarter, deployed in monthly releases.`,
       start_date:qi.qStart,end_date:qi.qEnd,work_type:'sustain',planning_state:'planned',budget_type:'support',sustain_quarter:qi.qk,space:'work',sort_order:projects.length}).select().single()
     if(error){alert('Failed to create the initiative: '+error.message);return null}
@@ -378,7 +378,7 @@ export function QuarterPlanner({items,setItems,projects,setProjects,epics=[],set
     if(error)alert('Failed to update the milestone: '+error.message)
   }
   // The milestones block at the top of a quarter or release column, with "+ Milestone"
-  const msOptions=(projects as any[]).filter(p=>(p.space||'work')==='work'&&!['Complete','Cancelled','Done'].includes(p.status)&&(ALL||!p.team||p.team===team)).sort((a,b)=>a.name.localeCompare(b.name))
+  const msOptions=(projects as any[]).filter(p=>(p.space||'work')==='work'&&!isClosedStatus(p.status)&&(ALL||!p.team||p.team===team)).sort((a,b)=>a.name.localeCompare(b.name))
   const msBlock=(col:string,a:string,b:string)=>{
     const list=msIn(a,b),f=msForm?.col===col?msForm:null
     return(

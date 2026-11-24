@@ -331,7 +331,7 @@ export function NotesEditor({content,persist,date,noteSpace,tasks,setTasks,proje
     const proj=pm?projects.find((p:any)=>p.id===pm.id):em?projects.find((p:any)=>p.id===epics.find((e:any)=>e.id===em.id)?.project_id):null
     const nums=items.map((i:any)=>Number(String(i.item_id||'').replace(/\D/g,''))||0)
     const iid=`RTL-${String((nums.length?Math.max(...nums):0)+1).padStart(3,'0')}`
-    const row:any={item_id:iid,name,status:'New',priority:'P3',effort:'M',request_type:bug?'Bug':'Enhancement',space:noteSpace,parent_project:proj?.name||null,team:proj?.team||null,epic_id:em?.id||null,flagged:false,sort_order:items.length,description:`From notes on ${fmtDay(date)}`}
+    const row:any={item_id:iid,name,status:noteSpace==='home'?'To Do':'Backlog',priority:'P3',effort:'M',request_type:bug?'Bug':'Enhancement',space:noteSpace,parent_project:proj?.name||null,team:proj?.team||null,epic_id:em?.id||null,flagged:false,sort_order:items.length,description:`From notes on ${fmtDay(date)}`}
     const{data,error}=await supabase.from('items').insert(row).select().single()
     if(error){alert('Failed to create it: '+error.message);return}
     setItems((p:any[])=>[...p,data])

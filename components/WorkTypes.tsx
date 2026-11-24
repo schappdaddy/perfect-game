@@ -28,9 +28,18 @@ export const REQUEST_TYPES=['Enhancement','Tech Debt','Bug']
 // Closed work: any of these statuses takes an item, epic or initiative out of every working
 // view (Backlog, Planning, Roadmap, Sprints pools, Teams, flags, Desk, PowerPoints); it's
 // kept on the Done tab
-export const CLOSED_STATUSES=['Done','Will Not Implement',"Won't Do",'Closed','Cancelled','Canceled','Resolved','Complete','Completed']
-export const isClosedStatus=(s:any)=>CLOSED_STATUSES.includes(s)||/^(done|closed|complete(d)?|cancell?ed|resolved|will not implement|won'?t do)$/i.test(String(s||'').trim())
+export const CLOSED_STATUSES=['Done','Killed','Will Not Implement',"Won't Do",'Closed','Cancelled','Canceled','Resolved','Complete','Completed']
+export const isClosedStatus=(s:any)=>CLOSED_STATUSES.includes(s)||/^(done|killed|closed|complete(d)?|cancell?ed|resolved|will not implement|won'?t do)$/i.test(String(s||'').trim())
 export const isClosed=(x:any)=>isClosedStatus(x?.status)
+// Statuses, matching Jira. Initiatives and epics share one workflow; stories and bugs another.
+export const INITIATIVE_STATUSES=['Backlog','Ready','In Progress','Blocked','Ready for Acceptance','Ready to Release','Hypercare','Done','Killed']
+export const EPIC_STATUSES=INITIATIVE_STATUSES
+export const STORY_STATUSES=['Backlog','Ready','In Progress','Blocked','Code Review','Ready for Test','In Test','Ready for Acceptance','Ready to Release','Done','Killed']
+export const STATUS_COLOR:Record<string,string>={'Backlog':'#5DADE2','Ready':'#8E44AD','In Progress':'#27AE60','Blocked':'#E74C3C','Code Review':'#E8B95A','Ready for Test':'#D4A017','In Test':'#C8973A',
+  'Ready for Acceptance':'#2E86AB','Ready to Release':'#2ECC71','Hypercare':'#1ABC9C','Done':'#16A085','Killed':'#5C6E80'}
+// A status from one workflow, moved to the nearest one in the other (converting a story to an epic or back)
+export const toEpicStatus=(s:any)=>EPIC_STATUSES.includes(s)?s:['Code Review','Ready for Test','In Test'].includes(s)?'In Progress':isClosedStatus(s)?'Done':'Backlog'
+export const toStoryStatus=(s:any)=>STORY_STATUSES.includes(s)?s:s==='Hypercare'?'Done':isClosedStatus(s)?'Done':'Backlog'
 
 // Bugs: work items with request type 'Bug', tracked like stories, with a severity
 export const isBug=(i:any)=>i?.request_type==='Bug'

@@ -1,5 +1,5 @@
 'use client'
-import { CLOSED_STATUSES } from './WorkTypes'
+import { CLOSED_STATUSES, STATUS_COLOR, EPIC_STATUSES, toEpicStatus, toStoryStatus } from './WorkTypes'
 import { useState } from 'react'
 import { supabase } from '../lib/supabase'
 import { ReleaseSelect, QuarterSelect, releaseText, fmtMonthKey, releaseOptions } from './Releases'
@@ -14,7 +14,7 @@ import { JiraChip } from './JiraLink'
 const ITEM_TERMINAL=CLOSED_STATUSES
 const EPIC='#E07B2A'
 const PRIORITY_BG:any={P1:'#C00000',P2:'#D4820A',P3:'#2E86AB'}
-const STATUS_CLR:any={'New':'#5DADE2','In Progress':'#27AE60','Blocked':'#E74C3C','Done':'#16A085','Testing':'#C8973A','Ready':'#8E44AD','To Do':'#5DADE2','Waiting':'#E8B95A'}
+const STATUS_CLR:any={...STATUS_COLOR,'New':'#5DADE2','In Progress':'#27AE60','Blocked':'#E74C3C','Done':'#16A085','Testing':'#C8973A','Ready':'#8E44AD','To Do':'#5DADE2','Waiting':'#E8B95A'}
 const TD={padding:'8px 12px',borderBottom:'1px solid #243447',fontSize:12,verticalAlign:'middle' as const}
 const LABEL={fontSize:11,color:'#7A8FA6',marginBottom:4,letterSpacing:0.5}
 const INPUT={width:'100%',boxSizing:'border-box' as const,background:'#1E3048',color:'#F4F6F8',border:'1px solid #243447',borderRadius:6,padding:'7px 10px',fontSize:13}
@@ -93,7 +93,7 @@ export function EpicRow({epic,projects,items,isSel,onSelect,ccCount=0,releases=[
           style={{width:44,background:'transparent',border:'1px solid rgba(224,123,42,0.45)',borderRadius:4,color:EPIC,fontWeight:700,fontSize:11,textAlign:'center' as const,padding:'2px 0'}}/>}
       </td>
       <td style={{...TD,fontSize:11,color:'#7A8FA6'}}><InlineSelect value={epic.swimlane||''} options={blank(opts.swimlanes||[])} onChange={v=>upd({swimlane:v})}>{epic.swimlane||'—'}</InlineSelect></td>
-      <td style={TD}><InlineSelect value={epic.status||'New'} options={statusOpts.length?statusOpts:['New','Ready','In Progress','Done']} onChange={v=>v&&upd({status:v})}><span style={{color:STATUS_CLR[epic.status]||'#7A8FA6',fontSize:11,fontWeight:600}}>{epic.status||'New'}</span></InlineSelect></td>
+      <td style={TD}><InlineSelect value={epic.status||'Backlog'} options={statusOpts.length?statusOpts:EPIC_STATUSES} onChange={v=>v&&upd({status:v})}><span style={{color:STATUS_CLR[epic.status]||'#7A8FA6',fontSize:11,fontWeight:600}}>{epic.status||'New'}</span></InlineSelect></td>
       <td style={{...TD,fontSize:10,color:'#7A8FA6'}}><InlineSelect value={epic.team||''} options={blank(['Consumer Experience','Operational Efficiency'])} onChange={v=>upd({team:v})}>{epic.team==='Consumer Experience'?'CE':epic.team==='Operational Efficiency'?'OE':'—'}</InlineSelect></td>
       <td style={{...TD,textAlign:'center' as const,fontSize:11}}><InlineSelect value={epic.effort||''} options={blank(['S','M','L','XL'])} onChange={v=>upd({effort:v})}>{epic.effort||'—'}</InlineSelect></td>
       <td style={{...TD,fontSize:11,color:EPIC,fontWeight:700}}><InlineSelect value={epic.request_type||''} options={[{value:'',label:'Epic'},...(opts.requestTypes||[]).map((o:string)=>({value:o,label:o}))]} onChange={v=>upd({request_type:v})}>{epic.request_type?`Epic · ${epic.request_type}`:'Epic'}</InlineSelect></td>
@@ -115,7 +115,7 @@ export async function convertStoryToEpic(item:any,{projects,setItems,setEpics,ep
   const pr=projects.find((p:any)=>p.name===item.parent_project)
   const{data,error}=await supabase.from('epics').insert({
     name:item.name,description:item.description||null,project_id:pr?.id||null,
-    priority:['P1','P2','P3','P4'].includes(item.priority)?item.priority:'P3',status:item.status||'New',
+    priority:['P1','P2','P3','P4'].includes(item.priority)?item.priority:'P3',status:(item.space||'work')==='home'?(item.status||'To Do'):toEpicStatus(item.status),
     start_date:item.start_date||null,end_date:item.end_date||null,effort:item.effort||null,team:item.team||null,
     work_type:item.work_type||null,space:item.space||'work',sort_order:epics.filter((e:any)=>e.project_id===(pr?.id||null)).length,
   }).select().single()
@@ -135,7 +135,7 @@ export async function convertEpicToStory(epic:any,{projects,items,setItems,setEp
   const pr=epicProject(epic,projects)
   const{data,error}=await supabase.from('items').insert({
     item_id:nextId,name:epic.name,description:epic.description||null,parent_project:pr?.name||null,
-    priority:epic.priority||'P3',status:epic.status||'New',start_date:epic.start_date||null,end_date:epic.end_date||null,
+    priority:epic.priority||'P3',status:(epic.space||'work')==='home'?(epic.status||'To Do'):toStoryStatus(epic.status),start_date:epic.start_date||null,end_date:epic.end_date||null,
     effort:epic.effort||'M',team:epic.team||pr?.team||null,work_type:epic.work_type||null,request_type:'Enhancement',
     swimlane:'POS',region:'',vendor:'',flagged:false,sort_order:items.length,space:epic.space||'work',
   }).select().single()
