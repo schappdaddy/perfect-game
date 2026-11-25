@@ -1,6 +1,11 @@
 'use client'
 import PerfectGame from '../components/PerfectGame'
+import AuthGate from '../components/AuthGate'
 
 export default function Page() {
-  return <PerfectGame />
+  return (
+    <AuthGate>
+      <PerfectGame />
+    </AuthGate>
+  )
 }
