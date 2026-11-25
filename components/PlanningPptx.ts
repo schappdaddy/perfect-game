@@ -156,7 +156,8 @@ function drawColumn(pptx:any,slide:any,c:PlanColumn,x:number,w:number,top:number
     y+=bh+0.08
   }
   // Cards: initiatives, then epics, then stories; two across when the column is wide
-  const cards=[...c.cards.filter(cd=>cd.kind==='initiative'),...c.cards.filter(cd=>cd.kind==='epic'),...c.cards.filter(cd=>cd.kind==='story'||cd.kind==='bug')]
+  // Pages laid out by the packer keep their order (initiatives, then epics, then the rest are already in it)
+  const cards=contain?c.cards:[...c.cards.filter(cd=>cd.kind==='initiative'),...c.cards.filter(cd=>cd.kind==='epic'),...c.cards.filter(cd=>cd.kind==='story'||cd.kind==='bug')]
   const n=cards.length,avail=bottom-0.06-y
   if(n&&(contain||cards.some(cd=>cd.children))){drawContainers(pptx,slide,cards,x+pad,y,iw,bottom-0.06,contain?999:12);return}
   if(!n){slide.addText(c.blocked?'No release this month.':'Nothing planned.',{x:x+pad,y,w:iw,h:0.24,fontSize:9,italic:true,color:'9AA3AF',margin:0});return}
