@@ -36,7 +36,8 @@ export default function TeamPrep(props:any){
   const inits=projects.filter((p:any)=>p.team===team&&!p.sustain_quarter&&(p.space||'work')==='work'&&!INIT_DONE.includes(p.status))
     .sort((a:any,b:any)=>(a.start_date||'9999').localeCompare(b.start_date||'9999')||a.name.localeCompare(b.name))
   const goLives=inits.filter((p:any)=>p.release_month&&months.includes(p.release_month))
-  const thisQ=m.quarterCols[0].cards.filter((c:any)=>c.kind!=='initiative').length
+  // Epics and stories planned this quarter (cards now contain their epics / stories)
+  const thisQ=m.quarterCols[0].cards.reduce((a:number,c:any)=>a+(c.kind==='initiative'?(c.children?.length||0):c.kind==='epic'?1+(c.children?.length||0):(c.children?.length||1)),0)
   const crew=people.filter((p:any)=>p.team===team&&p.active!==false)
   const today=new Date().toISOString().slice(0,10)
   const nextRel=months.map((k:string)=>({k,r:releaseOf(releases,k)})).find((x:any)=>!x.r?.no_release&&(x.r?.release_date||`${x.k}-28`)>=today)

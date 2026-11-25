@@ -62,11 +62,11 @@ function readinessPips(pptx:any,slide:any,x:number,y:number,cd:PlanCard,d=0.13){
 }
 const PIPS_W=0.32
 
-export async function exportPlanningPptx({title,subtitle,quarters,releaseSlides,fileName,extra}:{title:string,subtitle:string,quarters:PlanColumn[],releaseSlides:{label:string,cols:PlanColumn[],opts?:BoardOpts}[],fileName:string,extra?:(pptx:any)=>void}){
+export async function exportPlanningPptx({title,subtitle,quarters,releaseSlides,fileName,extra}:{title:string,subtitle:string,quarters:{label:string,cols:PlanColumn[],opts?:BoardOpts}[],releaseSlides:{label:string,cols:PlanColumn[],opts?:BoardOpts}[],fileName:string,extra?:(pptx:any)=>void}){
   const PptxGenJS=(await import('pptxgenjs')).default
   const pptx=new PptxGenJS()
   pptx.layout='LAYOUT_WIDE' // 13.33 × 7.5 in
-  drawBoard(pptx,title,`Quarter plan · ${subtitle}`,quarters)
+  for(const q of quarters)drawBoard(pptx,title,`Quarter plan · ${q.label} · ${subtitle}`,q.cols,q.opts||{})
   for(const r of releaseSlides)drawBoard(pptx,title,`Release plan · ${r.label} · ${subtitle}`,r.cols,r.opts||{})
   extra?.(pptx)
   await pptx.writeFile({fileName:fileName+'.pptx'})
@@ -298,11 +298,11 @@ export function packCards(cards:PlanCard[],w:number,H:number,H2=H):PlanCard[][]{
   return pages
 }
 // Lay columns out two to a slide; a column that doesn't fit half a slide gets slides of its own
-export function paginateColumns(cols:PlanColumn[]):PlanColumn[][]{
+export function paginateColumns(cols:PlanColumn[],keepEmpty=false):PlanColumn[][]{
   const full=B_X1-B_X0,half=(full-B_GAP)/2
   const slides:PlanColumn[][]=[];let pending:PlanColumn|null=null
   for(const c of cols){
-    if(!c.cards.length&&!c.milestones.length)continue // nothing in it (e.g. a month with no release)
+    if(!keepEmpty&&!c.cards.length&&!c.milestones.length)continue // nothing in it (e.g. a month with no release)
     const h=packCards(c.cards,half-0.14,cardArea(c,half))
     if(h.length===1){if(pending){slides.push([pending,c]);pending=null}else pending=c;continue}
     if(pending){slides.push([pending]);pending=null}
