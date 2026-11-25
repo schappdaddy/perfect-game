@@ -209,48 +209,67 @@ const CHILD:any={epic:{mark:'◆',clr:'D35400'},story:{mark:'▪',clr:'2874A6'},
 // Cards with what's inside them listed underneath, stacked into as many sub-columns as fit
 function drawContainers(pptx:any,slide:any,cards:PlanCard[],x:number,y0:number,w:number,bottom:number,MAXR=12){
   const G=CG,subs=subsFor(w),cw=(w-G*(subs-1))/subs
-  const HEAD=CHEAD,ROW=CROW
-  const hOf=(cd:PlanCard)=>{const k=cd.children?.length||0;return HEAD+(k?Math.min(k,MAXR)*ROW+(k>MAXR?ROW:0)+0.05:0)}
   const ys=Array(subs).fill(y0);let skipped=0,col=0
   const limit=MAXR>=999?bottom+0.01:bottom-0.24
   for(const cd of cards){
-    const h=hOf(cd)
+    const tw=cw-0.17,h=cardHt(cd,cw,MAXR)
     // reading order: down this sub-column, then the next one to the right
     while(ys[col]+h>limit&&ys[col]>y0&&col<subs-1)col++
     if(ys[col]+h>limit&&ys[col]>y0){skipped++;continue}
     const cx=x+col*(cw+G),cy=ys[col],K=KIND[cd.kind]
     slide.addShape(pptx.ShapeType.rect,{x:cx,y:cy,w:cw,h,fill:{color:K.fill},line:{color:K.line,width:0.75}})
     slide.addShape(pptx.ShapeType.rect,{x:cx,y:cy,w:0.06,h,fill:{color:K.bar},line:{color:K.bar,width:0}})
-    const tx=cx+0.12,tw=cw-0.17,bfs=7,bw=capsW(K.label,bfs)
+    const tx=cx+0.12,bfs=7,bw=capsW(K.label,bfs)
     slide.addText(K.label,{x:tx,y:cy+0.05,w:bw,h:0.16,fontSize:bfs,bold:true,color:K.badgeInk,fill:{color:K.badge},align:'center',valign:'middle',margin:0})
     const tags=[cd.ref,cd.team,cd.status,cd.release?`Release ${cd.release}`:null,cd.quarter].filter(Boolean).join(' · ')
     if(tags)slide.addText(trunc(tags,tw-bw-0.06-PIPS_W,7.5),{x:tx+bw+0.06,y:cy+0.04,w:tw-bw-0.06-PIPS_W,h:0.18,fontSize:7.5,bold:true,color:K.meta,margin:0,valign:'middle'})
     readinessPips(pptx,slide,cx+cw-PIPS_W,cy+0.055,cd)
-    const nfs=fitFs(cd.name,tw,11,true,9)
-    slide.addText(trunc(cd.name,tw,nfs,true),{x:tx,y:cy+0.23,w:tw,h:0.21,fontSize:nfs,bold:true,color:K.name,margin:0,valign:'middle'})
-    const kids=cd.children||[]
+    // The name in full, wrapping onto more lines if it needs them
+    const nl=nameLines(cd,tw)
+    slide.addText(cd.name,{x:tx,y:cy+0.23,w:tw,h:nl*NAME_LH,fontSize:NAME_FS,bold:true,color:K.name,margin:0,valign:'top',fit:'none'})
+    const kids=(cd.children||[]).slice(0,MAXR),more=(cd.children?.length||0)-kids.length
     if(kids.length){
-      const ry0=cy+HEAD
-      slide.addShape(pptx.ShapeType.rect,{x:tx-0.04,y:ry0-0.02,w:tw+0.02,h:Math.min(kids.length,MAXR)*ROW+(kids.length>MAXR?ROW:0)+0.04,fill:{color:cd.kind==='initiative'?'2C3A4E':'FFFFFF'},line:{color:cd.kind==='initiative'?'2C3A4E':'F0D9C8',width:0}})
-      kids.slice(0,MAXR).forEach((ch,i)=>{
-        const ry=ry0+i*ROW,C=CHILD[ch.kind],dark=cd.kind==='initiative'
-        const stw=ch.status?Math.min(1.05,ch.status.length*0.062+0.08):0
+      const ry0=cy+headHt(cd,tw),dark=cd.kind==='initiative'
+      const boxH=kids.reduce((a,k)=>a+kidH(k,tw),0)+(more>0?CROW:0)+0.04
+      slide.addShape(pptx.ShapeType.rect,{x:tx-0.04,y:ry0-0.02,w:tw+0.02,h:boxH,fill:{color:dark?'2C3A4E':'FFFFFF'},line:{color:dark?'2C3A4E':'F0D9C8',width:0}})
+      let ry=ry0
+      for(const ch of kids){
+        const C=CHILD[ch.kind],stw=statusW(ch.status),rh=kidH(ch,tw)
+        // Each row in full: it wraps rather than being cut off
         const left=[{text:`${C.mark} `,options:{color:C.clr,bold:true}},...(ch.ref?[{text:`${ch.ref}  `,options:{color:dark?'9FB0C3':MUTED,fontSize:7.5}}]:[]),
-          {text:trunc(ch.name+(ch.note?` · ${ch.note}`:''),tw-stw-0.32-(ch.ref?ch.ref.length*0.055:0),8.5),options:{color:dark?'F4F6F8':INK}}]
-        slide.addText(left,{x:tx,y:ry,w:tw-stw-0.04,h:ROW,fontSize:8.5,margin:0,valign:'middle'})
-        if(ch.status)slide.addText(ch.status,{x:tx+tw-stw,y:ry,w:stw,h:ROW,fontSize:7.5,bold:true,color:dark?'E8B95A':(ST_CLR[ch.status]||MUTED),align:'right',margin:0,valign:'middle'})
-      })
-      if(kids.length>MAXR)slide.addText(`+ ${kids.length-MAXR} more`,{x:tx,y:ry0+MAXR*ROW,w:tw,h:ROW,fontSize:8,italic:true,color:cd.kind==='initiative'?'C9D3DF':MUTED,margin:0,valign:'middle'})
+          {text:ch.name+(ch.note?` · ${ch.note}`:''),options:{color:dark?'F4F6F8':INK}}]
+        slide.addText(left,{x:tx,y:ry+0.02,w:tw-stw-0.04,h:rh-0.02,fontSize:KID_FS,margin:0,valign:'top',fit:'none',lineSpacing:KID_FS*1.15})
+        if(ch.status)slide.addText(ch.status,{x:tx+tw-stw,y:ry+0.02,w:stw,h:KID_LH,fontSize:7.5,bold:true,color:dark?'E8B95A':(ST_CLR[ch.status]||MUTED),align:'right',margin:0,valign:'top'})
+        ry+=rh
+      }
+      if(more>0)slide.addText(`+ ${more} more`,{x:tx,y:ry,w:tw,h:CROW,fontSize:8,italic:true,color:dark?'C9D3DF':MUTED,margin:0,valign:'middle'})
     }
     ys[col]+=h+G
   }
   if(skipped)slide.addText(`+ ${skipped} more not shown`,{x,y:bottom-0.22,w,h:0.22,fontSize:9,italic:true,bold:true,color:MUTED,margin:0})
 }
 
+// Card measurements, shared by the drawing and the page packing so they always agree.
+// Names and rows wrap onto as many lines as they need instead of being cut off.
+const NAME_FS=11,NAME_LH=0.2,KID_FS=8.5,KID_LH=0.155
+const txtW=(t:string,fs:number,bold=false)=>t.length*fs*(bold?0.48:0.4)/72
+const statusW=(st?:string)=>st?Math.min(1,st.length*0.054+0.08):0
+const kidLines=(ch:PlanChild,tw:number)=>{
+  const avail=Math.max(0.6,tw-statusW(ch.status)-0.06-0.14-(ch.ref?txtW(ch.ref+'  ',7.5):0))
+  return Math.max(1,Math.ceil(txtW(ch.name+(ch.note?` · ${ch.note}`:''),KID_FS)/avail))
+}
+const kidH=(ch:PlanChild,tw:number)=>0.05+kidLines(ch,tw)*KID_LH
+const nameLines=(cd:PlanCard,tw:number)=>Math.min(4,Math.max(1,Math.ceil(txtW(cd.name,NAME_FS,true)/tw)))
+const headHt=(cd:PlanCard,tw:number)=>0.26+nameLines(cd,tw)*NAME_LH
+const cardHt=(cd:PlanCard,cw:number,maxr=999)=>{
+  const tw=cw-0.17,all=cd.children||[],kids=all.slice(0,maxr)
+  return headHt(cd,tw)+(kids.length?kids.reduce((a,k)=>a+kidH(k,tw),0)+0.05+(all.length>maxr?CROW:0):0)
+}
+
 // ── Release slides that show everything: two months a slide, or one busy month a slide
 // (continued over more slides if needed), with every card and every row in it ──
-const CG=0.06,CHEAD=0.46,CROW=0.2
-const subsFor=(w:number)=>Math.max(1,Math.min(3,Math.floor((w+CG)/2.7)))
+const CG=0.06,CROW=0.2
+const subsFor=(w:number)=>Math.max(1,Math.min(3,Math.floor((w+CG)/3.6)))
 const B_X0=0.75,B_X1=13.08,B_GAP=0.1,B_TOP=1.15,B_BOTTOM=6.98
 const headH=(c:PlanColumn)=>0.52+(c.meta||[]).length*0.17+(c.progress?0.32:0)
 const msH=(c:PlanColumn,iw:number)=>{const n=c.milestones.length;if(!n)return 0;const mc=iw>=4.6?2:1,rows=Math.min(Math.ceil(n/mc),mc===2?4:6),more=n-rows*mc;return 0.24+rows*0.19+(more>0?0.19:0)+0.04+0.08}
@@ -258,20 +277,21 @@ const msH=(c:PlanColumn,iw:number)=>{const n=c.milestones.length;if(!n)return 0;
 const cardArea=(c:PlanColumn,w:number,first=true)=>B_BOTTOM-0.06-(B_TOP+headH(c)+0.07+(first?msH(c,w-0.14):0))
 // Split cards into pages that each fit; a card too tall for a page continues as "(cont.)"
 export function packCards(cards:PlanCard[],w:number,H:number,H2=H):PlanCard[][]{
-  const subs=subsFor(w),pages:PlanCard[][]=[];let page:PlanCard[]=[],col=0,y=0,cap=H
-  const hOf=(cd:PlanCard)=>CHEAD+((cd.children?.length||0)?(cd.children!.length*CROW+0.05):0)
+  const subs=subsFor(w),cw=(w-CG*(subs-1))/subs,tw=cw-0.17,pages:PlanCard[][]=[];let page:PlanCard[]=[],col=0,y=0,cap=H
   const cont=(cd:PlanCard)=>cd.name.replace(/ \(cont\.\)$/,'')+' (cont.)'
   const advance=()=>{if(col<subs-1){col++;y=0}else{pages.push(page);page=[];col=0;y=0;cap=H2}}
+  // How many of a card's rows fit in the room left
+  const rowsFitting=(cd:PlanCard,room:number)=>{let used=headHt(cd,tw)+0.05,n=0;for(const k of cd.children||[]){used+=kidH(k,tw);if(used>room)break;n++}return n}
   const queue=[...cards]
   while(queue.length){
-    const cd=queue.shift()!,h=hOf(cd),room=cap-y
+    const cd=queue.shift()!,h=cardHt(cd,cw),room=cap-y
     if(h<=room){page.push(cd);y+=h+CG;continue}
-    const kids=cd.children||[],fitRows=Math.floor((room-CHEAD-0.05)/CROW)
+    const kids=cd.children||[],fit=rowsFitting(cd,room)
     // Split a long card here if a fair share of it fits; otherwise carry it to the next sub-column
-    if(kids.length&&(fitRows>=3||(y===0&&fitRows>=1))){
-      page.push({...cd,children:kids.slice(0,fitRows)});queue.unshift({...cd,name:cont(cd),children:kids.slice(fitRows)});advance();continue
+    if(kids.length&&(fit>=3||(y===0&&fit>=1))){
+      page.push({...cd,children:kids.slice(0,fit)});queue.unshift({...cd,name:cont(cd),children:kids.slice(fit)});advance();continue
     }
-    if(y===0&&!kids.length){page.push(cd);advance();continue} // taller than a column on its own: place it anyway
+    if(y===0&&(!kids.length||fit<1)){page.push(cd);advance();continue} // taller than a column on its own: place it anyway
     advance();queue.unshift(cd)
   }
   if(page.length||!pages.length)pages.push(page)
