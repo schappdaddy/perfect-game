@@ -30,7 +30,25 @@ const capsW=(t:string,fs:number)=>t.length*fs*0.66/72+0.08
 
 export type PlanCard={kind:'initiative'|'epic'|'story'|'bug',name:string,ref?:string,team?:string|null,wt?:string,home?:string|null,release?:string|null,quarter?:string|null,priority?:string|null,status?:string|null,flag?:string|null,prd?:string|null,design?:string|null}
 export type PlanMilestone={date:string,name:string,type:string,color?:string|null,team?:string|null,done?:boolean}
-export type PlanColumn={title:string,sub?:string,meta?:string[],milestones:PlanMilestone[],cards:PlanCard[],blocked?:boolean,now?:boolean,slimmable?:boolean}
+export type PlanProgress={n:number,done:number,deployed:number,ready:number,fly:number,pct:number,days:number|null,risk:'red'|'amber'|'green'|'none'}
+export type PlanColumn={title:string,sub?:string,meta?:string[],milestones:PlanMilestone[],cards:PlanCard[],blocked?:boolean,now?:boolean,slimmable?:boolean,progress?:PlanProgress|null}
+
+// A release's progress as in the app: the % done (deployed + ready to release) and a bar of
+// deployed / ready / in flight / not started. dark = on a dark header.
+export function drawProgress(pptx:any,slide:any,x:number,y:number,w:number,p:PlanProgress,dark=false,big=false){
+  const riskClr={red:'E74C3C',amber:'D4A017',green:'27AE60',none:dark?'FFFFFF':'1F2A3C'}[p.risk]
+  const fs=big?20:11,lw=big?0.9:0.42
+  slide.addText(`${p.pct}%`,{x,y,w:lw,h:big?0.36:0.2,fontSize:fs,bold:true,color:riskClr,margin:0,valign:'middle'})
+  const days=p.days==null?'':p.days<0?` · ${-p.days}d late`:` · ${p.days}d to go`
+  slide.addText(`done · ${p.done}/${p.n}${days}`,{x:x+lw,y,w:Math.max(0.3,w-lw),h:big?0.36:0.2,fontSize:big?11:7.5,color:dark?'D5DCE5':'6B7280',margin:0,valign:'middle'})
+  const by=y+(big?0.4:0.21),bh=big?0.12:0.06
+  slide.addShape(pptx.ShapeType.rect,{x,y:by,w,h:bh,fill:{color:dark?'4A5563':'DDE3EA'},line:{color:dark?'4A5563':'DDE3EA',width:0}})
+  let bx=x
+  for(const[n,c] of [[p.deployed,'27AE60'],[p.ready,'7DCEA0'],[p.fly,'5DADE2']] as [number,string][]){
+    if(!n||!p.n)continue;const bw=w*n/p.n
+    slide.addShape(pptx.ShapeType.rect,{x:bx,y:by,w:bw,h:bh,fill:{color:c},line:{color:c,width:0}});bx+=bw
+  }
+}
 
 // PRD and Design readiness: two small dots, P and D (green = approved, amber = draft / in
 // review, outline = not started, dashed = not needed)
@@ -108,13 +126,14 @@ function drawColumn(pptx:any,slide:any,c:PlanColumn,x:number,w:number,top:number
   const pad=0.07,iw=w-pad*2
   // Header
   const meta=c.meta||[]
-  const hh=0.52+meta.length*0.17
+  const hh=0.52+meta.length*0.17+(c.progress?0.32:0)
   slide.addShape(pptx.ShapeType.rect,{x,y:top,w,h:bottom-top,fill:{color:c.blocked?'F1F2F4':'FFFFFF'},line:{color:c.now?'C8973A':LINE,width:c.now?1.5:0.75}})
   slide.addShape(pptx.ShapeType.rect,{x,y:top,w,h:hh,fill:{color:c.blocked?'8A94A3':'2F3742'},line:{color:c.blocked?'8A94A3':'2F3742',width:0}})
   const tt=c.title+(c.now?'  · NOW':''),tfs=fitFs(tt,iw,14,true,9)
   slide.addText(trunc(tt,iw,tfs,true),{x:x+pad,y:top+0.04,w:iw,h:0.27,fontSize:tfs,bold:true,color:'FFFFFF',margin:0})
   if(c.sub)slide.addText(trunc(c.sub,iw,9.5),{x:x+pad,y:top+0.3,w:iw,h:0.19,fontSize:9.5,color:c.blocked?'F4E3C8':'E8B95A',margin:0})
   meta.forEach((m,i)=>slide.addText(trunc(m,iw,8.5),{x:x+pad,y:top+0.49+i*0.17,w:iw,h:0.17,fontSize:8.5,color:'D5DCE5',margin:0}))
+  if(c.progress)drawProgress(pptx,slide,x+pad,top+0.52+meta.length*0.17,iw,c.progress,true)
   let y=top+hh+0.07
   // Milestones, two across in a wide column
   if(c.milestones.length){
