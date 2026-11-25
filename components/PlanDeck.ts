@@ -155,8 +155,9 @@ export function planModel(inp:PlanInput){
       const x=en.x,home=homeOf(en.kind,x)
       if(home){(en.kind==='epic'?g(home).epics:g(home).stories).push(x);continue}
       const ep=en.kind==='item'&&x.epic_id?epicById(x.epic_id):null
-      if(en.kind==='epic'&&bucketOf('epic',x)){const c=tdEpics.get(x.id)||{e:x,kids:[]};for(const i of storiesFor(x))if(!c.kids.some((z:any)=>z.id===i.id))c.kids.push(i);tdEpics.set(x.id,c);continue}
-      if(ep&&bucketOf('epic',ep)){const c=tdEpics.get(ep.id)||{e:ep,kids:[]};if(!c.kids.some((z:any)=>z.id===x.id))c.kids.push(x);tdEpics.set(ep.id,c);continue}
+      // An epic not under a regular initiative (tech debt, or no initiative at all) lists its own stories and bugs
+      if(en.kind==='epic'){const c=tdEpics.get(x.id)||{e:x,kids:[]};for(const i of storiesFor(x))if(!c.kids.some((z:any)=>z.id===i.id))c.kids.push(i);tdEpics.set(x.id,c);continue}
+      if(ep&&!homeOf('epic',ep)){const c=tdEpics.get(ep.id)||{e:ep,kids:[]};if(!c.kids.some((z:any)=>z.id===x.id))c.kids.push(x);tdEpics.set(ep.id,c);continue}
       const bk=en.kind==='item'&&bucketOf('item',x)
       if(bk){const c=tdLoose.get(bk.id)||{b:bk,kids:[]};c.kids.push(x);tdLoose.set(bk.id,c);continue}
       alone.push(toCard(en,cardOpts))
