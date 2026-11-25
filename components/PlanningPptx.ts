@@ -28,7 +28,8 @@ const trunc=(text:string,w:number,fs:number,bold=false)=>{
 // Width of a short all-caps label at a size (Calibri capitals run wider)
 const capsW=(t:string,fs:number)=>t.length*fs*0.66/72+0.08
 
-export type PlanCard={kind:'initiative'|'epic'|'story'|'bug',name:string,ref?:string,team?:string|null,wt?:string,home?:string|null,release?:string|null,quarter?:string|null,priority?:string|null,status?:string|null,flag?:string|null,prd?:string|null,design?:string|null}
+export type PlanChild={kind:'epic'|'story'|'bug',name:string,ref?:string,status?:string,note?:string}
+export type PlanCard={children?:PlanChild[],kind:'initiative'|'epic'|'story'|'bug',name:string,ref?:string,team?:string|null,wt?:string,home?:string|null,release?:string|null,quarter?:string|null,priority?:string|null,status?:string|null,flag?:string|null,prd?:string|null,design?:string|null}
 export type PlanMilestone={date:string,name:string,type:string,color?:string|null,team?:string|null,done?:boolean}
 export type PlanProgress={n:number,done:number,deployed:number,ready:number,fly:number,pct:number,days:number|null,risk:'red'|'amber'|'green'|'none'}
 export type PlanColumn={title:string,sub?:string,meta?:string[],milestones:PlanMilestone[],cards:PlanCard[],blocked?:boolean,now?:boolean,slimmable?:boolean,progress?:PlanProgress|null}
@@ -98,7 +99,7 @@ export function drawBoard(pptx:any,title:string,subtitle:string,cols:PlanColumn[
   // Busier columns get more room: width by how much they hold, at least 2 in
   const SLIM_W=0.42,nSlim=cols.filter(slim).length
   const room=X1-X0-GAP*(cols.length-1)-SLIM_W*nSlim
-  const weight=(c:PlanColumn)=>1+c.cards.length/6+Math.min(c.milestones.length,8)/16
+  const weight=(c:PlanColumn)=>1+(c.cards.length+c.cards.reduce((a,cd)=>a+Math.min(12,cd.children?.length||0)*0.4,0))/6+Math.min(c.milestones.length,8)/16
   const full=cols.filter(c=>!slim(c)),MIN_W=Math.min(2,room/Math.max(1,full.length))
   const widths=new Map<PlanColumn,number>()
   let left=room,pool=[...full]
@@ -156,6 +157,7 @@ function drawColumn(pptx:any,slide:any,c:PlanColumn,x:number,w:number,top:number
   // Cards: initiatives, then epics, then stories; two across when the column is wide
   const cards=[...c.cards.filter(cd=>cd.kind==='initiative'),...c.cards.filter(cd=>cd.kind==='epic'),...c.cards.filter(cd=>cd.kind==='story'||cd.kind==='bug')]
   const n=cards.length,avail=bottom-0.06-y
+  if(n&&cards.some(cd=>cd.children)){drawContainers(pptx,slide,cards,x+pad,y,iw,bottom-0.06);return}
   if(!n){slide.addText(c.blocked?'No release this month.':'Nothing planned.',{x:x+pad,y,w:iw,h:0.24,fontSize:9,italic:true,color:'9AA3AF',margin:0});return}
   // Cards two or three across in a wide column, never narrower than about 2.3 in
   const G=0.05,subs=Math.max(1,Math.min(3,Math.floor((iw+G)/2.35),n)),cw=(iw-G*(subs-1))/subs
@@ -197,4 +199,46 @@ function drawColumn(pptx:any,slide:any,c:PlanColumn,x:number,w:number,top:number
     }
   })
   if(shown<n)slide.addText(`+ ${n-shown} more`,{x:x+pad,y:y+shownRows*(ch+G),w:iw,h:0.22,fontSize:9,italic:true,bold:true,color:MUTED,margin:0})
+}
+
+// Status colours, as in the app
+const ST_CLR:any={'Backlog':'2874A6','Ready':'7D3C98','In Progress':'1E8449','Blocked':'C0392B','Code Review':'B7950B','Ready for Test':'B9770E','In Test':'AF601A',
+  'Ready for Acceptance':'1F618D','Ready to Release':'239B56','Hypercare':'138D75','Done':'117A65','Killed':'7B7D7D'}
+const CHILD:any={epic:{mark:'◆',clr:'D35400'},story:{mark:'▪',clr:'2874A6'},bug:{mark:'●',clr:'C0392B'}}
+// Cards with what's inside them listed underneath, stacked into as many sub-columns as fit
+function drawContainers(pptx:any,slide:any,cards:PlanCard[],x:number,y0:number,w:number,bottom:number){
+  const G=0.06,subs=Math.max(1,Math.min(3,Math.floor((w+G)/2.7))),cw=(w-G*(subs-1))/subs
+  const HEAD=0.46,ROW=0.2,MAXR=12
+  const hOf=(cd:PlanCard)=>{const k=cd.children?.length||0;return HEAD+(k?Math.min(k,MAXR)*ROW+(k>MAXR?ROW:0)+0.05:0)}
+  const ys=Array(subs).fill(y0);let skipped=0
+  for(const cd of cards){
+    const h=hOf(cd);let col=0;for(let i=1;i<subs;i++)if(ys[i]<ys[col])col=i
+    if(ys[col]+h>bottom-0.24&&ys[col]>y0){skipped++;continue}
+    const cx=x+col*(cw+G),cy=ys[col],K=KIND[cd.kind]
+    slide.addShape(pptx.ShapeType.rect,{x:cx,y:cy,w:cw,h,fill:{color:K.fill},line:{color:K.line,width:0.75}})
+    slide.addShape(pptx.ShapeType.rect,{x:cx,y:cy,w:0.06,h,fill:{color:K.bar},line:{color:K.bar,width:0}})
+    const tx=cx+0.12,tw=cw-0.17,bfs=7,bw=capsW(K.label,bfs)
+    slide.addText(K.label,{x:tx,y:cy+0.05,w:bw,h:0.16,fontSize:bfs,bold:true,color:K.badgeInk,fill:{color:K.badge},align:'center',valign:'middle',margin:0})
+    const tags=[cd.ref,cd.team,cd.status,cd.release?`Release ${cd.release}`:null,cd.quarter].filter(Boolean).join(' · ')
+    if(tags)slide.addText(trunc(tags,tw-bw-0.06-PIPS_W,7.5),{x:tx+bw+0.06,y:cy+0.04,w:tw-bw-0.06-PIPS_W,h:0.18,fontSize:7.5,bold:true,color:K.meta,margin:0,valign:'middle'})
+    readinessPips(pptx,slide,cx+cw-PIPS_W,cy+0.055,cd)
+    const nfs=fitFs(cd.name,tw,11,true,9)
+    slide.addText(trunc(cd.name,tw,nfs,true),{x:tx,y:cy+0.23,w:tw,h:0.21,fontSize:nfs,bold:true,color:K.name,margin:0,valign:'middle'})
+    const kids=cd.children||[]
+    if(kids.length){
+      const ry0=cy+HEAD
+      slide.addShape(pptx.ShapeType.rect,{x:tx-0.04,y:ry0-0.02,w:tw+0.02,h:Math.min(kids.length,MAXR)*ROW+(kids.length>MAXR?ROW:0)+0.04,fill:{color:cd.kind==='initiative'?'2C3A4E':'FFFFFF'},line:{color:cd.kind==='initiative'?'2C3A4E':'F0D9C8',width:0}})
+      kids.slice(0,MAXR).forEach((ch,i)=>{
+        const ry=ry0+i*ROW,C=CHILD[ch.kind],dark=cd.kind==='initiative'
+        const stw=ch.status?Math.min(1.05,ch.status.length*0.062+0.08):0
+        const left=[{text:`${C.mark} `,options:{color:C.clr,bold:true}},...(ch.ref?[{text:`${ch.ref}  `,options:{color:dark?'9FB0C3':MUTED,fontSize:7.5}}]:[]),
+          {text:trunc(ch.name+(ch.note?` · ${ch.note}`:''),tw-stw-0.32-(ch.ref?ch.ref.length*0.055:0),8.5),options:{color:dark?'F4F6F8':INK}}]
+        slide.addText(left,{x:tx,y:ry,w:tw-stw-0.04,h:ROW,fontSize:8.5,margin:0,valign:'middle'})
+        if(ch.status)slide.addText(ch.status,{x:tx+tw-stw,y:ry,w:stw,h:ROW,fontSize:7.5,bold:true,color:dark?'E8B95A':(ST_CLR[ch.status]||MUTED),align:'right',margin:0,valign:'middle'})
+      })
+      if(kids.length>MAXR)slide.addText(`+ ${kids.length-MAXR} more`,{x:tx,y:ry0+MAXR*ROW,w:tw,h:ROW,fontSize:8,italic:true,color:cd.kind==='initiative'?'C9D3DF':MUTED,margin:0,valign:'middle'})
+    }
+    ys[col]+=h+G
+  }
+  if(skipped)slide.addText(`+ ${skipped} more not shown`,{x,y:bottom-0.22,w,h:0.22,fontSize:9,italic:true,bold:true,color:MUTED,margin:0})
 }
