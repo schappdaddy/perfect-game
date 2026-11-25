@@ -4,7 +4,7 @@ import { Fragment, useState } from 'react'
 // The Backlog table's columns. Drag a header to reorder them; the order is saved in this
 // browser and used for every row (stories, bugs and epics alike).
 export const BACKLOG_COLS:[string,string,number][]=[
-  ['item_id','ID',85],['name','Item Name',200],['parent_project','Initiative',130],['epic','Epic',130],['work_type','Work',80],['release_month','Release',95],
+  ['item_id','ID',85],['name','Item Name',200],['parent_project','Initiative',130],['epic','Epic',130],['tags','Tags',140],['work_type','Work',80],['release_month','Release',95],
   ['priority','Priority',70],['committed_priority','Rank',55],
   ['swimlane','Swimlane',110],['status','Status',130],['team','Team',50],
   ['effort','Effort',55],
@@ -21,8 +21,10 @@ function load():string[]{
     const v=JSON.parse(localStorage.getItem(KEY)||'null')
     if(!Array.isArray(v))return DEFAULT
     // keep the saved order, drop columns that no longer exist, add new ones at the end
-    const known=v.filter((k:any)=>DEFAULT.includes(k))
-    return [...known,...DEFAULT.filter(k=>!known.includes(k))]
+    const out=v.filter((k:any)=>DEFAULT.includes(k))
+    // a column added since the order was saved goes in after the column before it by default
+    DEFAULT.forEach((k,i)=>{if(out.includes(k))return;const prev=DEFAULT.slice(0,i).reverse().find(p=>out.includes(p));out.splice(prev?out.indexOf(prev)+1:0,0,k)})
+    return out
   }catch{return DEFAULT}
 }
 export function useBacklogColumns(){

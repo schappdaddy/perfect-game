@@ -1,6 +1,7 @@
 'use client'
 import { TEAM_NAMES } from './Teams'
 import { BACKLOG_COLS, inColumnOrder } from './BacklogColumns'
+import { TagEditor } from './Tags'
 import { CLOSED_STATUSES, STATUS_COLOR, EPIC_STATUSES, toEpicStatus, toStoryStatus } from './WorkTypes'
 import { useState } from 'react'
 import { supabase } from '../lib/supabase'
@@ -76,7 +77,7 @@ export async function setEpicRelease(epic:any,month:string|null,{items,setItems,
   if(rels.length&&rels[rels.length-1]!==month)setEpics((prev:any[])=>prev.map((e:any)=>e.id===epic.id?{...e,release_month:rels[rels.length-1]}:e))
 }
 
-export function EpicRow({colOrder=BACKLOG_COLS.map(c=>c[0]),epic,projects,items,isSel,onSelect,ccCount=0,releases=[],setItems,setEpics,statusOpts=[],opts={},onRank,onDragEpic,onDropEpic,onOverEpic,dragOver=false}:any){
+export function EpicRow({colOrder=BACKLOG_COLS.map(c=>c[0]),tagProps={},epic,projects,items,isSel,onSelect,ccCount=0,releases=[],setItems,setEpics,statusOpts=[],opts={},onRank,onDragEpic,onDropEpic,onOverEpic,dragOver=false}:any){
   const upd=(f:any)=>updateEpic(epic.id,f,setEpics)
   const blank=(list:string[])=>[{value:'',label:'—'},...list.map(o=>({value:o,label:o}))]
   const pr=epicProject(epic,projects)
@@ -91,6 +92,7 @@ export function EpicRow({colOrder=BACKLOG_COLS.map(c=>c[0]),epic,projects,items,
       style={{background:isSel?'#2A2418':'rgba(224,123,42,0.07)',cursor:'pointer',borderLeft:`3px solid ${EPIC}`,borderTop:dragOver?'2px solid #C8973A':undefined}}>
       <td style={{...TD,textAlign:'center' as const,color:EPIC,cursor:onDragEpic?'grab':'pointer'}} title={onDragEpic?'Drag onto another epic to rank it there':undefined}>{onDragEpic&&<span style={{color:'#3A4A5E',marginRight:3}}>⠿</span>}◆</td>
       {inColumnOrder(colOrder,{
+        tags:<td style={{...TD,maxWidth:180}}><TagEditor value={epic.tags||[]} onChange={v=>upd({tags:v})} {...tagProps}/></td>,
         item_id:<td style={{...TD,fontSize:9,fontWeight:800,color:EPIC,letterSpacing:1}}>EPIC</td>,
         name:<td style={{...TD,minWidth:240}}>
         <div style={{fontSize:12.5,fontWeight:800,color:'#F4F6F8',lineHeight:1.35}}><InlineText value={epic.name} width={230} onSave={v=>v&&upd({name:v})}>{epic.name}</InlineText></div>
@@ -217,6 +219,8 @@ export function EpicPanel({epic,projects,items,setItems,setEpics,statusOpts,prio
       <div style={{padding:16,display:'flex',flexDirection:'column',gap:14}}>
         <div><div style={LABEL}>EPIC NAME</div>
           <input value={name} onChange={e=>setName(e.target.value)} onBlur={()=>name.trim()&&name!==epic.name&&upd({name:name.trim()})} style={INPUT}/></div>
+        <div><div style={LABEL}>TAGS</div>
+          <TagEditor value={epic.tags||[]} onChange={v=>upd({tags:v})} size={11} max={20} placeholder="+ Add a tag"/></div>
         <div><div style={LABEL}>DESCRIPTION</div>
           <textarea value={desc} rows={3} onChange={e=>setDesc(e.target.value)} onBlur={()=>desc!==(epic.description||'')&&upd({description:desc||null})} style={{...INPUT,resize:'vertical' as const,fontFamily:'inherit'}}/></div>
         <div><div style={LABEL}>INITIATIVE</div>
