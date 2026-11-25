@@ -7,6 +7,7 @@ import { WT_LABEL, WorkTag, workTypeOfProject, isBug, BugTag, CLOSED_STATUSES, i
 import { ReadinessPips, ReadinessAudit } from './Readiness'
 import { JiraChip } from './JiraLink'
 import { IntakeBubble } from './Intake'
+import { TagChips } from './Tags'
 
 // Monthly releases and quarterly planning of all work (New, Sustain and SaaS deliverable).
 // A release is a month ('2026-11'). Each month can have a release date, or be marked as
@@ -544,6 +545,7 @@ export function QuarterPlanner({items,setItems,projects,setProjects,epics=[],set
         {(isEpic?ptsOf(en)>0:!!x.effort)&&<span title={isEpic&&!x.effort?'Effort points of its open stories':undefined} style={{fontSize:10,color:'#7A8FA6',border:'1px solid #3A4A5E',borderRadius:3,padding:'0 4px'}}>{isEpic&&!x.effort?ptsOf(en)+' pts':x.effort}</span>}
       </div>
       <div style={{fontSize:12,color:'#F4F6F8',lineHeight:1.3,fontWeight:isEpic?700:400}}>{x.name}</div>
+      {(x.tags||[]).length>0&&<TagChips names={x.tags} size={9} max={4}/>}
       <div style={{display:'flex',alignItems:'center',gap:6,flexWrap:'wrap' as const,rowGap:3}}>
         {statusPill(en.kind,x)}
         {o.showQuarter&&qi&&<span style={{fontSize:10,color:'#C8D4E0'}}>🗓 Worked in <b>{qi.label}</b>{later?<span style={{color:'#5DADE2'}}> · ships after</span>:''}</span>}

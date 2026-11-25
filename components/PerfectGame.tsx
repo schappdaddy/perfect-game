@@ -10,6 +10,7 @@ import { InlineSelect, InlineText, InlineDate, InlineEditStyles } from './Inline
 import { MilestoneTypeSelect } from './MilestoneTypes'
 import { JiraChip } from './JiraLink'
 import { BACKLOG_COLS, useBacklogColumns, inColumnOrder } from './BacklogColumns'
+import { TagEditor, TagChips, useTags } from './Tags'
 import { IntakeBubble } from './Intake'
 import { WORK_TYPE_KEYS, WT_LABEL, WT_COLOR, WorkTag, isWorkType, workTypeOfProject, capacityShare, REQUEST_TYPES, isBug, SEVERITIES, sevOf, BugTag, CLOSED_STATUSES, isClosed, INITIATIVE_STATUSES, EPIC_STATUSES, STORY_STATUSES, STATUS_COLOR } from './WorkTypes'
 import { QuarterPlanner, ReleaseCalendar, ReleaseSelect, QuarterSelect, ReleasesManager, releaseOptions, releaseOf, releaseText, fmtMonthKey } from './Releases'
@@ -2094,6 +2095,8 @@ function Backlog({mode='list',items,setItems,projects,setProjects,space,ccrs=[],
   const [fst,setFst]=useState('All')
   const [fpp,setFpp]=useState('All')
   const [fep,setFep]=useState('All') // epic filter: 'All' | '__none' | epic id
+  const [ftag,setFtag]=useState('All') // tag filter: 'All' | '__none' | tag name
+  const allTags=useTags()
   const [seg,setSegState]=useState<string>(()=>{try{return localStorage.getItem('pg_backlog_seg')||'all'}catch{return 'all'}}) // 'all' | 'new' | 'sustain'
   const setSeg=(v:string)=>{setSegState(v);try{localStorage.setItem('pg_backlog_seg',v)}catch{}}
   const wtOf=(item:any)=>workTypeOfItem(item,projects)
@@ -2452,6 +2455,17 @@ const sorted=items.filter(i=>!isItemDone(i)).sort((a,b)=>{
     return list.map(x=>({e:x.e,label:dup.has(x.e.name)?`${x.e.name} (${x.pn||'no initiative'})`:x.e.name}))
       .sort((a,b)=>a.label.localeCompare(b.label))
   })()
+  // Tags: how many open stories and epics use each; keep records in step on rename / delete
+  const tagUses=(n:string)=>items.filter((i:any)=>!ITEM_TERMINAL.includes(i.status)&&(i.tags||[]).includes(n)).length+(epics as any[]).filter((e:any)=>!ITEM_TERMINAL.includes(e.status)&&(e.tags||[]).includes(n)).length
+  const tagRenamed=(from:string,to:string)=>{
+    const f=(x:any)=>(x.tags||[]).includes(from)?{...x,tags:x.tags.map((t:string)=>t===from?to:t)}:x
+    setItems((p:any[])=>p.map(f));setEpics?.((p:any[])=>p.map(f));if(ftag===from)setFtag(to)
+  }
+  const tagDeleted=(name:string)=>{
+    const f=(x:any)=>(x.tags||[]).includes(name)?{...x,tags:x.tags.filter((t:string)=>t!==name)}:x
+    setItems((p:any[])=>p.map(f));setEpics?.((p:any[])=>p.map(f));if(ftag===name)setFtag('All')
+  }
+  const tagProps={uses:tagUses,onRenamed:tagRenamed,onDeleted:tagDeleted}
   const preSeg=sorted.filter(item=>{
     if(ft!=='All'&&item.team!==ft) return false
     if(fp!=='All'&&item.priority!==fp) return false
@@ -2460,6 +2474,7 @@ const sorted=items.filter(i=>!isItemDone(i)).sort((a,b)=>{
     if(fpp!=='All'&&item.parent_project!==fpp) return false
     if(fep==='__none'&&epicOf(item)) return false
     if(fep!=='All'&&fep!=='__none'&&epicOf(item)?.id!==fep) return false
+    if(ftag==='__none'?(item.tags||[]).length>0:ftag!=='All'&&!(item.tags||[]).includes(ftag)) return false
     if(frt!=='All'&&item.request_type!==frt) return false
     if(frg!=='All'&&item.region!==frg) return false
     if(fvn!=='All'&&item.vendor!==fvn) return false
@@ -2483,6 +2498,7 @@ const sorted=items.filter(i=>!isItemDone(i)).sort((a,b)=>{
       &&(fs==='All'||e.swimlane===fs)&&(frt==='All'||e.request_type===frt)&&(frg==='All'||e.region===frg)&&(fvn==='All'||e.vendor===fvn)
       &&(frl==='All'||(frl==='__none'?!e.release_month:e.release_month===frl))
       &&(fpp==='All'||epicProjName(e)===fpp)&&(fep==='All'||fep===e.id)
+      &&(ftag==='All'||(ftag==='__none'?!(e.tags||[]).length:(e.tags||[]).includes(ftag)))
       &&(!srch||e.name.toLowerCase().includes(srch.toLowerCase())))
       .sort(epicRankSort)
   const visibleEpics=seg==='all'?preSegEpics:preSegEpics.filter(e=>epicWorkType(e,projects)===seg)
@@ -2853,6 +2869,11 @@ const sorted=items.filter(i=>!isItemDone(i)).sort((a,b)=>{
           <option value="__none">No epic</option>
           {filterEpics.map(({e,label})=><option key={e.id} value={e.id}>{label}</option>)}
         </select>
+        <select value={ftag} onChange={e=>setFtag(e.target.value)} title="Filter by tag" style={{...sel,maxWidth:150,color:ftag==='All'?undefined:'#5DADE2',border:`1px solid ${ftag==='All'?'#243447':'#5DADE2'}`}}>
+          <option value="All">All Tags</option>
+          <option value="__none">No tag</option>
+          {allTags.map(t=><option key={t.name} value={t.name}># {t.name} ({tagUses(t.name)})</option>)}
+        </select>
         <button onClick={()=>setSf(f=>!f)} style={{...sel,background:sf?'#7D2D00':'#1E3048',color:sf?'#FF8C42':'#7A8FA6',border:`1px solid ${sf?'#FF8C42':'#243447'}`}}>
           🚩{fc>0&&<span style={{background:'#C8973A',color:'#0D1B2A',borderRadius:10,padding:'0 5px',fontSize:10,fontWeight:700,marginLeft:3}}>{fc}</span>}
         </button>
@@ -2940,7 +2961,7 @@ const sorted=items.filter(i=>!isItemDone(i)).sort((a,b)=>{
             </thead>
             <tbody>
               {displayRows.map((item:any,idx:number)=>{
-                if(item.__epic)return <EpicRow key={'epic:'+item.__epic.id} colOrder={colOrder} releases={releases} setItems={setItems} setEpics={setEpics} statusOpts={epicStatusesFor(space)} opts={epicOpts} onRank={rankEpic} onDragEpic={setDragEpic} onDropEpic={dropOnEpic} onOverEpic={(e:any)=>dragEpic&&setOverEpic(e.id)} dragOver={!!dragEpic&&overEpic===item.__epic.id} epic={item.__epic} projects={projects} items={items} ccCount={cc.length}
+                if(item.__epic)return <EpicRow key={'epic:'+item.__epic.id} colOrder={colOrder} tagProps={tagProps} releases={releases} setItems={setItems} setEpics={setEpics} statusOpts={epicStatusesFor(space)} opts={epicOpts} onRank={rankEpic} onDragEpic={setDragEpic} onDropEpic={dropOnEpic} onOverEpic={(e:any)=>dragEpic&&setOverEpic(e.id)} dragOver={!!dragEpic&&overEpic===item.__epic.id} epic={item.__epic} projects={projects} items={items} ccCount={cc.length}
                   isSel={selEpicId===item.__epic.id} onSelect={()=>{setSelected(null);setSelEpicId(selEpicId===item.__epic.id?null:item.__epic.id)}}/>
                 if(item.__hdr)return(
                   <tr key={item.key}>
@@ -2984,6 +3005,7 @@ const sorted=items.filter(i=>!isItemDone(i)).sort((a,b)=>{
                       </div>
                     </td>
                     {inColumnOrder(colOrder,{
+                      tags:<td style={{...TD,maxWidth:180}}><TagEditor value={item.tags||[]} onChange={v=>upd(item.id,'tags',v)} {...tagProps}/></td>,
                       item_id:<td style={{...TD,color:'#7A8FA6',fontFamily:'monospace',fontSize:10}}>{item.item_id}</td>,
                       name:<td style={{...TD,minWidth:240,paddingLeft:item.__indent?30:12,borderLeft:item.__indent?'2px solid rgba(224,123,42,0.35)':undefined}}>
                       <div style={{fontSize:12,color:'#F4F6F8',fontWeight:isSel?700:400,lineHeight:1.35,marginBottom:3,display:'flex',alignItems:'flex-start',gap:4}}>{rt(item.request_type)&&<span style={{flexShrink:0}}>{rt(item.request_type)}</span>}<span style={{minWidth:0}}><InlineText value={item.name} width={220} onSave={v=>v&&upd(item.id,'name',v)}>{item.name}</InlineText></span></div>
@@ -3099,6 +3121,10 @@ const sorted=items.filter(i=>!isItemDone(i)).sort((a,b)=>{
             })()}
             <div style={{padding:16,display:'flex',flexDirection:'column',gap:14,flex:1}}>
               <PanelField selected={selected} upd={upd} label="Item Name" field="name"/>
+              <div>
+                <div style={{fontSize:11,color:'#7A8FA6',marginBottom:4,letterSpacing:0.5}}>TAGS</div>
+                <TagEditor value={selected.tags||[]} onChange={v=>upd(selected.id,'tags',v)} size={11} max={20} placeholder="+ Add a tag" {...tagProps}/>
+              </div>
               <PanelField selected={selected} upd={upd} label="Description" field="description" type="textarea"/>
               <EditableDropdown field="priority" value={selected.priority} options={PRIORITIES} setOptions={null} label="Priority"/>
               <EditableDropdown field="team" value={selected.team} options={TEAMS} setOptions={null} label="Dev Team"/>
