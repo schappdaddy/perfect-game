@@ -31,13 +31,14 @@ export function FullPlanButton(props:any){
 export function FullPlanDialog({onClose,strategies=[],projects,items,epics,releases,milestones,sprints,strategyItems,tracks,goals,deps,strategyRoles,projectRoles,people,roles,teams,workTypeOf,epicWorkTypeOf,lockTeam,startN0=0}:any){
   const mTypes=useMilestoneTypes()
   const cur=fyQuarterOf(monthKeyOf(new Date()))
-  const [stratId,setStratId]=useState<string>(()=>{let v:any=null;try{v=localStorage.getItem('pg_strategy')}catch{};return strategies.some((s:any)=>s.id===v)?v:(strategies[0]?.id||'')})
   const [startN,setStartN]=useState(startN0)
   const [team,setTeam]=useState(lockTeam||'__all')
   const [wt,setWt]=useState('all')
   const [sec,setSec]=useState<any>({roadmap:true,budget:true,quarters:true,releases:true,calendar:true,epics:true,sprints:true,unplanned:true,readiness:true})
   const [busy,setBusy]=useState(false)
-  const strategy=strategies.find((s:any)=>s.id===stratId)||null
+  // The deck is the agreed plan: only the promoted strategy goes in (the most recently promoted).
+  // Other strategies are what-ifs that stay on the Strategy tab.
+  const strategy=(strategies as any[]).filter((s:any)=>s.promoted_at).sort((a:any,b:any)=>String(b.promoted_at).localeCompare(String(a.promoted_at)))[0]||null
   const start=nextQ(cur.fy,cur.q,startN),end=nextQ(start.fy,start.q,3)
   const any=Object.entries(sec).some(([k,v])=>v&&(strategy||(k!=='roadmap'&&k!=='budget')))
   async function go(){
@@ -63,10 +64,10 @@ export function FullPlanDialog({onClose,strategies=[],projects,items,epics,relea
         <div style={{fontSize:11.5,color:'#7A8FA6',marginBottom:14}}>Strategy → quarters → releases → sprints → what&apos;s not planned yet, in one deck.{team!=='__all'?` Only ${team}: its initiatives, people, work and sprints.`:''}</div>
         <div style={{display:'grid',gridTemplateColumns:'1fr 1fr',gap:10,marginBottom:14}}>
           <div style={{gridColumn:'1 / -1'}}><div style={lab}>STRATEGY</div>
-            <select value={stratId} onChange={e=>setStratId(e.target.value)} style={inp}>
-              {!strategies.length&&<option value="">No strategies yet</option>}
-              {strategies.map((s:any)=><option key={s.id} value={s.id}>{s.name}</option>)}
-            </select></div>
+            <div title="The deck shows the plan as promoted. To include a different strategy, promote it on the Strategy tab." style={{...inp,boxSizing:'border-box' as const,color:strategy?'#F4F6F8':'#7A8FA6'}}>
+              {strategy?<>{strategy.name} <span style={{color:'#7A8FA6'}}>· promoted {new Date(strategy.promoted_at).toLocaleDateString('en-US',{month:'short',day:'numeric',year:'numeric'})}</span></>
+                :'No strategy promoted yet: the strategy slides are left out'}
+            </div></div>
           <div><div style={lab}>QUARTERS</div>
             <select value={startN} onChange={e=>setStartN(Number(e.target.value))} style={inp}>
               {[-1,0,1,2].map(n=>{const a=nextQ(cur.fy,cur.q,n),b=nextQ(a.fy,a.q,3);return <option key={n} value={n}>{quarterLabel(a.fy,a.q)} – {quarterLabel(b.fy,b.q)}{n===0?' (from now)':''}</option>})}
