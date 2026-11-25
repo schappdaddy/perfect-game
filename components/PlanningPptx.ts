@@ -29,8 +29,8 @@ const trunc=(text:string,w:number,fs:number,bold=false)=>{
 const capsW=(t:string,fs:number)=>t.length*fs*0.66/72+0.08
 
 // n / done / release / kids are extra detail for the app (the Teams tab); the slides ignore them
-export type PlanChild={kind:'epic'|'story'|'bug',name:string,ref?:string,status?:string,note?:string,n?:number,done?:number,release?:string|null,priority?:string|null,kids?:PlanChild[]}
-export type PlanCard={children?:PlanChild[],pid?:string,n?:number,done?:number,kind:'initiative'|'epic'|'story'|'bug',name:string,ref?:string,team?:string|null,wt?:string,home?:string|null,release?:string|null,quarter?:string|null,priority?:string|null,status?:string|null,flag?:string|null,prd?:string|null,design?:string|null}
+export type PlanChild={kind:'epic'|'story'|'bug',name:string,ref?:string,href?:string,rid?:string,status?:string,note?:string,n?:number,done?:number,release?:string|null,priority?:string|null,kids?:PlanChild[]}
+export type PlanCard={children?:PlanChild[],pid?:string,href?:string,rid?:string,n?:number,done?:number,kind:'initiative'|'epic'|'story'|'bug',name:string,ref?:string,team?:string|null,wt?:string,home?:string|null,release?:string|null,quarter?:string|null,priority?:string|null,status?:string|null,flag?:string|null,prd?:string|null,design?:string|null}
 export type PlanMilestone={date:string,name:string,type:string,color?:string|null,team?:string|null,done?:boolean}
 export type PlanProgress={n:number,done:number,deployed:number,ready:number,fly:number,pct:number,days:number|null,risk:'red'|'amber'|'green'|'none'}
 export type PlanColumn={title:string,sub?:string,meta?:string[],milestones:PlanMilestone[],cards:PlanCard[],blocked?:boolean,now?:boolean,slimmable?:boolean,progress?:PlanProgress|null}
@@ -185,8 +185,8 @@ function drawColumn(pptx:any,slide:any,c:PlanColumn,x:number,w:number,top:number
       // Line 1: the kind label, then id, team, work type, priority, release / quarter
       const bfs=6.5,bw=capsW(K.label,bfs)
       slide.addText(K.label,{x:tx,y:cy+0.04,w:bw,h:0.15,fontSize:bfs,bold:true,color:K.badgeInk,fill:{color:K.badge},align:'center',valign:'middle',margin:0})
-      const tags=[cd.ref,cd.team,cd.wt,cd.priority,cd.status,cd.release?`Release ${cd.release}`:null,cd.quarter].filter(Boolean).join(' · ')
-      if(tags)slide.addText(trunc(tags,tw-bw-0.06-PIPS_W,7),{x:tx+bw+0.06,y:cy+0.03,w:tw-bw-0.06-PIPS_W,h:0.17,fontSize:7,bold:true,color:K.meta,margin:0,valign:'middle'})
+      const tags=tagRuns(cd,[cd.team,cd.wt,cd.priority,cd.status,cd.release?`Release ${cd.release}`:null,cd.quarter],tw-bw-0.06-PIPS_W,7)
+      if(tags)slide.addText(tags,{x:tx+bw+0.06,y:cy+0.03,w:tw-bw-0.06-PIPS_W,h:0.17,fontSize:7,bold:true,color:K.meta,margin:0,valign:'middle'})
       readinessPips(pptx,slide,cx+cw-PIPS_W,cy+0.045,cd)
       // Line 2: the name; line 3: the initiative it belongs to
       slide.addText(trunc(cd.name,tw,nameFs,true),{x:tx,y:cy+0.2,w:tw,h:0.2,fontSize:nameFs,bold:true,color:K.name,margin:0,valign:'middle'})
@@ -202,6 +202,15 @@ function drawColumn(pptx:any,slide:any,c:PlanColumn,x:number,w:number,top:number
     }
   })
   if(shown<n)slide.addText(`+ ${n-shown} more`,{x:x+pad,y:y+shownRows*(ch+G),w:iw,h:0.22,fontSize:9,italic:true,bold:true,color:MUTED,margin:0})
+}
+
+// A card's tag line, its Jira key first and linked to Jira
+function tagRuns(cd:PlanCard,rest:(string|null|undefined)[],w:number,fs:number){
+  const all=[cd.ref,...rest].filter(Boolean).join(' · ')
+  if(!all)return null
+  const t=trunc(all,w,fs)
+  if(!cd.ref||!t.startsWith(cd.ref))return t
+  return[{text:cd.ref,options:{color:cd.kind==='initiative'?'8DB8FF':'0052CC',...(cd.href?{hyperlink:{url:cd.href,tooltip:'Open in Jira'}}:{})}},{text:t.slice(cd.ref.length),options:{}}]
 }
 
 // Status colours, as in the app
@@ -223,8 +232,8 @@ function drawContainers(pptx:any,slide:any,cards:PlanCard[],x:number,y0:number,w
     slide.addShape(pptx.ShapeType.rect,{x:cx,y:cy,w:0.06,h,fill:{color:K.bar},line:{color:K.bar,width:0}})
     const tx=cx+0.12,bfs=7,bw=capsW(K.label,bfs)
     slide.addText(K.label,{x:tx,y:cy+0.05,w:bw,h:0.16,fontSize:bfs,bold:true,color:K.badgeInk,fill:{color:K.badge},align:'center',valign:'middle',margin:0})
-    const tags=[cd.ref,cd.team,cd.status,cd.release?`Release ${cd.release}`:null,cd.quarter].filter(Boolean).join(' · ')
-    if(tags)slide.addText(trunc(tags,tw-bw-0.06-PIPS_W,7.5),{x:tx+bw+0.06,y:cy+0.04,w:tw-bw-0.06-PIPS_W,h:0.18,fontSize:7.5,bold:true,color:K.meta,margin:0,valign:'middle'})
+    const tags=tagRuns(cd,[cd.team,cd.status,cd.release?`Release ${cd.release}`:null,cd.quarter],tw-bw-0.06-PIPS_W,7.5)
+    if(tags)slide.addText(tags,{x:tx+bw+0.06,y:cy+0.04,w:tw-bw-0.06-PIPS_W,h:0.18,fontSize:7.5,bold:true,color:K.meta,margin:0,valign:'middle'})
     readinessPips(pptx,slide,cx+cw-PIPS_W,cy+0.055,cd)
     // The name in full, wrapping onto more lines if it needs them
     const nl=nameLines(cd,tw)
@@ -238,7 +247,7 @@ function drawContainers(pptx:any,slide:any,cards:PlanCard[],x:number,y0:number,w
       for(const ch of kids){
         const C=CHILD[ch.kind],stw=statusW(ch.status),rh=kidH(ch,tw)
         // Each row in full: it wraps rather than being cut off
-        const left=[{text:`${C.mark} `,options:{color:C.clr,bold:true}},...(ch.ref?[{text:`${ch.ref}  `,options:{color:dark?'9FB0C3':MUTED,fontSize:7.5}}]:[]),
+        const left=[{text:`${C.mark} `,options:{color:C.clr,bold:true}},...(ch.ref?[{text:ch.ref,options:{color:dark?'8DB8FF':'0052CC',fontSize:7.5,...(ch.href?{hyperlink:{url:ch.href,tooltip:'Open in Jira'}}:{})}},{text:'  ',options:{fontSize:7.5}}]:[]),
           {text:ch.name+(ch.note?` · ${ch.note}`:''),options:{color:dark?'F4F6F8':INK}}]
         slide.addText(left,{x:tx,y:ry+0.02,w:tw-stw-0.04,h:rh-0.02,fontSize:KID_FS,margin:0,valign:'top',fit:'none',lineSpacing:KID_FS*1.15})
         if(ch.status)slide.addText(ch.status,{x:tx+tw-stw,y:ry+0.02,w:stw,h:KID_LH,fontSize:7.5,bold:true,color:dark?'E8B95A':(ST_CLR[ch.status]||MUTED),align:'right',margin:0,valign:'top'})

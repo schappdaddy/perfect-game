@@ -10,6 +10,7 @@ import { drawBoard, drawProgress, paginateColumns, type PlanColumn, type PlanCar
 import { addStrategySlides } from './StrategyPptx'
 import { typeColor, typeName } from './MilestoneTypes'
 import { workTypeOfProject, CLOSED_STATUSES, STATUS_COLOR, sevOf } from './WorkTypes'
+import { jiraKeyOf, jiraHrefOf } from './JiraLink'
 
 const MONTHS=['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec']
 const TERMINAL=CLOSED_STATUSES
@@ -18,6 +19,10 @@ const EFFORT_POINTS:any={XS:0.5,S:1,M:2,L:3,XL:5}
 const PRI:any={P1:1,P2:2,P3:3,P4:4}
 const WTS:any={new:'New',sustain:'Sustain',saas:'SaaS'}
 const shortOf=(t:any)=>t?teamShort(t)||t:null
+// The id shown on slides is the Jira key, linked to Jira; the internal ids (item_id, RTL-…)
+// never go on a slide. rid keeps the internal id for the app.
+const jk=(x:any)=>jiraKeyOf(x)||''
+const jh=(x:any)=>jiraHrefOf(x)||undefined
 const pad=(n:number)=>String(n).padStart(2,'0')
 const lastDay=(k:string)=>{const[y,m]=k.split('-').map(Number);return `${k}-${pad(new Date(y,m,0).getDate())}`}
 const fmtDay=(iso:string)=>{const[,m,d]=iso.split('-').map(Number);return `${MONTHS[m-1]} ${d}`}
@@ -69,9 +74,9 @@ export function planModel(inp:PlanInput){
   const toMs=(m:any)=>{const p=projects.find((x:any)=>x.id===m.project_id);return{date:fmtDay(m.date),name:m.name+(p?` · ${p.name}`:''),type:typeName(mTypes,m.type),color:typeColor(mTypes,m.type),team:shortOf(p?.team),done:!!m.completed}}
   const toCard=(en:Entry,o:{quarter?:boolean,release?:boolean}={}):PlanCard=>{
     const x=en.x
-    if(en.kind==='project')return{kind:'initiative',name:x.name,team:shortOf(x.team),release:o.release&&x.release_month?fmtMonthKey(x.release_month):null,prd:x.prd_status||null,design:x.design_status||null}
+    if(en.kind==='project')return{kind:'initiative',ref:jk(x)||undefined,href:jh(x),name:x.name,team:shortOf(x.team),release:o.release&&x.release_month?fmtMonthKey(x.release_month):null,prd:x.prd_status||null,design:x.design_status||null}
     const home=homeOf(en.kind,x),bk=bucketOf(en.kind,x)
-    return{prd:x.prd_status||null,design:x.design_status||null,kind:en.kind==='epic'?'epic':x.request_type==='Bug'?'bug':'story',name:x.name,ref:en.kind==='item'?x.item_id:undefined,team:shortOf(teamOf(en.kind,x)),wt:WTS[wtOf(en.kind,x)],priority:[x.priority,x.request_type==='Bug'?x.severity:null].filter(Boolean).join(' · ')||null,
+    return{prd:x.prd_status||null,design:x.design_status||null,kind:en.kind==='epic'?'epic':x.request_type==='Bug'?'bug':'story',name:x.name,ref:jk(x)||undefined,href:jh(x),rid:en.kind==='item'?x.item_id:undefined,team:shortOf(teamOf(en.kind,x)),wt:WTS[wtOf(en.kind,x)],priority:[x.priority,x.request_type==='Bug'?x.severity:null].filter(Boolean).join(' · ')||null,
       home:home?`◈ ${home.name}`:bk?`Tech debt · ${bk.name}`:null,release:o.release&&x.release_month?fmtMonthKey(x.release_month):null,quarter:o.quarter&&en.qk?en.qk.replace('-',' '):null}
   }
   // Release view range: the months of the quarters shown through the quarter after
@@ -127,7 +132,7 @@ export function planModel(inp:PlanInput){
   // one, or with request type Tech Debt
   const isTD=(i:any)=>!!bucketOf('item',i)||i.request_type==='Tech Debt'||(!!i.epic_id&&!!bucketOf('epic',epicById(i.epic_id)))
   const tdItems=items.filter((i:any)=>live(i)&&shown('item',i)&&isTD(i))
-  const tdRow=(i:any)=>{const ep=i.epic_id?epicById(i.epic_id):null;return{epic:ep?.name||'',kind:i.request_type==='Bug'?'Bug':'Story',ref:i.item_id||'',name:i.name,status:i.status||'',severity:i.request_type==='Bug'?(sevOf(i.severity)?.label||'—'):''}}
+  const tdRow=(i:any)=>{const ep=i.epic_id?epicById(i.epic_id):null;return{epic:ep?.name||'',kind:i.request_type==='Bug'?'Bug':'Story',ref:jk(i),href:jh(i),name:i.name,status:i.status||'',severity:i.request_type==='Bug'?(sevOf(i.severity)?.label||'—'):''}}
   const tdSort=(a:any,b:any)=>(a.epic||'~').localeCompare(b.epic||'~')||(TERMINAL.includes(a.status)?0:a.status==='Ready to Release'?1:NOT_STARTED.includes(a.status)?3:2)-(TERMINAL.includes(b.status)?0:b.status==='Ready to Release'?1:NOT_STARTED.includes(b.status)?3:2)||String(a.ref).localeCompare(String(b.ref))
   const techDebt=relMonths.map(k=>{const its=tdItems.filter((i:any)=>effRel(i)===k);return{k,label:`${fmtMonthKey(k)} release`,sub:releaseText(releases,k),progress:progressOf(its,k),rows:its.map(tdRow).sort(tdSort)}}).filter(x=>x.rows.length)
   const tdBacklog=tdItems.filter((i:any)=>!effRel(i)&&!TERMINAL.includes(i.status)).map(tdRow).sort(tdSort)
@@ -145,7 +150,7 @@ export function planModel(inp:PlanInput){
   // with no epic) listed under it; a tech-debt epic with its stories and bugs under it; tech
   // debt with no epic under its Tech Debt initiative; work with no initiative on its own
   function containers(list:Entry[],ini:Entry[],storiesFor:(e:any)=>any[],partOf:((e:any)=>string)|null,cardOpts:any):PlanCard[]{
-    const kid=(i:any):PlanChild=>({kind:i.request_type==='Bug'?'bug':'story',ref:i.item_id||'',name:i.name,status:i.status||'',priority:i.priority||null,release:effRel(i)?fmtMonthKey(effRel(i)):null})
+    const kid=(i:any):PlanChild=>({kind:i.request_type==='Bug'?'bug':'story',ref:jk(i),href:jh(i),rid:i.item_id||'',name:i.name,status:i.status||'',priority:i.priority||null,release:effRel(i)?fmtMonthKey(effRel(i)):null})
     const isDone=(x:any)=>TERMINAL.includes(x.status==='Hypercare'?'Done':x.status)||x.status==='Ready to Release'
     // Story counts rolled up for a card: its stories and bugs, done (or ready to release) of all
     const roll=(kids:any[])=>({n:kids.length,done:kids.filter(isDone).length})
@@ -170,7 +175,7 @@ export function planModel(inp:PlanInput){
     const initCards:PlanCard[]=[...groups.values()].sort((a,b)=>Number(b.goLive)-Number(a.goLive)||a.p.name.localeCompare(b.p.name)).map(({p,goLive,epics:eps,stories:sts})=>({
       ...toCard(ent('project',p),{release:true}),status:goLive&&p.release_month?'GO-LIVE':p.status||null,
       pid:p.id,...roll([...eps.flatMap(storiesFor),...sts]),
-      children:[...eps.map((e:any)=>{const ss=storiesFor(e).sort(byState),n=ss.length;return{kind:'epic' as const,name:e.name+(partOf?partOf(e):''),status:e.status||'',note:n?`${n} stor${n===1?'y':'ies'}`:'',
+      children:[...eps.map((e:any)=>{const ss=storiesFor(e).sort(byState),n=ss.length;return{kind:'epic' as const,ref:jk(e),href:jh(e),name:e.name+(partOf?partOf(e):''),status:e.status||'',note:n?`${n} stor${n===1?'y':'ies'}`:'',
         ...roll(ss),release:e.release_month?fmtMonthKey(e.release_month):null,priority:e.priority||null,kids:ss.map(kid)}}),...sts.sort(byState).map(kid)]}))
     const tdCards:PlanCard[]=[...tdEpics.values()].map(({e,kids})=>({...toCard(ent('epic',e),cardOpts),name:e.name+(partOf?partOf(e):''),status:e.status||null,...roll(kids),children:kids.sort(byState).map(kid)}))
     // The Tech Debt initiative itself, holding its stories and bugs that have no epic
@@ -231,7 +236,7 @@ export function planModel(inp:PlanInput){
     ...items.filter((i:any)=>open(i)&&!qkOf('item',i)&&!withItsEpic(i)&&shown('item',i)).map((i:any)=>ent('item',i))]
   const groupName=(en:Entry)=>homeOf(en.kind,en.x)?.name||'No initiative'
   unplannedWork.sort((a,b)=>{const ga=groupName(a),gb=groupName(b);return(ga==='No initiative'?1:0)-(gb==='No initiative'?1:0)||ga.localeCompare(gb)||(PRI[a.x.priority]||9)-(PRI[b.x.priority]||9)||(a.kind==='epic'?0:1)-(b.kind==='epic'?0:1)})
-  const rowOf=(en:Entry,child=false)=>({child,group:groupName(en),kind:en.kind==='epic'?'Epic':en.x.request_type==='Bug'?'Bug':'Story',ref:en.kind==='item'?en.x.item_id||'':'',name:en.x.name,team:shortOf(teamOf(en.kind,en.x))||'',wt:WTS[wtOf(en.kind,en.x)]||'',priority:en.x.priority||'',status:en.x.status||'',stories:null})
+  const rowOf=(en:Entry,child=false)=>({child,group:groupName(en),kind:en.kind==='epic'?'Epic':en.x.request_type==='Bug'?'Bug':'Story',ref:jk(en.x),href:jh(en.x),rid:en.kind==='item'?en.x.item_id||'':'',name:en.x.name,team:shortOf(teamOf(en.kind,en.x))||'',wt:WTS[wtOf(en.kind,en.x)]||'',priority:en.x.priority||'',status:en.x.status||'',stories:null})
   // Each unplanned epic is followed by its own open stories and bugs that aren't planned either
   const unplannedRows=unplannedWork.flatMap(en=>en.kind!=='epic'?[rowOf(en)]:[rowOf(en),
     ...storiesOf(en.x).filter((i:any)=>open(i)&&!qkOf('item',i)&&withItsEpic(i)&&shown('item',i))
@@ -286,7 +291,7 @@ export function planModel(inp:PlanInput){
     const rels=[...new Set(live.map((i:any)=>i.release_month||e.release_month).filter(Boolean))].sort() as string[]
     return{epic:e,home:epicHome(e),quarter:qLabel(qkOf('epic',e)),status:e.status||'',team:shortOf(teamOf('epic',e))||'',
       releases:rels.map(k=>fmtMonthKey(k)),inPlan:inPlan.length,total:live.length,
-      rows:sts.map((i:any)=>({kind:i.request_type==='Bug'?'Bug':'Story',ref:i.item_id||'',name:i.name,status:i.status||'',quarter:qLabel(qkOf('item',i)),release:i.release_month?fmtMonthKey(i.release_month):'',fit:fitOf(i)}))}
+      rows:sts.map((i:any)=>({kind:i.request_type==='Bug'?'Bug':'Story',ref:jk(i),href:jh(i),name:i.name,status:i.status||'',quarter:qLabel(qkOf('item',i)),release:i.release_month?fmtMonthKey(i.release_month):'',fit:fitOf(i)}))}
   })
   return{quarters,quarterCols,quarterSlides,releaseSlides,sprintSlides,undatedInits,unplannedRows,ALL,calendarMonth,calendarFys,isBlocked,storiesOf,readiness,epicBreakdown,techDebt,tdBacklog}
 }
@@ -309,14 +314,14 @@ function sectionSlide(pptx:any,n:number,title:string,blurb:string){
   s.addText(blurb,{x:0.9,y:4.05,w:11,h:0.9,fontSize:15,color:MUTED,margin:0,valign:'top'})
 }
 // A long list as table slides, a set number of rows per slide, grouped with band rows
-type Cell=string|{text:string,color?:string,bold?:boolean}
+type Cell=string|{text:string,color?:string,bold?:boolean,link?:string}
 function tableSlides(pptx:any,title:string,subtitle:string,header:string[],colW:number[],rows:{group?:string,groupFill?:string,cells:Cell[]}[],boldCol=0,perSlide=17){
   const pages:any[][]=[];let page:any[]=[],last:string|undefined,n=0
   const th=(t:string)=>({text:t,options:{bold:true,color:'FFFFFF',fill:{color:HEAD},fontSize:9,valign:'middle'}})
   for(const r of rows){
     if(n>=perSlide){pages.push(page);page=[];n=0;last=undefined}
     if(r.group!==undefined&&r.group!==last){page.push([{text:r.group,options:{colspan:header.length,bold:true,color:INK,fill:{color:r.groupFill||SUB},fontSize:9}}]);last=r.group;n++}
-    if(r.cells.length)page.push(r.cells.map((c,i)=>typeof c==='string'?{text:c,options:{fontSize:9,color:INK,bold:i===boldCol}}:{text:c.text,options:{fontSize:9,color:c.color||INK,bold:c.bold??i===boldCol}}));n++
+    if(r.cells.length)page.push(r.cells.map((c,i)=>typeof c==='string'?{text:c,options:{fontSize:9,color:INK,bold:i===boldCol}}:{text:c.text,options:{fontSize:9,color:c.color||INK,bold:c.bold??i===boldCol,...(c.link?{hyperlink:{url:c.link,tooltip:'Open in Jira'}}:{})}}));n++
   }
   if(page.length)pages.push(page)
   pages.forEach((p,ix)=>{
@@ -358,7 +363,7 @@ function calendarSlide(pptx:any,m:any,fy:number,releases:any[],sub:string){
         const name=g.p?.name||'No initiative',td=!!g.p?.sustain_quarter
         lines.push({t:name,kind:g.goLive?'golive':td?'td':'init'})
         for(const e of g.epics){const n=e.__n;lines.push({t:`◆ ${e.name}${n?` · ${n} stor${n===1?'y':'ies'}`:''}${e.__total>1?` · part ${e.__part+1} of ${e.__total}`:''}`,kind:'epic'})}
-        for(const it of g.stories)lines.push({t:`▪ ${it.item_id?it.item_id+' ':''}${it.name}`,kind:'story'})
+        for(const it of g.stories)lines.push({t:`▪ ${jk(it)?jk(it)+' ':''}${it.name}`,kind:'story'})
       }
       const LH=0.155,maxL=Math.floor((H-0.32)/LH)
       if(!lines.length){s.addText('Nothing tagged to this release yet.',{x:x+0.08,y:y+0.3,w:W-0.15,h:0.2,fontSize:8,italic:true,color:'9AA3AF',margin:0});return}
@@ -384,7 +389,7 @@ export function addEpicSlides(pptx:any,m:any,sub:string){
   const eb=m.epicBreakdown as any[]
   tableSlides(pptx,'Epics at a glance',`Each epic, how much of it is in the plan, and when it ships · ${sub}`,
     ['Epic','Initiative','Team','Status','Quarter','Ships','In the plan'],[3.9,2.7,0.6,1.3,1.0,1.6,1.1],
-    eb.map(x=>({cells:[x.epic.name,x.home,x.team,x.status,x.quarter||'—',x.releases.join(', ')||'—',
+    eb.map(x=>({cells:[jk(x.epic)?{text:`${jk(x.epic)}  ${x.epic.name}`,link:jh(x.epic)}:x.epic.name,x.home,x.team,x.status,x.quarter||'—',x.releases.join(', ')||'—',
       x.total?{text:`${x.inPlan} of ${x.total}`,color:x.inPlan===x.total?'1E8449':x.inPlan===0?'C0392B':'B9770E',bold:true}:{text:'no stories',color:MUTED}]})),0,16)
 }
 
@@ -407,7 +412,7 @@ export function addTechDebtSlides(pptx:any,m:any,sub:string){
       if(g!==last){body.push([{text:g,options:{colspan:4,bold:true,color:INK,fill:{color:'FBE5D3'},fontSize:10}}]);last=g}
       const sc=hexOf(STATUS_COLOR[r.status],MUTED)
       body.push([{text:r.kind==='Bug'?'🐞 Bug':'▪ Story',options:{fontSize:10,color:r.kind==='Bug'?'C0392B':'2E86AB',bold:true}},
-        {text:r.name,options:{fontSize:10,color:INK}},
+        {text:r.ref?[{text:r.ref,options:{color:'0052CC',bold:true,...(r.href?{hyperlink:{url:r.href,tooltip:'Open in Jira'}}:{})}},{text:`  ${r.name}`,options:{color:INK}}]:r.name,options:{fontSize:10,color:INK}},
         {text:r.status,options:{fontSize:10,color:sc,bold:true}},
         {text:r.severity,options:{fontSize:10,color:INK}}])
     }
@@ -486,8 +491,8 @@ export async function exportFullPlanPptx({strategy,strategyCtx,plan,sections,fil
     sectionSlide(pptx,++n,'Not planned yet',`${m.undatedInits.length} initiative${m.undatedInits.length!==1?'s':''} with no dates or release, and ${m.unplannedRows.length} epic${m.unplannedRows.length!==1?'s':''} and stor${m.unplannedRows.length===1?'y':'ies'} with no quarter.`)
     tableSlides(pptx,'Initiatives not on the roadmap',`No dates or release · ${sub}`,['Initiative','Team','Work type','Status','Priority','Epics','Stories'],[4.6,1.1,1.3,1.6,1.1,1.1,1.1],
       m.undatedInits.map((p:any)=>({cells:[p.name,shortOf(p.team)||'',WTS[workTypeOfProject(p)]||'',p.status||'',p.priority||'',String(plan.epics.filter((e:any)=>e.project_id===p.id&&!TERMINAL.includes(e.status)).length),String(plan.items.filter((i:any)=>i.parent_project===p.name&&!TERMINAL.includes(i.status)).length)]})))
-    tableSlides(pptx,'Work with no quarter',`Epics and stories not planned yet, by initiative and priority · ${sub}`,['Kind','ID','Name','Team','Work type','Priority','Status'],[0.8,1.0,5.6,0.8,1.2,0.9,1.6],
-      m.unplannedRows.map(r=>({group:r.group,cells:[r.kind,r.ref,(r.child?'   ↳ ':'')+r.name,r.team,r.wt,r.priority,r.status]})),2)
+    tableSlides(pptx,'Work with no quarter',`Epics and stories not planned yet, by initiative and priority · ${sub}`,['Kind','Jira','Name','Team','Work type','Priority','Status'],[0.8,1.0,5.6,0.8,1.2,0.9,1.6],
+      m.unplannedRows.map(r=>({group:r.group,cells:[r.kind,r.ref?{text:r.ref,color:'0052CC',link:r.href}:'',(r.child?'   ↳ ':'')+r.name,r.team,r.wt,r.priority,r.status]})),2)
   }
   if(sections.readiness){
     const ready=(st:any)=>st==='approved'||st==='na'
@@ -501,7 +506,7 @@ export async function exportFullPlanPptx({strategy,strategyCtx,plan,sections,fil
         return{cells:[r.qi.label,String(t),`${p} · ${pctS(p,t)}`,`${d} · ${pctS(d,t)}`,`${b} · ${pctS(b,t)}`,String(t-b)]}}),0)
     tableSlides(pptx,'Not ready yet',`Planned work whose PRD or Design isn't approved, by quarter · ${sub}`,['Kind','Name','Initiative','Team','PRD','Design'],[0.9,4.6,2.6,0.7,1.25,1.25],
       m.readiness.flatMap((r:any)=>r.rows.filter((z:any)=>!ready(z.x.prd_status)||!ready(z.x.design_status)).map((z:any)=>({group:r.qi.label,
-        cells:[z.kind,`${z.x.item_id?z.x.item_id+' ':''}${z.x.name}`,z.home,z.team||'',SL[z.x.prd_status||''],SL[z.x.design_status||'']]}))),1)
+        cells:[z.kind,jk(z.x)?{text:`${jk(z.x)}  ${z.x.name}`,link:jh(z.x),bold:true}:z.x.name,z.home,z.team||'',SL[z.x.prd_status||''],SL[z.x.design_status||'']]}))),1)
   }
   await pptx.writeFile({fileName:fileName+'.pptx'})
 }
