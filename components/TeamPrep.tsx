@@ -34,6 +34,10 @@ function Done({n,done,w=46}:{n?:number,done?:number,w?:number}){
     <span style={{width:w,height:4,borderRadius:2,background:'#243447',overflow:'hidden',display:'inline-block'}}><span style={{display:'block',height:'100%',width:`${pct}%`,background:pct===100?'#27AE60':'#5DADE2'}}/></span>
     <span style={{fontSize:9,color:'#8FA6BC',fontVariantNumeric:'tabular-nums'}}>{done}/{n}</span></span>
 }
+// The Jira key, linked to Jira
+const Jira=({k,href,size=9}:{k?:string,href?:string,size?:number})=>!k?null:href
+  ?<a href={href} target="_blank" rel="noreferrer" onClick={e=>e.stopPropagation()} title={`Open ${k} in Jira`} style={{color:'#4C9AFF',fontSize:size,fontWeight:700,textDecoration:'none',flexShrink:0,whiteSpace:'nowrap' as const}}>◆ {k}</a>
+  :<span style={{color:'#4C9AFF',fontSize:size,fontWeight:700,flexShrink:0,whiteSpace:'nowrap' as const}}>◆ {k}</span>
 const CH:any={epic:{m:'◆',c:'#E07B2A'},story:{m:'▪',c:'#5DADE2'},bug:{m:'●',c:'#E74C3C'}}
 
 export default function TeamPrep(props:any){
@@ -160,7 +164,8 @@ export default function TeamPrep(props:any){
   const kidRow=(ch:any,key:string,indent=0)=>(
     <div key={key} style={{display:'flex',alignItems:'center',gap:5,fontSize:10.5,padding:'1px 0',paddingLeft:indent,opacity:KILLED.includes(ch.status)?0.5:1}}>
       <span style={{color:CH[ch.kind].c,fontSize:9,flexShrink:0}}>{CH[ch.kind].m}</span>
-      {ch.ref&&<span style={{color:'#7A8FA6',fontFamily:'monospace',fontSize:9.5,flexShrink:0}}>{ch.ref}</span>}
+      {ch.rid&&<span style={{color:'#7A8FA6',fontFamily:'monospace',fontSize:9.5,flexShrink:0}}>{ch.rid}</span>}
+      <Jira k={ch.ref} href={ch.href}/>
       <span style={{color:isDone(ch.status)?'#8FA6BC':'#E1E7EE',flex:1,minWidth:0,lineHeight:1.3,textDecoration:CLOSED_STATUSES.includes(ch.status)?'line-through':undefined}}>{ch.name}</span>
       {ch.priority&&<span style={{fontSize:9,fontWeight:700,color:ch.priority==='P1'?'#E74C3C':ch.priority==='P2'?'#D4820A':'#7A8FA6',flexShrink:0}}>{ch.priority}</span>}
       <Pill s={ch.status} size={8.5}/>
@@ -174,6 +179,7 @@ export default function TeamPrep(props:any){
           <span style={{color:'#7A8FA6',fontSize:8,width:7,flexShrink:0}}>{has?(open?'▾':'▸'):''}</span>
           <span style={{color:CH.epic.c,fontSize:9,flexShrink:0}}>◆</span>
           <span style={{color:'#F4F6F8',fontWeight:700,flex:1,minWidth:0,lineHeight:1.3}}>{ch.name}</span>
+          <Jira k={ch.ref} href={ch.href}/>
           <Pill s={ch.status} size={8.5}/>
         </div>
         <div style={{display:'flex',alignItems:'center',gap:6,paddingLeft:19,marginTop:1,flexWrap:'wrap' as const}}>
@@ -209,7 +215,7 @@ export default function TeamPrep(props:any){
                   {cards.map((cd:any,i:number)=>{const K=KIND[cd.kind],proj=cd.pid?projects.find((p:any)=>p.id===cd.pid):null,eps=(cd.children||[]).filter((x:any)=>x.kind==='epic'),sts=(cd.children||[]).filter((x:any)=>x.kind!=='epic');return(
                     <div key={i} style={{background:K.bg,borderLeft:`3px solid ${K.c}`,borderRadius:5,padding:'5px 7px'}}>
                       <div style={{display:'flex',gap:5,alignItems:'center',fontSize:9,fontWeight:800,color:K.c,flexWrap:'wrap' as const}}>
-                        <span>{K.l}</span>{cd.ref&&<span style={{color:'#7A8FA6',fontFamily:'monospace'}}>{cd.ref}</span>}
+                        <span>{K.l}</span>{cd.rid&&<span style={{color:'#7A8FA6',fontFamily:'monospace'}}>{cd.rid}</span>}<Jira k={cd.ref} href={cd.href}/>
                         <span style={{marginLeft:'auto',color:'#7A8FA6',fontWeight:700}}>{[cd.priority,cd.release?`📦 ${cd.release}`:null,cd.quarter].filter(Boolean).join(' · ')}</span>
                         <ReadinessPips kind="item" x={{prd_status:cd.prd,design_status:cd.design}} size={11}/>
                       </div>
@@ -323,7 +329,7 @@ export default function TeamPrep(props:any){
               {head&&<div style={{fontSize:10.5,fontWeight:800,color:r.group==='No initiative'?'#8FA6BC':'#C8973A',margin:'8px 0 3px'}}>{r.group==='No initiative'?'○':'◈'} {r.group}</div>}
               <div style={{display:'grid',gridTemplateColumns:'54px 80px 1fr 70px 40px 120px',gap:8,alignItems:'center',fontSize:11.5,padding:`4px 0 4px ${r.child?28:10}px`,borderBottom:'1px solid #1C2C3F',borderLeft:r.child?'2px solid rgba(224,123,42,0.35)':undefined,marginLeft:r.child?10:0}}>
                 <span style={{fontSize:9,fontWeight:800,color:r.kind==='Epic'?'#E07B2A':r.kind==='Bug'?'#E74C3C':'#5DADE2'}}>{r.kind==='Bug'?'🐞 BUG':r.kind.toUpperCase()}</span>
-                <span style={{color:'#7A8FA6',fontFamily:'monospace',fontSize:10.5}}>{r.ref}</span>
+                <span style={{display:'flex',flexDirection:'column' as const}}><span style={{color:'#7A8FA6',fontFamily:'monospace',fontSize:10.5}}>{r.rid}</span><Jira k={r.ref} href={r.href} size={9.5}/></span>
                 <span style={{color:r.child?'#C8C8D4':'#F4F6F8'}}>{r.name}</span>
                 <span style={{color:'#7A8FA6'}}>{r.wt}</span>
                 <span style={{fontWeight:700,color:r.priority==='P1'?'#E74C3C':r.priority==='P2'?'#D4820A':'#7A8FA6'}}>{r.priority}</span>
