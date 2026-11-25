@@ -62,6 +62,8 @@ const TEMPLATE={
 
 export default function StrategyTab({projects:mainProjects,setProjects,strategies,setStrategies,tracks,setTracks,goals,setGoals,deps:allDeps,setDeps,people,teams,onOpenProject,openAssistant,items=[],epics:mainEpics=[],setEpics,strategyItems=[],setStrategyItems,roles=[],projectRoles=[],setProjectRoles,strategyRoles=[],setStrategyRoles}:any){
   const allTeams=useTeams()
+  // The promoted strategy (the most recently promoted): the one the rest of the app uses
+  const liveId=(strategies as any[]).filter((x:any)=>x.promoted_at).sort((x:any,y:any)=>String(y.promoted_at).localeCompare(String(x.promoted_at)))[0]?.id||null
   const [pptPick,setPptPick]=useState<Set<string>|null>(null) // strategies to put in the PowerPoint (dialog open when set) // delivery teams, incl. proposed ones (Strategy settings › Teams)
   const [stratId,setStratId]=useState<any>(()=>{try{return localStorage.getItem('pg_strategy')}catch{return null}})
   const strategy=(strategies as any[]).find(s=>s.id===stratId)||strategies[0]||null
@@ -776,9 +778,15 @@ export default function StrategyTab({projects:mainProjects,setProjects,strategie
       <div style={{display:'flex',alignItems:'center',gap:10,padding:'10px 16px',borderBottom:'1px solid #243447',background:'#162436',flexWrap:'wrap' as const,flexShrink:0}}>
         <select value={strategy.id} onChange={e=>{if(e.target.value==='__new'){setSelId('__new');return}pickStrategy(e.target.value)}}
           style={{background:'#1E3048',color:'#F4F6F8',border:'1px solid #243447',borderRadius:6,padding:'5px 10px',fontSize:13,fontWeight:700,cursor:'pointer',maxWidth:360}}>
-          {strategies.map((s:any)=><option key={s.id} value={s.id}>{s.name}</option>)}
+          {strategies.map((s:any)=><option key={s.id} value={s.id}>{s.id===liveId?'★ ':''}{s.name}{s.id===liveId?' (promoted)':''}</option>)}
           <option value="__new">+ New strategy…</option>
         </select>
+        {strategy.id===liveId
+          ?<span title={`The promoted strategy: the Roadmap's tracks and the full-plan deck come from it. Promoted ${new Date(strategy.promoted_at).toLocaleString('en-US',{month:'short',day:'numeric',year:'numeric',hour:'numeric',minute:'2-digit'})}.`}
+              style={{display:'inline-flex',alignItems:'center',gap:5,fontSize:11,fontWeight:800,color:'#27AE60',border:'1px solid rgba(39,174,96,0.55)',background:'rgba(39,174,96,0.12)',borderRadius:12,padding:'3px 10px',whiteSpace:'nowrap' as const}}>
+              ★ Promoted · {new Date(strategy.promoted_at).toLocaleDateString('en-US',{month:'short',day:'numeric'})}</span>
+          :<span title={liveId?`Not promoted: a what-if. The promoted strategy is "${(strategies as any[]).find((x:any)=>x.id===liveId)?.name}".`:'No strategy has been promoted yet.'}
+              style={{fontSize:11,fontWeight:700,color:'#7A8FA6',border:'1px dashed #3A4A5E',borderRadius:12,padding:'3px 10px',whiteSpace:'nowrap' as const}}>Draft · not promoted</span>}
         <div style={{display:'flex',border:'1px solid #243447',borderRadius:6,overflow:'hidden'}}>
           {[['map','Roadmap'],['report','📊 Report']].map(([k,l])=>(
             <button key={k} onClick={()=>setPref('mode',k)} style={{background:view.mode===k?'#C8973A':'#1E3048',color:view.mode===k?'#0D1B2A':'#F4F6F8',border:'none',fontSize:11,fontWeight:700,padding:'5px 10px',cursor:'pointer'}}>{l}</button>
