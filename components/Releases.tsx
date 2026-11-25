@@ -672,6 +672,7 @@ export function QuarterPlanner({items,setItems,projects,setProjects,epics=[],set
           </span>
         </div>
         <div style={{fontSize:12,fontWeight:800,color:'#F4F6F8',lineHeight:1.3}}>{p.name}</div>
+        {(p.tags||[]).length>0&&<TagChips names={p.tags} size={9} max={4}/>}
         <div style={{display:'flex'}}>{statusPill('project',p)}</div>
         <div style={{fontSize:10,color:'#7A8FA6'}}>{p.start_date?`${fmtD(p.start_date)} – ${p.ongoing||!p.end_date?'ongoing':fmtD(p.end_date)}`:'No dates'} · {eps.length} epic{eps.length!==1?'s':''} · {sts.length} stor{sts.length===1?'y':'ies'}</div>
       </div>
