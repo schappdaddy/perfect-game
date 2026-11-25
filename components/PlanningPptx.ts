@@ -62,17 +62,18 @@ function readinessPips(pptx:any,slide:any,x:number,y:number,cd:PlanCard,d=0.13){
 }
 const PIPS_W=0.32
 
-export async function exportPlanningPptx({title,subtitle,quarters,releaseSlides,fileName,extra}:{title:string,subtitle:string,quarters:PlanColumn[],releaseSlides:{label:string,cols:PlanColumn[]}[],fileName:string,extra?:(pptx:any)=>void}){
+export async function exportPlanningPptx({title,subtitle,quarters,releaseSlides,fileName,extra}:{title:string,subtitle:string,quarters:PlanColumn[],releaseSlides:{label:string,cols:PlanColumn[],opts?:BoardOpts}[],fileName:string,extra?:(pptx:any)=>void}){
   const PptxGenJS=(await import('pptxgenjs')).default
   const pptx=new PptxGenJS()
   pptx.layout='LAYOUT_WIDE' // 13.33 × 7.5 in
   drawBoard(pptx,title,`Quarter plan · ${subtitle}`,quarters)
-  for(const r of releaseSlides)drawBoard(pptx,title,`Release plan · ${r.label} · ${subtitle}`,r.cols)
+  for(const r of releaseSlides)drawBoard(pptx,title,`Release plan · ${r.label} · ${subtitle}`,r.cols,r.opts||{})
   extra?.(pptx)
   await pptx.writeFile({fileName:fileName+'.pptx'})
 }
 
-export function drawBoard(pptx:any,title:string,subtitle:string,cols:PlanColumn[]){
+export type BoardOpts={equal?:boolean,contain?:boolean}
+export function drawBoard(pptx:any,title:string,subtitle:string,cols:PlanColumn[],opts:BoardOpts={}){
   const slide=pptx.addSlide()
   slide.background={color:CREAM}
   slide.addShape(pptx.ShapeType.rect,{x:0.25,y:0,w:0.28,h:7.5,fill:{color:'2F3742'},line:{color:'2F3742'}})
@@ -99,7 +100,7 @@ export function drawBoard(pptx:any,title:string,subtitle:string,cols:PlanColumn[
   // Busier columns get more room: width by how much they hold, at least 2 in
   const SLIM_W=0.42,nSlim=cols.filter(slim).length
   const room=X1-X0-GAP*(cols.length-1)-SLIM_W*nSlim
-  const weight=(c:PlanColumn)=>1+(c.cards.length+c.cards.reduce((a,cd)=>a+Math.min(12,cd.children?.length||0)*0.4,0))/6+Math.min(c.milestones.length,8)/16
+  const weight=(c:PlanColumn)=>opts.equal?1:1+(c.cards.length+c.cards.reduce((a,cd)=>a+Math.min(12,cd.children?.length||0)*0.4,0))/6+Math.min(c.milestones.length,8)/16
   const full=cols.filter(c=>!slim(c)),MIN_W=Math.min(2,room/Math.max(1,full.length))
   const widths=new Map<PlanColumn,number>()
   let left=room,pool=[...full]
@@ -113,7 +114,7 @@ export function drawBoard(pptx:any,title:string,subtitle:string,cols:PlanColumn[
   for(const c of cols){
     const w=slim(c)?SLIM_W:widths.get(c)||MIN_W
     if(slim(c))drawSlim(pptx,slide,c,x,w,TOP,BOTTOM)
-    else drawColumn(pptx,slide,c,x,w,TOP,BOTTOM)
+    else drawColumn(pptx,slide,c,x,w,TOP,BOTTOM,!!opts.contain)
     x+=w+GAP
   }
 }
@@ -123,7 +124,7 @@ function drawSlim(pptx:any,slide:any,c:PlanColumn,x:number,w:number,top:number,b
   slide.addText(`${c.title} · ${c.blocked?(c.sub||'No release'):`${c.sub||''}${c.sub?' · ':''}nothing planned`}`,{x:x-(bottom-top)/2+w/2,y:top+(bottom-top)/2-w/2,w:bottom-top,h:w,rotate:270,fontSize:9,bold:true,color:MUTED,align:'center',valign:'middle',margin:0})
 }
 
-function drawColumn(pptx:any,slide:any,c:PlanColumn,x:number,w:number,top:number,bottom:number){
+function drawColumn(pptx:any,slide:any,c:PlanColumn,x:number,w:number,top:number,bottom:number,contain=false){
   const pad=0.07,iw=w-pad*2
   // Header
   const meta=c.meta||[]
@@ -157,7 +158,7 @@ function drawColumn(pptx:any,slide:any,c:PlanColumn,x:number,w:number,top:number
   // Cards: initiatives, then epics, then stories; two across when the column is wide
   const cards=[...c.cards.filter(cd=>cd.kind==='initiative'),...c.cards.filter(cd=>cd.kind==='epic'),...c.cards.filter(cd=>cd.kind==='story'||cd.kind==='bug')]
   const n=cards.length,avail=bottom-0.06-y
-  if(n&&cards.some(cd=>cd.children)){drawContainers(pptx,slide,cards,x+pad,y,iw,bottom-0.06);return}
+  if(n&&(contain||cards.some(cd=>cd.children))){drawContainers(pptx,slide,cards,x+pad,y,iw,bottom-0.06,contain?999:12);return}
   if(!n){slide.addText(c.blocked?'No release this month.':'Nothing planned.',{x:x+pad,y,w:iw,h:0.24,fontSize:9,italic:true,color:'9AA3AF',margin:0});return}
   // Cards two or three across in a wide column, never narrower than about 2.3 in
   const G=0.05,subs=Math.max(1,Math.min(3,Math.floor((iw+G)/2.35),n)),cw=(iw-G*(subs-1))/subs
@@ -206,14 +207,17 @@ const ST_CLR:any={'Backlog':'2874A6','Ready':'7D3C98','In Progress':'1E8449','Bl
   'Ready for Acceptance':'1F618D','Ready to Release':'239B56','Hypercare':'138D75','Done':'117A65','Killed':'7B7D7D'}
 const CHILD:any={epic:{mark:'◆',clr:'D35400'},story:{mark:'▪',clr:'2874A6'},bug:{mark:'●',clr:'C0392B'}}
 // Cards with what's inside them listed underneath, stacked into as many sub-columns as fit
-function drawContainers(pptx:any,slide:any,cards:PlanCard[],x:number,y0:number,w:number,bottom:number){
-  const G=0.06,subs=Math.max(1,Math.min(3,Math.floor((w+G)/2.7))),cw=(w-G*(subs-1))/subs
-  const HEAD=0.46,ROW=0.2,MAXR=12
+function drawContainers(pptx:any,slide:any,cards:PlanCard[],x:number,y0:number,w:number,bottom:number,MAXR=12){
+  const G=CG,subs=subsFor(w),cw=(w-G*(subs-1))/subs
+  const HEAD=CHEAD,ROW=CROW
   const hOf=(cd:PlanCard)=>{const k=cd.children?.length||0;return HEAD+(k?Math.min(k,MAXR)*ROW+(k>MAXR?ROW:0)+0.05:0)}
-  const ys=Array(subs).fill(y0);let skipped=0
+  const ys=Array(subs).fill(y0);let skipped=0,col=0
+  const limit=MAXR>=999?bottom+0.01:bottom-0.24
   for(const cd of cards){
-    const h=hOf(cd);let col=0;for(let i=1;i<subs;i++)if(ys[i]<ys[col])col=i
-    if(ys[col]+h>bottom-0.24&&ys[col]>y0){skipped++;continue}
+    const h=hOf(cd)
+    // reading order: down this sub-column, then the next one to the right
+    while(ys[col]+h>limit&&ys[col]>y0&&col<subs-1)col++
+    if(ys[col]+h>limit&&ys[col]>y0){skipped++;continue}
     const cx=x+col*(cw+G),cy=ys[col],K=KIND[cd.kind]
     slide.addShape(pptx.ShapeType.rect,{x:cx,y:cy,w:cw,h,fill:{color:K.fill},line:{color:K.line,width:0.75}})
     slide.addShape(pptx.ShapeType.rect,{x:cx,y:cy,w:0.06,h,fill:{color:K.bar},line:{color:K.bar,width:0}})
@@ -241,4 +245,50 @@ function drawContainers(pptx:any,slide:any,cards:PlanCard[],x:number,y0:number,w
     ys[col]+=h+G
   }
   if(skipped)slide.addText(`+ ${skipped} more not shown`,{x,y:bottom-0.22,w,h:0.22,fontSize:9,italic:true,bold:true,color:MUTED,margin:0})
+}
+
+// ── Release slides that show everything: two months a slide, or one busy month a slide
+// (continued over more slides if needed), with every card and every row in it ──
+const CG=0.06,CHEAD=0.46,CROW=0.2
+const subsFor=(w:number)=>Math.max(1,Math.min(3,Math.floor((w+CG)/2.7)))
+const B_X0=0.75,B_X1=13.08,B_GAP=0.1,B_TOP=1.15,B_BOTTOM=6.98
+const headH=(c:PlanColumn)=>0.52+(c.meta||[]).length*0.17+(c.progress?0.32:0)
+const msH=(c:PlanColumn,iw:number)=>{const n=c.milestones.length;if(!n)return 0;const mc=iw>=4.6?2:1,rows=Math.min(Math.ceil(n/mc),mc===2?4:6),more=n-rows*mc;return 0.24+rows*0.19+(more>0?0.19:0)+0.04+0.08}
+// Room for cards in a column of width w
+const cardArea=(c:PlanColumn,w:number,first=true)=>B_BOTTOM-0.06-(B_TOP+headH(c)+0.07+(first?msH(c,w-0.14):0))
+// Split cards into pages that each fit; a card too tall for a page continues as "(cont.)"
+export function packCards(cards:PlanCard[],w:number,H:number,H2=H):PlanCard[][]{
+  const subs=subsFor(w),pages:PlanCard[][]=[];let page:PlanCard[]=[],col=0,y=0,cap=H
+  const hOf=(cd:PlanCard)=>CHEAD+((cd.children?.length||0)?(cd.children!.length*CROW+0.05):0)
+  const cont=(cd:PlanCard)=>cd.name.replace(/ \(cont\.\)$/,'')+' (cont.)'
+  const advance=()=>{if(col<subs-1){col++;y=0}else{pages.push(page);page=[];col=0;y=0;cap=H2}}
+  const queue=[...cards]
+  while(queue.length){
+    const cd=queue.shift()!,h=hOf(cd),room=cap-y
+    if(h<=room){page.push(cd);y+=h+CG;continue}
+    const kids=cd.children||[],fitRows=Math.floor((room-CHEAD-0.05)/CROW)
+    // Split a long card here if a fair share of it fits; otherwise carry it to the next sub-column
+    if(kids.length&&(fitRows>=3||(y===0&&fitRows>=1))){
+      page.push({...cd,children:kids.slice(0,fitRows)});queue.unshift({...cd,name:cont(cd),children:kids.slice(fitRows)});advance();continue
+    }
+    if(y===0&&!kids.length){page.push(cd);advance();continue} // taller than a column on its own: place it anyway
+    advance();queue.unshift(cd)
+  }
+  if(page.length||!pages.length)pages.push(page)
+  return pages
+}
+// Lay columns out two to a slide; a column that doesn't fit half a slide gets slides of its own
+export function paginateColumns(cols:PlanColumn[]):PlanColumn[][]{
+  const full=B_X1-B_X0,half=(full-B_GAP)/2
+  const slides:PlanColumn[][]=[];let pending:PlanColumn|null=null
+  for(const c of cols){
+    if(!c.cards.length&&!c.milestones.length)continue // nothing in it (e.g. a month with no release)
+    const h=packCards(c.cards,half-0.14,cardArea(c,half))
+    if(h.length===1){if(pending){slides.push([pending,c]);pending=null}else pending=c;continue}
+    if(pending){slides.push([pending]);pending=null}
+    const f=packCards(c.cards,full-0.14,cardArea(c,full),cardArea(c,full,false))
+    f.forEach((cards,i)=>slides.push([{...c,title:f.length>1?`${c.title} (${i+1} of ${f.length})`:c.title,cards,milestones:i?[]:c.milestones}]))
+  }
+  if(pending)slides.push([pending])
+  return slides
 }

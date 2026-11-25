@@ -6,7 +6,7 @@
 //   schedule) → not planned (initiatives with no dates, epics and stories with no quarter).
 import { teamShort } from './Teams'
 import { quarterMonths, quarterKey, quarterLabel, fyQuarterOf, fmtMonthKey, releaseOf, releaseText, monthKeyOf } from './Releases'
-import { drawBoard, drawProgress, type PlanColumn, type PlanCard, type PlanChild, type PlanProgress } from './PlanningPptx'
+import { drawBoard, drawProgress, paginateColumns, type PlanColumn, type PlanCard, type PlanChild, type PlanProgress } from './PlanningPptx'
 import { addStrategySlides } from './StrategyPptx'
 import { typeColor, typeName } from './MilestoneTypes'
 import { workTypeOfProject, CLOSED_STATUSES, STATUS_COLOR, sevOf } from './WorkTypes'
@@ -171,12 +171,15 @@ export function planModel(inp:PlanInput){
     return[...initCards,...tdCards,...looseCards,...alone]
   }
   const quarterCols=buildQuarterCols()
-  const releaseSlides=quarters.map(qi=>{
+  // Release slides show everything: per quarter, what's not in a release yet, then each
+  // month, two to a slide (a busy month gets slides of its own)
+  const releaseSlides=quarters.flatMap(qi=>{
     const noRel=planned.filter(en=>!en.x.release_month&&en.qk===qi.qk)
-    const cols:PlanColumn[]=[...(noRel.length?[{title:'Not in a release yet',sub:`Planned in ${qi.label}`,meta:[`${noRel.length} · ${pts(noRel)} pts`],milestones:[],cards:noRel.map(en=>toCard(en))}]:[]),
+    const cols:PlanColumn[]=[...(noRel.length?[{title:'Not in a release yet',sub:`Planned in ${qi.label}`,meta:[`${noRel.length} · ${pts(noRel)} pts`],milestones:[],
+        cards:containers(noRel,[],(e:any)=>storiesOf(e).filter((i:any)=>live(i)&&shown('item',i)&&!effRel(i)&&(qkOf('item',i)||qkOf('epic',e))===qi.qk),null,{quarter:true})}]:[]),
       ...qi.months.filter(k=>relCols.includes(k)).map(monthCol)]
-    return{label:`${qi.label} (${fmtMonthKey(qi.months[0]).slice(0,3)}–${fmtMonthKey(qi.months[2])})`,cols}
-  }).filter(r=>r.cols.some(c=>c.cards.length||c.milestones.length))
+    return paginateColumns(cols).map(sc=>({label:`${qi.label} · ${sc.map(c=>c.title).join(' & ')}`,cols:sc,opts:{equal:true,contain:true}}))
+  })
 
   // Sprints, one slide per release: each team's sprints in the release window (after the
   // previous release, up to this one) and what's planned for the release but not in a sprint
@@ -449,7 +452,7 @@ export async function exportFullPlanPptx({strategy,strategyCtx,plan,sections,fil
   }
   if(sections.releases){
     sectionSlide(pptx,++n,'Release plan','What ships in each monthly release, one slide per quarter, and what is planned but not in a release yet.')
-    if(m.releaseSlides.length)m.releaseSlides.forEach(r=>drawBoard(pptx,'Release plan',`${r.label} · ${sub}`,r.cols))
+    if(m.releaseSlides.length)m.releaseSlides.forEach(r=>drawBoard(pptx,'Release plan',`${r.label} · ${sub}`,r.cols,r.opts))
     else drawBoard(pptx,'Release plan',sub,[])
   }
   if(sections.calendar){
