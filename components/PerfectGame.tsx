@@ -2484,6 +2484,14 @@ const sorted=items.filter(i=>!isItemDone(i)).sort((a,b)=>{
     setItems((p:any[])=>p.map(f));setEpics?.((p:any[])=>p.map(f));setProjects((p:any[])=>p.map(f));if(ftag===name)setFtag('All')
   }
   const tagProps={uses:tagUses,onRenamed:tagRenamed,onDeleted:tagDeleted}
+  // What a story inherits when its own quarter / release is empty: the quarter of its Tech
+  // Debt initiative (or its epic), and its epic's release
+  function inheritedPlan(it:any){
+    const ep=it.epic_id?(epics as any[]).find((e:any)=>e.id===it.epic_id):null
+    const bucket=projects.find((p:any)=>p.name===it.parent_project&&p.sustain_quarter)
+    const q=bucket?.sustain_quarter||ep?.plan_quarter||null
+    return{q,qFrom:bucket?.sustain_quarter?'initiative':'epic',rel:ep?.release_month||null,epic:ep?.name||''}
+  }
   const preSeg=sorted.filter(item=>{
     if(ft!=='All'&&item.team!==ft) return false
     if(fp!=='All'&&item.priority!==fp) return false
@@ -3063,7 +3071,9 @@ const sorted=items.filter(i=>!isItemDone(i)).sort((a,b)=>{
                       :<span style={{fontSize:11,color:'#3A4A5E'}}>—</span>}</InlineSelect>})()}</td>,
                       work_type:<td style={TD}><InlineSelect value={item.work_type||''} title="Work type: automatic follows the initiative or request type"
                       options={[{value:'',label:`Automatic (${WT_LABEL[wtOf({...item,work_type:null}) as 'new']})`},...WORK_TYPE_KEYS.map(k=>({value:k,label:WT_LABEL[k]}))]} onChange={v=>upd(item.id,'work_type',v)}><WorkTag wt={wtOf(item)}/></InlineSelect></td>,
-                      release_month:<td style={TD}><InlineSelect value={item.release_month||''} options={releaseOptions(releases,item.release_month)} onChange={v=>upd(item.id,'release_month',v)}>{item.release_month?<span title={`${fmtMonthKey(item.release_month)} release · ${releaseText(releases,item.release_month)}`} style={{fontSize:10,fontWeight:700,color:releaseOf(releases,item.release_month)?.no_release?'#D4820A':'#5DADE2',border:'1px solid rgba(93,173,226,0.4)',borderRadius:4,padding:'1px 6px',whiteSpace:'nowrap' as const}}>📦 {fmtMonthKey(item.release_month)}</span>:<span style={{fontSize:11,color:'#3A4A5E'}}>—</span>}</InlineSelect></td>,
+                      release_month:<td style={TD}><InlineSelect value={item.release_month||''} options={releaseOptions(releases,item.release_month)} onChange={v=>upd(item.id,'release_month',v)}>{item.release_month?<span title={`${fmtMonthKey(item.release_month)} release · ${releaseText(releases,item.release_month)}`} style={{fontSize:10,fontWeight:700,color:releaseOf(releases,item.release_month)?.no_release?'#D4820A':'#5DADE2',border:'1px solid rgba(93,173,226,0.4)',borderRadius:4,padding:'1px 6px',whiteSpace:'nowrap' as const}}>📦 {fmtMonthKey(item.release_month)}</span>:(()=>{const inh=inheritedPlan(item);return inh.rel
+                        ?<span title={`No release of its own: ships in ${fmtMonthKey(inh.rel)} with its epic, ${inh.epic}. Click to set one.`} style={{fontSize:10,fontWeight:700,color:'#5DADE2',opacity:0.75,border:'1px dashed rgba(93,173,226,0.5)',borderRadius:4,padding:'1px 6px',whiteSpace:'nowrap' as const}}>📦 {fmtMonthKey(inh.rel)} · epic</span>
+                        :<span style={{fontSize:11,color:'#3A4A5E'}}>—</span>})()}</InlineSelect></td>,
                       priority:<td style={TD}><InlineSelect value={item.priority} options={PRIORITIES} onChange={v=>v&&upd(item.id,'priority',v)}><span style={{background:pclr.bg,color:pclr.text,borderRadius:4,padding:'2px 8px',fontSize:10,fontWeight:700,whiteSpace:'nowrap' as const}}>{item.priority}</span></InlineSelect></td>,
                       committed_priority:<td style={{...TD,textAlign:'center' as const,padding:'0 4px'}} onClick={e=>e.stopPropagation()}>
                       {(item.priority==='P1'||item.priority==='P2')
@@ -3185,18 +3195,27 @@ const sorted=items.filter(i=>!isItemDone(i)).sort((a,b)=>{
                   </div>
                 )
               })()}
-              <div style={{display:'flex',gap:8}}>
-                <div style={{flex:1}} title="The quarter it's worked in. Plan on Backlog › Planning to also file tech debt under the quarter's Tech Debt initiative.">
-                  <div style={{fontSize:11,color:'#7A8FA6',marginBottom:4,letterSpacing:0.5}}>QUARTER</div>
-                  <QuarterSelect value={selected.plan_quarter} onChange={(v:any)=>upd(selected.id,'plan_quarter',v)}
-                    style={{width:'100%',background:'#1E3048',color:'#F4F6F8',border:'1px solid #243447',borderRadius:6,padding:'7px 10px',fontSize:13,cursor:'pointer'}}/>
-                </div>
-                <div style={{flex:1}}>
-                  <div style={{fontSize:11,color:'#7A8FA6',marginBottom:4,letterSpacing:0.5}}>RELEASE</div>
-                  <ReleaseSelect value={selected.release_month} releases={releases} onChange={(v:any)=>upd(selected.id,'release_month',v)}
-                    style={{width:'100%',background:'#1E3048',color:'#F4F6F8',border:'1px solid #243447',borderRadius:6,padding:'7px 10px',fontSize:13,cursor:'pointer'}}/>
-                </div>
-              </div>
+              {(()=>{
+                // A story with no quarter / release of its own is worked in its Tech Debt
+                // initiative's quarter (or its epic's) and ships with its epic: say so
+                const inh=inheritedPlan(selected)
+                const sel={width:'100%',background:'#1E3048',color:'#F4F6F8',border:'1px solid #243447',borderRadius:6,padding:'7px 10px',fontSize:13,cursor:'pointer'}
+                const note=(t:string)=><div style={{fontSize:10.5,color:'#5DADE2',marginTop:4,lineHeight:1.35}}>↳ {t}</div>
+                return(
+                <div style={{display:'flex',gap:8}}>
+                  <div style={{flex:1}} title="The quarter it's worked in. Plan on Backlog › Planning to also file tech debt under the quarter's Tech Debt initiative.">
+                    <div style={{fontSize:11,color:'#7A8FA6',marginBottom:4,letterSpacing:0.5}}>QUARTER</div>
+                    <QuarterSelect value={selected.plan_quarter} onChange={(v:any)=>upd(selected.id,'plan_quarter',v)} style={{...sel,color:!selected.plan_quarter&&inh.q?'#5DADE2':sel.color}}
+                      emptyLabel={!selected.plan_quarter&&inh.q?`↳ ${inh.q.replace('-',' ')}`:undefined}/>
+                    {!selected.plan_quarter&&inh.q&&note(`Worked in ${inh.q.replace('-',' ')}: from ${inh.qFrom==='initiative'?`its initiative, ${selected.parent_project}`:`its epic, ${inh.epic}`}`)}
+                  </div>
+                  <div style={{flex:1}}>
+                    <div style={{fontSize:11,color:'#7A8FA6',marginBottom:4,letterSpacing:0.5}}>RELEASE</div>
+                    <ReleaseSelect value={selected.release_month} releases={releases} onChange={(v:any)=>upd(selected.id,'release_month',v)} style={{...sel,color:!selected.release_month&&inh.rel?'#5DADE2':sel.color}}
+                      emptyLabel={!selected.release_month&&inh.rel?`↳ ${fmtMonthKey(inh.rel)}`:undefined}/>
+                    {!selected.release_month&&inh.rel&&note(`Ships in ${fmtMonthKey(inh.rel)} with its epic, ${inh.epic}. Pick a release to ship it separately.`)}
+                  </div>
+                </div>)})()}
               {space==='work'&&(()=>{
                 const proj=projects.find((p:any)=>p.name===selected.parent_project)
                 const auto=proj?workTypeOfProject(proj):(SUSTAIN_REQUEST_TYPES.includes(selected.request_type)?'sustain':'new')

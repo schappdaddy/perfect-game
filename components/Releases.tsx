@@ -66,22 +66,22 @@ export function releaseOptions(releases:any[],value?:string|null){
 }
 // Pick a monthly release for an initiative, epic or story
 // A quarter picker for epics and stories (plan_quarter): last quarter through two years on
-export function QuarterSelect({value,onChange,style}:any){
+export function QuarterSelect({value,onChange,style,emptyLabel}:any){
   const c=fyQuarterOf(monthKeyOf(new Date()))
   const opts:any[]=[];for(let n=-1;n<8;n++){const{fy,q}=nextQ(c.fy,c.q,n);opts.push(quarterKey(fy,q))}
   if(value&&!opts.includes(value))opts.unshift(value)
   const lbl=(k:string)=>k.replace('-',' ')
   return <select value={value||''} onChange={e=>onChange(e.target.value||null)} style={style}>
-    <option value="">Not planned</option>{opts.map(k=><option key={k} value={k}>{lbl(k)}</option>)}
+    <option value="">{emptyLabel||'Not planned'}</option>{opts.map(k=><option key={k} value={k}>{lbl(k)}</option>)}
   </select>
 }
-export function ReleaseSelect({value,onChange,releases,style}:any){
+export function ReleaseSelect({value,onChange,releases,style,emptyLabel}:any){
   const now=monthKeyOf(new Date())
   const keys:string[]=[];for(let i=-3;i<=18;i++)keys.push(addMonths(now,i))
   if(value&&!keys.includes(value))keys.unshift(value)
   return(
     <select value={value||''} onChange={e=>onChange(e.target.value||null)} style={style}>
-      <option value="">No release</option>
+      <option value="">{emptyLabel||'No release'}</option>
       {keys.map(k=>{const r=releaseOf(releases,k);return(
         <option key={k} value={k} disabled={!!r?.no_release&&k!==value}>{fmtMonthKey(k)} · {releaseText(releases,k)}</option>
       )})}
