@@ -28,8 +28,9 @@ const trunc=(text:string,w:number,fs:number,bold=false)=>{
 // Width of a short all-caps label at a size (Calibri capitals run wider)
 const capsW=(t:string,fs:number)=>t.length*fs*0.66/72+0.08
 
-export type PlanChild={kind:'epic'|'story'|'bug',name:string,ref?:string,status?:string,note?:string}
-export type PlanCard={children?:PlanChild[],kind:'initiative'|'epic'|'story'|'bug',name:string,ref?:string,team?:string|null,wt?:string,home?:string|null,release?:string|null,quarter?:string|null,priority?:string|null,status?:string|null,flag?:string|null,prd?:string|null,design?:string|null}
+// n / done / release / kids are extra detail for the app (the Teams tab); the slides ignore them
+export type PlanChild={kind:'epic'|'story'|'bug',name:string,ref?:string,status?:string,note?:string,n?:number,done?:number,release?:string|null,priority?:string|null,kids?:PlanChild[]}
+export type PlanCard={children?:PlanChild[],pid?:string,n?:number,done?:number,kind:'initiative'|'epic'|'story'|'bug',name:string,ref?:string,team?:string|null,wt?:string,home?:string|null,release?:string|null,quarter?:string|null,priority?:string|null,status?:string|null,flag?:string|null,prd?:string|null,design?:string|null}
 export type PlanMilestone={date:string,name:string,type:string,color?:string|null,team?:string|null,done?:boolean}
 export type PlanProgress={n:number,done:number,deployed:number,ready:number,fly:number,pct:number,days:number|null,risk:'red'|'amber'|'green'|'none'}
 export type PlanColumn={title:string,sub?:string,meta?:string[],milestones:PlanMilestone[],cards:PlanCard[],blocked?:boolean,now?:boolean,slimmable?:boolean,progress?:PlanProgress|null}

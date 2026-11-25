@@ -4,7 +4,7 @@ import { useMilestoneTypes } from './MilestoneTypes'
 import { fyQuarterOf, monthKeyOf, quarterLabel, fmtMonthKey, releaseOf } from './Releases'
 import { planModel } from './PlanDeck'
 import { FullPlanDialog } from './FullPlanExport'
-import { workTypeOfProject, WT_LABEL, CLOSED_STATUSES } from './WorkTypes'
+import { workTypeOfProject, WT_LABEL, CLOSED_STATUSES, STATUS_COLOR } from './WorkTypes'
 import { ReadinessPips } from './Readiness'
 
 // The Teams tab: a briefing page to prep for each team, top to bottom: the team at a glance,
@@ -18,6 +18,23 @@ const KIND:any={initiative:{c:'#C8973A',bg:'rgba(200,151,58,0.12)',l:'INITIATIVE
 const nextQ=(fy:number,q:number,n:number)=>{q+=n;while(q>4){q-=4;fy++}while(q<1){q+=4;fy--}return{fy,q}}
 const pad=(n:number)=>String(n).padStart(2,'0')
 const fmtDay=(iso:string)=>{const[,m,d]=iso.split('-').map(Number);return `${MONTHS[m-1]} ${d}`}
+const KILLED=['Killed','Will Not Implement',"Won't Do"]
+const isDone=(st:any)=>CLOSED_STATUSES.includes(st==='Hypercare'?'Done':st)||st==='Ready to Release'
+// A status as a coloured pill (Jira colours), as on the Releases board
+function Pill({s,size=9}:{s?:string|null,size?:number}){
+  if(!s)return null
+  const c=s==='GO-LIVE'?'#C8973A':STATUS_COLOR[s]||'#7A8FA6'
+  return <span title={`Status: ${s}`} style={{fontSize:size,fontWeight:800,color:s==='GO-LIVE'?'#0D1B2A':c,background:s==='GO-LIVE'?c:`${c}22`,border:`1px solid ${c}88`,borderRadius:8,padding:'0 6px',whiteSpace:'nowrap' as const,lineHeight:1.5,flexShrink:0}}>{s==='GO-LIVE'?'◈ GO-LIVE':s}</span>
+}
+// Stories done (or ready to release) of all, as a small bar
+function Done({n,done,w=46}:{n?:number,done?:number,w?:number}){
+  if(!n)return null
+  const pct=Math.round((done||0)/n*100)
+  return <span title={`${done} of ${n} stories and bugs done or ready to release (${pct}%)`} style={{display:'inline-flex',alignItems:'center',gap:4,flexShrink:0}}>
+    <span style={{width:w,height:4,borderRadius:2,background:'#243447',overflow:'hidden',display:'inline-block'}}><span style={{display:'block',height:'100%',width:`${pct}%`,background:pct===100?'#27AE60':'#5DADE2'}}/></span>
+    <span style={{fontSize:9,color:'#8FA6BC',fontVariantNumeric:'tabular-nums'}}>{done}/{n}</span></span>
+}
+const CH:any={epic:{m:'◆',c:'#E07B2A'},story:{m:'▪',c:'#5DADE2'},bug:{m:'●',c:'#E74C3C'}}
 
 export default function TeamPrep(props:any){
   const{items,epics,projects,releases,milestones,sprints,people,roles,projectRoles,teams,workTypeOf,epicWorkTypeOf,onOpenProject}=props
@@ -27,6 +44,12 @@ export default function TeamPrep(props:any){
   const setTeam=(v:string)=>{setTeamS(v);try{localStorage.setItem('pg_team_prep',v)}catch{}}
   const [startN,setStartN]=useState(0)
   const [exportOpen,setExportOpen]=useState(false)
+  // Show each epic's stories on the boards, and the epics under each initiative on the roadmap
+  const [allStories,setAllStoriesS]=useState<boolean>(()=>{try{return localStorage.getItem('pg_team_prep_stories')==='1'}catch{return false}})
+  const setAllStories=(v:boolean)=>{setAllStoriesS(v);setOpenEp({});try{localStorage.setItem('pg_team_prep_stories',v?'1':'0')}catch{}}
+  const [openEp,setOpenEp]=useState<Record<string,boolean>>({})
+  const [showEpics,setShowEpicsS]=useState<boolean>(()=>{try{return localStorage.getItem('pg_team_prep_epics')!=='0'}catch{return true}})
+  const setShowEpics=(v:boolean)=>{setShowEpicsS(v);try{localStorage.setItem('pg_team_prep_epics',v?'1':'0')}catch{}}
   const start=nextQ(cur.fy,cur.q,startN)
   const m=planModel({items,epics,projects,releases,milestones,mTypes,sprints,start,team,wt:'all',teams,workTypeOf,epicWorkTypeOf})
   const months=m.quarters.flatMap((q:any)=>q.months)
@@ -60,7 +83,7 @@ export default function TeamPrep(props:any){
   const roadmap=(
     <div style={box}>
       {H('ROADMAP',`${inits.length} initiative${inits.length!==1?'s':''} · ${quarterLabel(m.quarters[0].fy,m.quarters[0].q)} – ${quarterLabel(m.quarters[3].fy,m.quarters[3].q)}`)}
-      <div style={{display:'grid',gridTemplateColumns:'220px 1fr',fontSize:11}}>
+      <div style={{display:'grid',gridTemplateColumns:'290px 1fr',fontSize:11}}>
         <div/>
         <div style={{display:'grid',gridTemplateColumns:'repeat(12,1fr)',borderBottom:'1px solid #243447',marginBottom:4}}>
           {months.map((k:string,i:number)=>{const fr=releaseOf(releases,k)?.no_release;return(
@@ -72,15 +95,44 @@ export default function TeamPrep(props:any){
           const ships=[p.release_month,...epics.filter((x:any)=>x.project_id===p.id).map((x:any)=>x.release_month),...items.filter((x:any)=>x.parent_project===p.name).map((x:any)=>x.release_month)].filter((k:any)=>k&&months.includes(k)).sort()
           const thr=ships[ships.length-1]
           const wt=workTypeOfProject(p)
+          // Its epics, with their stories and bugs, and the stories with no epic
+          const pe=epics.filter((x:any)=>x.project_id===p.id&&!KILLED.includes(x.status)).map((e:any)=>{
+            const ss=items.filter((i:any)=>i.epic_id===e.id&&!KILLED.includes(i.status))
+            const rel=[...new Set([...ss.map((i:any)=>i.release_month||e.release_month),e.release_month].filter(Boolean))].sort() as string[]
+            return{e,ss,rel,done:ss.filter((i:any)=>isDone(i.status)).length}
+          }).sort((a:any,b:any)=>(a.e.plan_quarter||'~').localeCompare(b.e.plan_quarter||'~')||(a.rel[0]||'~').localeCompare(b.rel[0]||'~')||a.e.name.localeCompare(b.e.name))
+          const loose=items.filter((i:any)=>i.parent_project===p.name&&!i.epic_id&&!KILLED.includes(i.status))
+          const all=[...pe.flatMap((x:any)=>x.ss),...loose],allDone=all.filter((i:any)=>isDone(i.status)).length
+          const qBand=(qk:string|null)=>{const qi=m.quarters.findIndex((q:any)=>q.qk===qk);return qi<0?null:{left:qi*25,width:25}}
           return(<div key={p.id} style={{display:'contents'}}>
-            <div onClick={()=>onOpenProject?.(p)} title="Open this initiative" style={{padding:'6px 8px 6px 0',cursor:'pointer',overflow:'hidden',whiteSpace:'nowrap' as const,textOverflow:'ellipsis',color:'#F4F6F8',fontWeight:700,borderBottom:'1px solid #1C2C3F'}}>
-              <span style={{color:'#C8973A'}}>◈</span> {p.name} <span style={{color:'#7A8FA6',fontWeight:400,fontSize:10}}>{wt!=='new'?(WT_LABEL as any)[wt]:''}</span></div>
-            <div style={{position:'relative',height:30,borderBottom:'1px solid #1C2C3F',background:'repeating-linear-gradient(90deg,transparent 0,transparent calc(25% - 1px),#243447 calc(25% - 1px),#243447 25%)'}}>
-              {on&&<div title={`${s} → ${p.ongoing?'ongoing':p.end_date}`} style={{position:'absolute',top:7,height:16,left:`${pos(s<winStart?winStart:s)}%`,width:`${Math.max(1,pos(e>winEnd?winEnd:e)-pos(s<winStart?winStart:s))}%`,background:p.planning_state==='proposed'?'rgba(224,123,42,0.35)':'rgba(39,174,96,0.75)',border:p.ongoing?'1px dashed rgba(255,255,255,0.4)':undefined,borderRadius:5}}/>}
-              {!s&&<span style={{position:'absolute',left:6,top:8,fontSize:10,color:'#5B6B7E',fontStyle:'italic'}}>No dates yet</span>}
+            <div onClick={()=>onOpenProject?.(p)} title="Open this initiative" style={{padding:'5px 8px 5px 0',cursor:'pointer',borderBottom:'1px solid #1C2C3F',minWidth:0}}>
+              <div style={{overflow:'hidden',whiteSpace:'nowrap' as const,textOverflow:'ellipsis',color:'#F4F6F8',fontWeight:700}}><span style={{color:'#C8973A'}}>◈</span> {p.name} <span style={{color:'#7A8FA6',fontWeight:400,fontSize:10}}>{wt!=='new'?(WT_LABEL as any)[wt]:''}</span></div>
+              <div style={{display:'flex',alignItems:'center',gap:6,marginTop:2}}>
+                <Pill s={p.status} size={8.5}/>
+                <span style={{fontSize:9.5,color:'#7A8FA6'}}>{pe.length} epic{pe.length!==1?'s':''}{loose.length?` · ${loose.length} without an epic`:''}</span>
+                <Done n={all.length} done={allDone}/>
+              </div>
+            </div>
+            <div style={{position:'relative',height:42,borderBottom:'1px solid #1C2C3F',background:'repeating-linear-gradient(90deg,transparent 0,transparent calc(25% - 1px),#243447 calc(25% - 1px),#243447 25%)'}}>
+              {on&&<div title={`${s} → ${p.ongoing?'ongoing':p.end_date}`} style={{position:'absolute',top:13,height:16,left:`${pos(s<winStart?winStart:s)}%`,width:`${Math.max(1,pos(e>winEnd?winEnd:e)-pos(s<winStart?winStart:s))}%`,background:p.planning_state==='proposed'?'rgba(224,123,42,0.35)':'rgba(39,174,96,0.75)',border:p.ongoing?'1px dashed rgba(255,255,255,0.4)':undefined,borderRadius:5}}/>}
+              {!s&&<span style={{position:'absolute',left:6,top:14,fontSize:10,color:'#5B6B7E',fontStyle:'italic'}}>No dates yet</span>}
               {thr&&thr!==p.release_month&&<span title={`Its work ships through the ${fmtMonthKey(thr)} release`} style={{position:'absolute',top:4,left:`${pos(relDate(thr))}%`,transform:'translateX(-50%)',fontSize:9,fontWeight:800,color:'#5DADE2',border:'1px dashed #5DADE2',background:'#0D1B2A',borderRadius:8,padding:'0 5px',whiteSpace:'nowrap' as const}}>📦 through {MONTHS[Number(thr.split('-')[1])-1]}</span>}
               {p.release_month&&months.includes(p.release_month)&&<span title={`Goes live in the ${fmtMonthKey(p.release_month)} release`} style={{position:'absolute',top:4,left:`${pos(relDate(p.release_month))}%`,transform:'translateX(-50%)',fontSize:9,fontWeight:800,color:'#0D1B2A',background:'#C8973A',borderRadius:8,padding:'0 5px',whiteSpace:'nowrap' as const}}>◈ go-live {MONTHS[Number(p.release_month.split('-')[1])-1]}</span>}
             </div>
+            {showEpics&&pe.map(({e,ss,rel,done}:any)=>{const b=qBand(e.plan_quarter);return(<div key={e.id} style={{display:'contents'}}>
+              <div title={e.name} style={{padding:'3px 8px 3px 16px',borderBottom:'1px solid #16263A',display:'flex',alignItems:'center',gap:5,minWidth:0,background:'rgba(224,123,42,0.03)'}}>
+                <span style={{color:'#E07B2A',fontSize:9,flexShrink:0}}>◆</span>
+                <span style={{flex:1,minWidth:0,overflow:'hidden',whiteSpace:'nowrap' as const,textOverflow:'ellipsis',color:'#C8D4E0',fontSize:10.5}}>{e.name}</span>
+                <Pill s={e.status} size={8}/>
+                {ss.length>0&&<Done n={ss.length} done={done} w={30}/>}
+              </div>
+              <div style={{position:'relative',height:22,borderBottom:'1px solid #16263A',background:'repeating-linear-gradient(90deg,rgba(224,123,42,0.03) 0,rgba(224,123,42,0.03) calc(25% - 1px),#1C2C3F calc(25% - 1px),#1C2C3F 25%)'}}>
+                {b&&<div title={`Planned in ${String(e.plan_quarter).replace('-',' ')}`} style={{position:'absolute',top:8,height:6,left:`${b.left}%`,width:`${b.width}%`,background:isDone(e.status)?'rgba(39,174,96,0.45)':'rgba(224,123,42,0.35)',borderRadius:3}}/>}
+                {rel.filter((k:string)=>months.includes(k)).map((k:string,ix:number,arr:string[])=>(
+                  <span key={k} title={`${ss.filter((i:any)=>(i.release_month||e.release_month)===k).length} of its stories ship in the ${fmtMonthKey(k)} release${arr.length>1?` (part ${ix+1} of ${arr.length})`:''}`} style={{position:'absolute',top:3,left:`${pos(relDate(k))}%`,transform:'translateX(-50%)',fontSize:8.5,fontWeight:800,color:'#5DADE2',background:'#0D1B2A',border:'1px solid #5DADE2',borderRadius:7,padding:'0 4px',whiteSpace:'nowrap' as const}}>📦 {MONTHS[Number(k.split('-')[1])-1]}</span>))}
+                {!b&&!rel.some((k:string)=>months.includes(k))&&<span style={{position:'absolute',left:6,top:4,fontSize:9,color:'#5B6B7E',fontStyle:'italic'}}>{e.plan_quarter||rel.length?'outside these quarters':'not planned yet'}</span>}
+              </div>
+            </div>)})}
           </div>)
         })}
         {!inits.length&&<div style={{gridColumn:'1 / -1',fontSize:11,color:'#7A8FA6',fontStyle:'italic',padding:6}}>No open initiatives for {team}.</div>}
@@ -89,18 +141,62 @@ export default function TeamPrep(props:any){
   )
 
   // ── A board of columns (quarters, months or sprints), cards grouped by initiative ──
-  const board=(cols:any[],empty='Nothing here.')=>(
+  // A release's progress, as on the Releases board: % done and deployed / ready / in flight
+  const progress=(r:any)=>{
+    if(!r?.n)return null
+    const clr=r.risk==='red'?'#E74C3C':r.risk==='amber'?'#E8B95A':r.risk==='green'?'#27AE60':'#C8D4E0',late=r.days!=null&&r.days<0&&r.pct<100
+    return(
+      <div title={`${r.done} of ${r.n} done (${r.pct}%): ${r.deployed} deployed, ${r.ready} ready to release · ${r.fly} in flight · ${r.n-r.done-r.fly} not started`} style={{marginTop:5}}>
+        <div style={{display:'flex',alignItems:'baseline',gap:6}}>
+          <span style={{fontSize:14,fontWeight:900,color:clr,fontVariantNumeric:'tabular-nums'}}>{r.pct}%</span>
+          <span style={{fontSize:9.5,color:'#7A8FA6'}}>done · {r.done}/{r.n}{r.days!=null?` · ${late?`${-r.days}d late`:`${r.days}d to go`}`:''}</span>
+        </div>
+        <div style={{display:'flex',height:5,borderRadius:3,overflow:'hidden',background:'#243447',marginTop:3}}>
+          <div style={{width:`${r.deployed/r.n*100}%`,background:'#27AE60'}}/><div style={{width:`${r.ready/r.n*100}%`,background:'#7DCEA0'}}/><div style={{width:`${r.fly/r.n*100}%`,background:'#5DADE2'}}/>
+        </div>
+      </div>)
+  }
+  // A story or bug inside a card
+  const kidRow=(ch:any,key:string,indent=0)=>(
+    <div key={key} style={{display:'flex',alignItems:'center',gap:5,fontSize:10.5,padding:'1px 0',paddingLeft:indent,opacity:KILLED.includes(ch.status)?0.5:1}}>
+      <span style={{color:CH[ch.kind].c,fontSize:9,flexShrink:0}}>{CH[ch.kind].m}</span>
+      {ch.ref&&<span style={{color:'#7A8FA6',fontFamily:'monospace',fontSize:9.5,flexShrink:0}}>{ch.ref}</span>}
+      <span style={{color:isDone(ch.status)?'#8FA6BC':'#E1E7EE',flex:1,minWidth:0,lineHeight:1.3,textDecoration:CLOSED_STATUSES.includes(ch.status)?'line-through':undefined}}>{ch.name}</span>
+      {ch.priority&&<span style={{fontSize:9,fontWeight:700,color:ch.priority==='P1'?'#E74C3C':ch.priority==='P2'?'#D4820A':'#7A8FA6',flexShrink:0}}>{ch.priority}</span>}
+      <Pill s={ch.status} size={8.5}/>
+    </div>)
+  // An epic inside an initiative card: status, release, stories done; click to list its stories
+  const epicRow=(ch:any,key:string)=>{
+    const open=openEp[key]??allStories,has=!!ch.kids?.length
+    return(
+      <div key={key} style={{borderTop:'1px solid rgba(255,255,255,0.05)',padding:'3px 0'}}>
+        <div onClick={has?()=>setOpenEp(o=>({...o,[key]:!open})):undefined} title={has?(open?'Hide its stories':'Show its stories'):undefined} style={{display:'flex',alignItems:'center',gap:5,fontSize:10.5,cursor:has?'pointer':'default'}}>
+          <span style={{color:'#7A8FA6',fontSize:8,width:7,flexShrink:0}}>{has?(open?'▾':'▸'):''}</span>
+          <span style={{color:CH.epic.c,fontSize:9,flexShrink:0}}>◆</span>
+          <span style={{color:'#F4F6F8',fontWeight:700,flex:1,minWidth:0,lineHeight:1.3}}>{ch.name}</span>
+          <Pill s={ch.status} size={8.5}/>
+        </div>
+        <div style={{display:'flex',alignItems:'center',gap:6,paddingLeft:19,marginTop:1,flexWrap:'wrap' as const}}>
+          {ch.release&&<span title="The release this epic ships in" style={{fontSize:9,color:'#5DADE2'}}>📦 {ch.release}</span>}
+          {ch.priority&&<span style={{fontSize:9,fontWeight:700,color:ch.priority==='P1'?'#E74C3C':ch.priority==='P2'?'#D4820A':'#7A8FA6'}}>{ch.priority}</span>}
+          {ch.n?<Done n={ch.n} done={ch.done}/>:<span style={{fontSize:9,color:'#5B6B7E',fontStyle:'italic'}}>no stories here</span>}
+        </div>
+        {open&&has&&<div style={{marginTop:2}}>{ch.kids.map((k:any,i:number)=>kidRow(k,`${key}-${i}`,19))}</div>}
+      </div>)
+  }
+  const board=(cols:any[],empty='Nothing here.',bk='b')=>(
     <div style={{display:'flex',gap:10,overflowX:'auto',paddingBottom:4}}>
       {cols.map((c:any,ix:number)=>{
         const groups=new Map<string,any[]>()
         for(const cd of c.cards){const g=cd.kind==='initiative'?'◈ Initiatives':cd.home||'No initiative';if(!groups.has(g))groups.set(g,[]);groups.get(g)!.push(cd)}
         const slim=c.blocked&&!c.cards.length&&!c.milestones.length
         return(
-          <div key={ix} style={{flex:slim?'0 0 70px':'1 0 240px',minWidth:slim?70:240,background:c.blocked?'repeating-linear-gradient(135deg,#0F1C2B,#0F1C2B 8px,#132234 8px,#132234 16px)':'#0F1C2B',border:`1px solid ${c.now?'#C8973A':'#243447'}`,borderRadius:8}}>
+          <div key={ix} style={{flex:slim?'0 0 70px':'1 0 270px',minWidth:slim?70:270,background:c.blocked?'repeating-linear-gradient(135deg,#0F1C2B,#0F1C2B 8px,#132234 8px,#132234 16px)':'#0F1C2B',border:`1px solid ${c.now?'#C8973A':'#243447'}`,borderRadius:8}}>
             <div style={{padding:'8px 10px',borderBottom:'1px solid #243447'}}>
               <div style={{fontSize:13,fontWeight:800,color:c.blocked?'#7A8FA6':'#F4F6F8'}}>{c.title}{c.now&&<span style={{fontSize:9,color:'#C8973A',marginLeft:6}}>NOW</span>}</div>
               {c.sub&&<div style={{fontSize:10.5,color:c.blocked?'#D4820A':'#E8B95A'}}>{c.sub}</div>}
               {!slim&&(c.meta||[]).map((t:string,i:number)=><div key={i} style={{fontSize:10,color:'#7A8FA6'}}>{t}</div>)}
+              {!slim&&progress(c.progress)}
             </div>
             {!slim&&<div style={{padding:8,display:'flex',flexDirection:'column',gap:6}}>
               {c.milestones.length>0&&<div style={{border:'1px solid rgba(176,124,224,0.5)',background:'rgba(176,124,224,0.07)',borderRadius:6,padding:'5px 7px'}}>
@@ -110,15 +206,27 @@ export default function TeamPrep(props:any){
               {[...groups.entries()].map(([g,cards])=>(
                 <div key={g} style={{display:'flex',flexDirection:'column',gap:4,borderLeft:`2px solid ${g.startsWith('◈')?'rgba(200,151,58,0.55)':'#3A4A5E'}`,paddingLeft:6}}>
                   {g!=='◈ Initiatives'&&<div style={{fontSize:10,fontWeight:800,color:g.startsWith('◈')?'#C8973A':'#8FA6BC',overflow:'hidden',whiteSpace:'nowrap' as const,textOverflow:'ellipsis'}}>{g.startsWith('Tech debt')?'🔧 ':''}{g}</div>}
-                  {cards.map((cd:any,i:number)=>{const K=KIND[cd.kind];return(
-                    <div key={i} style={{background:K.bg,borderLeft:`3px solid ${K.c}`,borderRadius:5,padding:'4px 7px'}}>
+                  {cards.map((cd:any,i:number)=>{const K=KIND[cd.kind],proj=cd.pid?projects.find((p:any)=>p.id===cd.pid):null,eps=(cd.children||[]).filter((x:any)=>x.kind==='epic'),sts=(cd.children||[]).filter((x:any)=>x.kind!=='epic');return(
+                    <div key={i} style={{background:K.bg,borderLeft:`3px solid ${K.c}`,borderRadius:5,padding:'5px 7px'}}>
                       <div style={{display:'flex',gap:5,alignItems:'center',fontSize:9,fontWeight:800,color:K.c,flexWrap:'wrap' as const}}>
                         <span>{K.l}</span>{cd.ref&&<span style={{color:'#7A8FA6',fontFamily:'monospace'}}>{cd.ref}</span>}
-                        <span style={{marginLeft:'auto',color:'#7A8FA6',fontWeight:700}}>{[cd.priority,cd.status,cd.release?`📦 ${cd.release}`:null,cd.quarter].filter(Boolean).join(' · ')}</span>
+                        <span style={{marginLeft:'auto',color:'#7A8FA6',fontWeight:700}}>{[cd.priority,cd.release?`📦 ${cd.release}`:null,cd.quarter].filter(Boolean).join(' · ')}</span>
                         <ReadinessPips kind="item" x={{prd_status:cd.prd,design_status:cd.design}} size={11}/>
                       </div>
-                      <div style={{fontSize:11.5,color:'#F4F6F8',fontWeight:cd.kind==='story'?400:700,lineHeight:1.3}}>{cd.name}</div>
+                      <div onClick={proj&&onOpenProject?()=>onOpenProject(proj):undefined} title={proj?'Open this initiative':undefined} style={{fontSize:cd.kind==='initiative'?12.5:11.5,color:'#F4F6F8',fontWeight:cd.kind==='story'||cd.kind==='bug'?400:800,lineHeight:1.3,cursor:proj?'pointer':'default'}}>{cd.name}</div>
+                      {!!(cd.status||cd.n)&&<div style={{display:'flex',alignItems:'center',gap:6,marginTop:2,flexWrap:'wrap' as const}}>
+                        <Pill s={cd.status}/>
+                        {cd.n>0&&<Done n={cd.n} done={cd.done} w={60}/>}
+                        {cd.kind==='initiative'&&eps.length>0&&<span style={{fontSize:9,color:'#7A8FA6'}}>{eps.length} epic{eps.length!==1?'s':''}{sts.length?` · ${sts.length} without an epic`:''}</span>}
+                      </div>}
                       {cd.flag&&<div style={{fontSize:9.5,fontWeight:700,color:'#E74C3C'}}>⚠ {cd.flag}</div>}
+                      {(cd.children||[]).length>0&&<div style={{marginTop:4}}>
+                        {eps.map((ch:any,j:number)=>epicRow(ch,`${bk}-${c.title}-${cd.name}-${j}`))}
+                        {sts.length>0&&<div style={{borderTop:eps.length?'1px solid rgba(255,255,255,0.05)':undefined,paddingTop:eps.length?3:0}}>
+                          {eps.length>0&&<div style={{fontSize:9,color:'#7A8FA6',fontWeight:700,marginBottom:1}}>Not in an epic</div>}
+                          {sts.map((ch:any,j:number)=>kidRow(ch,`${bk}-${c.title}-${cd.name}-s${j}`))}
+                        </div>}
+                      </div>}
                     </div>)})}
                 </div>
               ))}
@@ -146,7 +254,11 @@ export default function TeamPrep(props:any){
         <select value={startN} onChange={e=>setStartN(Number(e.target.value))} style={{background:'#1E3048',color:'#F4F6F8',border:'1px solid #243447',borderRadius:6,fontSize:12,padding:'5px 8px'}}>
           {[-1,0,1,2].map(n=>{const a=nextQ(cur.fy,cur.q,n),b=nextQ(a.fy,a.q,3);return <option key={n} value={n}>{quarterLabel(a.fy,a.q)} – {quarterLabel(b.fy,b.q)}{n===0?' (from now)':''}</option>})}
         </select>
-        <button onClick={()=>setExportOpen(true)} style={{marginLeft:'auto',background:'#C8973A',border:'none',borderRadius:6,color:'#0D1B2A',fontSize:12,fontWeight:800,padding:'7px 14px',cursor:'pointer'}}>⬇ {team} plan</button>
+        <label title="List every epic's stories and bugs on the boards (or click an epic to open just that one)" style={{display:'flex',alignItems:'center',gap:5,fontSize:11.5,color:'#C8C8D4',cursor:'pointer',marginLeft:'auto'}}>
+          <input type="checkbox" checked={allStories} onChange={e=>setAllStories(e.target.checked)} style={{accentColor:'#C8973A'}}/>Show stories in epics</label>
+        <label title="List each initiative's epics on the roadmap" style={{display:'flex',alignItems:'center',gap:5,fontSize:11.5,color:'#C8C8D4',cursor:'pointer'}}>
+          <input type="checkbox" checked={showEpics} onChange={e=>setShowEpics(e.target.checked)} style={{accentColor:'#C8973A'}}/>Epics on roadmap</label>
+        <button onClick={()=>setExportOpen(true)} style={{background:'#C8973A',border:'none',borderRadius:6,color:'#0D1B2A',fontSize:12,fontWeight:800,padding:'7px 14px',cursor:'pointer'}}>⬇ {team} plan</button>
       </div>
       <div style={{padding:'16px 24px 40px',maxWidth:1600}}>
         {/* At a glance */}
@@ -162,17 +274,17 @@ export default function TeamPrep(props:any){
 
         {roadmap}
 
-        <div style={box}>{H('QUARTER PLAN','What the team works on each quarter, by initiative')}{board(m.quarterCols)}</div>
+        <div style={box}>{H('QUARTER PLAN','What the team works on each quarter, by initiative')}{board(m.quarterCols,'Nothing here.','q')}</div>
 
         <div style={box}>{H('RELEASES','What ships in each monthly release')}
           {m.releaseSlides.length?m.releaseSlides.map((r:any,i:number)=>(
-            <div key={i} style={{marginBottom:12}}><div style={{fontSize:11,fontWeight:700,color:'#8FA6BC',marginBottom:6}}>{r.label}</div>{board(r.cols)}</div>
+            <div key={i} style={{marginBottom:12}}><div style={{fontSize:11,fontWeight:700,color:'#8FA6BC',marginBottom:6}}>{r.label}</div>{board(r.cols,'Nothing here.',`r${i}`)}</div>
           )):<div style={{fontSize:11,color:'#7A8FA6',fontStyle:'italic'}}>No releases planned for {team} in these quarters.</div>}
         </div>
 
         <div style={box}>{H('SPRINTS','Each release’s sprints, and what’s planned for it but not in a sprint yet')}
           {m.sprintSlides.length?m.sprintSlides.map((r:any,i:number)=>(
-            <div key={i} style={{marginBottom:12}}><div style={{fontSize:11,fontWeight:700,color:'#8FA6BC',marginBottom:6}}>{r.label}</div>{board(r.cols)}</div>
+            <div key={i} style={{marginBottom:12}}><div style={{fontSize:11,fontWeight:700,color:'#8FA6BC',marginBottom:6}}>{r.label}</div>{board(r.cols,'Nothing here.',`s${i}`)}</div>
           )):<div style={{fontSize:11,color:'#7A8FA6',fontStyle:'italic'}}>No {team} sprints in these quarters yet.</div>}
         </div>
 
