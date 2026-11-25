@@ -1123,6 +1123,7 @@ function ProjectDetail({project,items,setItems,projects,setProjects,milestones,s
           <div style={{fontSize:11,color:'#7A8FA6',marginTop:1,display:'flex',alignItems:'center',gap:8}}>{projectItems.length} items · {projectMilestones.length} milestones
             <IntakeBubble x={project} apply={(f:any)=>setProjects((p:any[])=>p.map((r:any)=>r.id===project.id?{...r,...f}:r))}/>
             <JiraChip kind="project" x={project} add apply={(f:any)=>setProjects((p:any[])=>p.map((r:any)=>r.id===project.id?{...r,...f}:r))}/></div>
+          <div style={{marginTop:4}}><TagEditor value={project.tags||[]} onChange={v=>setProjectTags(setProjects,project,v)} size={10} max={8} placeholder="+ Tag"/></div>
         </div>
         <span style={{color:ragColor,fontSize:14}}>{project.rag==='Green'?'🟢':project.rag==='Amber'?'🟡':project.rag==='Red'?'🔴':'⚪'}</span>
         <button onClick={onClose} style={{background:'none',border:'none',cursor:'pointer',fontSize:20,color:'#7A8FA6',padding:'0 4px'}}>×</button>
@@ -1608,6 +1609,12 @@ function ProjectDetail({project,items,setItems,projects,setProjects,milestones,s
     </div>
   )
 }
+// Save an initiative's tags
+async function setProjectTags(setProjects:any,p:any,tags:string[]){
+  setProjects((prev:any[])=>prev.map((r:any)=>r.id===p.id?{...r,tags}:r))
+  const{error}=await supabase.from('projects').update({tags}).eq('id',p.id)
+  if(error)alert('Failed to save the tags: '+error.message)
+}
 function Projects({items,setItems,projects,setProjects,milestones,setMilestones,tasks,setTasks,space,ccrs,ccrItems,roles=[],people=[],projectRoles=[],setProjectRoles,itemAssignments=[],setItemAssignments,sprints=[],selectedProject,setSelectedProject,epics=[],setEpics,releases=[]}:{items:any[],setItems:any,projects:any[],setProjects:any,milestones:any[],setMilestones:any,tasks:any[],setTasks:any,space:string,ccrs:any[],ccrItems:any[],roles?:any[],people?:any[],projectRoles?:any[],setProjectRoles?:any,itemAssignments?:any[],setItemAssignments?:any,sprints?:any[],selectedProject:any,setSelectedProject:any,epics?:any[],setEpics?:any,releases?:any[]}) {
   const mobile=useIsMobile()
   const [adding,setAdding]=useState(false)
@@ -1615,6 +1622,8 @@ function Projects({items,setItems,projects,setProjects,milestones,setMilestones,
   const [saving,setSaving]=useState(false)
   const [filterTeam,setFilterTeam]=useState('All')
   const [filterRAG,setFilterRAG]=useState('All')
+  const [filterTag,setFilterTag]=useState('All')
+  const allTags=useTags()
   const [dragId,setDragId]=useState(null)
   const [dragOverId,setDragOverId]=useState(null)
   const [addingMilestone,setAddingMilestone]=useState(false)
@@ -1629,6 +1638,7 @@ function Projects({items,setItems,projects,setProjects,milestones,setMilestones,
     if(isProjectDone(p)) return false // completed/cancelled live in the Done tab
     if(filterTeam!=='All'&&p.team!==filterTeam) return false
     if(filterRAG!=='All'&&p.rag!==filterRAG) return false
+    if(filterTag==='__none'?(p.tags||[]).length>0:filterTag!=='All'&&!(p.tags||[]).includes(filterTag)) return false
     return true
   }).sort((a,b)=>(a.sort_order??999)-(b.sort_order??999)) // pure manual order — drag has full control; priority is a badge/filter, not a pin
 
@@ -1794,6 +1804,10 @@ function Projects({items,setItems,projects,setProjects,milestones,setMilestones,
             <option value="Amber">🟡 Amber</option>
             <option value="Red">🔴 Red</option>
           </select>
+          <select value={filterTag} onChange={e=>setFilterTag(e.target.value)} title="Filter by tag" style={{...sel,color:filterTag==='All'?undefined:'#5DADE2'}}>
+            <option value="All">All Tags</option><option value="__none">No tag</option>
+            {allTags.map(t=><option key={t.name} value={t.name}># {t.name}</option>)}
+          </select>
           {totalViolations>0&&(
             <div style={{background:'rgba(192,57,43,0.15)',border:'1px solid rgba(192,57,43,0.4)',borderRadius:6,padding:'5px 12px',fontSize:12,color:'#E74C3C'}}>
               ⚠️ {totalViolations} timeline violation{totalViolations!==1?'s':''}
@@ -1866,6 +1880,7 @@ function Projects({items,setItems,projects,setProjects,milestones,setMilestones,
                       <IntakeBubble x={project} size={13} apply={(f:any)=>setProjects((p:any[])=>p.map((r:any)=>r.id===project.id?{...r,...f}:r))}/>
                       <ReadinessPips kind="project" x={project} size={13} apply={(f:any)=>setProjects((p:any[])=>p.map((r:any)=>r.id===project.id?{...r,...f}:r))}/>
                       <JiraChip kind="project" x={project} size={10} apply={(f:any)=>setProjects((p:any[])=>p.map((r:any)=>r.id===project.id?{...r,...f}:r))}/>
+                      <TagEditor value={project.tags||[]} onChange={v=>setProjectTags(setProjects,project,v)} size={10} max={4}/>
                       {violations.length>0&&<span style={{background:'rgba(192,57,43,0.15)',border:'1px solid rgba(192,57,43,0.4)',borderRadius:5,padding:'2px 7px',fontSize:11,color:'#E74C3C'}}>⚠️ {violations.length} violation{violations.length!==1?'s':''}</span>}
                       {projectMilestones.length>0&&<span style={{background:'rgba(200,151,58,0.15)',border:'1px solid rgba(200,151,58,0.3)',borderRadius:5,padding:'2px 7px',fontSize:11,color:'#C8973A'}}>🏁 {projectMilestones.length} milestone{projectMilestones.length!==1?'s':''}</span>}
                     </div>
@@ -2457,13 +2472,16 @@ const sorted=items.filter(i=>!isItemDone(i)).sort((a,b)=>{
   })()
   // Tags: how many open stories and epics use each; keep records in step on rename / delete
   const tagUses=(n:string)=>items.filter((i:any)=>!ITEM_TERMINAL.includes(i.status)&&(i.tags||[]).includes(n)).length+(epics as any[]).filter((e:any)=>!ITEM_TERMINAL.includes(e.status)&&(e.tags||[]).includes(n)).length
+    +projects.filter((p:any)=>!PROJECT_TERMINAL.includes(p.status)&&(p.tags||[]).includes(n)).length
+  // The tag filter: a story or epic matches on its own tags or its initiative's
+  const tagMatch=(own:any,init:any)=>{const all=[...(own||[]),...(init?.tags||[])];return ftag==='All'||(ftag==='__none'?!all.length:all.includes(ftag))}
   const tagRenamed=(from:string,to:string)=>{
     const f=(x:any)=>(x.tags||[]).includes(from)?{...x,tags:x.tags.map((t:string)=>t===from?to:t)}:x
-    setItems((p:any[])=>p.map(f));setEpics?.((p:any[])=>p.map(f));if(ftag===from)setFtag(to)
+    setItems((p:any[])=>p.map(f));setEpics?.((p:any[])=>p.map(f));setProjects((p:any[])=>p.map(f));if(ftag===from)setFtag(to)
   }
   const tagDeleted=(name:string)=>{
     const f=(x:any)=>(x.tags||[]).includes(name)?{...x,tags:x.tags.filter((t:string)=>t!==name)}:x
-    setItems((p:any[])=>p.map(f));setEpics?.((p:any[])=>p.map(f));if(ftag===name)setFtag('All')
+    setItems((p:any[])=>p.map(f));setEpics?.((p:any[])=>p.map(f));setProjects((p:any[])=>p.map(f));if(ftag===name)setFtag('All')
   }
   const tagProps={uses:tagUses,onRenamed:tagRenamed,onDeleted:tagDeleted}
   const preSeg=sorted.filter(item=>{
@@ -2474,7 +2492,7 @@ const sorted=items.filter(i=>!isItemDone(i)).sort((a,b)=>{
     if(fpp!=='All'&&item.parent_project!==fpp) return false
     if(fep==='__none'&&epicOf(item)) return false
     if(fep!=='All'&&fep!=='__none'&&epicOf(item)?.id!==fep) return false
-    if(ftag==='__none'?(item.tags||[]).length>0:ftag!=='All'&&!(item.tags||[]).includes(ftag)) return false
+    if(!tagMatch(item.tags,projects.find((p:any)=>p.name===item.parent_project))) return false
     if(frt!=='All'&&item.request_type!==frt) return false
     if(frg!=='All'&&item.region!==frg) return false
     if(fvn!=='All'&&item.vendor!==fvn) return false
@@ -2498,7 +2516,7 @@ const sorted=items.filter(i=>!isItemDone(i)).sort((a,b)=>{
       &&(fs==='All'||e.swimlane===fs)&&(frt==='All'||e.request_type===frt)&&(frg==='All'||e.region===frg)&&(fvn==='All'||e.vendor===fvn)
       &&(frl==='All'||(frl==='__none'?!e.release_month:e.release_month===frl))
       &&(fpp==='All'||epicProjName(e)===fpp)&&(fep==='All'||fep===e.id)
-      &&(ftag==='All'||(ftag==='__none'?!(e.tags||[]).length:(e.tags||[]).includes(ftag)))
+      &&tagMatch(e.tags,projects.find((p:any)=>p.id===e.project_id))
       &&(!srch||e.name.toLowerCase().includes(srch.toLowerCase())))
       .sort(epicRankSort)
   const visibleEpics=seg==='all'?preSegEpics:preSegEpics.filter(e=>epicWorkType(e,projects)===seg)
