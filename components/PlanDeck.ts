@@ -6,7 +6,7 @@
 //   schedule) → not planned (initiatives with no dates, epics and stories with no quarter).
 import { teamShort } from './Teams'
 import { quarterMonths, quarterKey, quarterLabel, fyQuarterOf, fmtMonthKey, releaseOf, releaseText, monthKeyOf } from './Releases'
-import { drawBoard, drawProgress, type PlanColumn, type PlanCard, type PlanProgress } from './PlanningPptx'
+import { drawBoard, drawProgress, type PlanColumn, type PlanCard, type PlanChild, type PlanProgress } from './PlanningPptx'
 import { addStrategySlides } from './StrategyPptx'
 import { typeColor, typeName } from './MilestoneTypes'
 import { workTypeOfProject, CLOSED_STATUSES, STATUS_COLOR, sevOf } from './WorkTypes'
@@ -81,12 +81,13 @@ export function planModel(inp:PlanInput){
   const relCols=relMonths.filter(k=>!(inp.hideNoRel&&isBlocked(k)&&![...planned,...inits].some(en=>en.x.release_month===k)))
   const shownTeams:string[]=ALL?teams:[team]
 
-  const quarterCols:PlanColumn[]=quarters.map(qi=>{
+  const buildQuarterCols=():PlanColumn[]=>quarters.map(qi=>{
     const list=planned.filter(en=>en.qk===qi.qk),ini=inits.filter(en=>en.qk===qi.qk||(!en.qk&&qi.months.includes(en.x.release_month)))
     const bks=shownTeams.map(t=>bucketFor(qi.qk,t)).filter(Boolean).map((b:any)=>`Tech debt: ${b.name}`)
     return{title:qi.label,sub:`${fmtMonthKey(qi.months[0]).slice(0,3)}–${fmtMonthKey(qi.months[2])}`,now:qi.qk===quarterKey(cur.fy,cur.q),
       meta:[...bks,`${list.length} planned${ini.length?` · ${ini.length} go-live${ini.length!==1?'s':''}`:''} · ${pts(list)} pts`],
-      milestones:msIn(qi.qStart,qi.qEnd).map(toMs),cards:[...ini.map(en=>toCard(en,{release:true})),...list.map(en=>toCard(en,{release:true}))]}
+      milestones:msIn(qi.qStart,qi.qEnd).map(toMs),
+      cards:containers(list,ini,(e:any)=>storiesOf(e).filter((i:any)=>live(i)&&shown('item',i)&&(qkOf('item',i)||qkOf('epic',e))===qi.qk),null,{release:true})}
   })
   // An epic shipping in stages (its stories in more than one release) appears in each of
   // those releases as "part 1 of 2"; its own release is its final part. Stories with no
@@ -134,13 +135,42 @@ export function planModel(inp:PlanInput){
     const td=planned.filter(en=>inRelease(en,k)&&(shownQks.has(en.qk as string)||relMonths.includes(k))).sort(rank),ini=inits.filter(en=>en.x.release_month===k),r=releaseOf(releases,k),blocked=isBlocked(k)
     return{title:`${fmtMonthKey(k)}`,sub:blocked?`No release${r?.notes?' · '+r.notes:''}`:releaseText(releases,k),blocked,slimmable:true,progress:blocked?null:relProgress(k),
       meta:blocked?[]:[`${ini.length?`${ini.length} go-live${ini.length!==1?'s':''} · `:''}${td.length} planned · ${pts(td)} pts`],
-      milestones:msIn(`${k}-01`,lastDay(k)).map(toMs),cards:[...ini.map(en=>toCard(en)),...td.map(en=>{
-        const c=toCard(en,{quarter:true});if(en.kind!=='epic')return c
-        const{months,here}=epicMonths(en.x);if(months.length<2)return c
-        const ix=months.indexOf(k),n=here(k).length
-        return{...c,name:`${c.name} — part ${ix+1} of ${months.length}${ix===months.length-1?', completes':''} (${n} stor${n===1?'y':'ies'})`}
-      })]}
+      milestones:msIn(`${k}-01`,lastDay(k)).map(toMs),
+      cards:containers(td,ini,(e:any)=>storiesOf(e).filter((i:any)=>live(i)&&shown('item',i)&&effRel(i)===k),(e:any)=>{
+        const{months}=epicMonths(e);if(months.length<2)return ''
+        const ix=months.indexOf(k);return ` — part ${ix+1} of ${months.length}${ix===months.length-1?', completes':''}`
+      },{quarter:true})}
   }
+  // The board's cards, contained as in the app: an initiative with its epics (and any stories
+  // with no epic) listed under it; a tech-debt epic with its stories and bugs under it; tech
+  // debt with no epic under its Tech Debt initiative; work with no initiative on its own
+  function containers(list:Entry[],ini:Entry[],storiesFor:(e:any)=>any[],partOf:((e:any)=>string)|null,cardOpts:any):PlanCard[]{
+    const kid=(i:any):PlanChild=>({kind:i.request_type==='Bug'?'bug':'story',ref:i.item_id||'',name:i.name,status:i.status||''})
+    const groups=new Map<string,{p:any,goLive:boolean,epics:any[],stories:any[]}>()
+    const g=(p:any)=>{if(!groups.has(p.id))groups.set(p.id,{p,goLive:false,epics:[],stories:[]});return groups.get(p.id)!}
+    for(const en of ini)g(en.x).goLive=g(en.x).goLive||!!(cardOpts.quarter?true:en.x.release_month)
+    const tdEpics=new Map<string,{e:any,kids:any[]}>(),tdLoose=new Map<string,{b:any,kids:any[]}>(),alone:PlanCard[]=[]
+    for(const en of list){
+      if(en.kind==='project')continue
+      const x=en.x,home=homeOf(en.kind,x)
+      if(home){(en.kind==='epic'?g(home).epics:g(home).stories).push(x);continue}
+      const ep=en.kind==='item'&&x.epic_id?epicById(x.epic_id):null
+      if(en.kind==='epic'&&bucketOf('epic',x)){const c=tdEpics.get(x.id)||{e:x,kids:[]};for(const i of storiesFor(x))if(!c.kids.some((z:any)=>z.id===i.id))c.kids.push(i);tdEpics.set(x.id,c);continue}
+      if(ep&&bucketOf('epic',ep)){const c=tdEpics.get(ep.id)||{e:ep,kids:[]};if(!c.kids.some((z:any)=>z.id===x.id))c.kids.push(x);tdEpics.set(ep.id,c);continue}
+      const bk=en.kind==='item'&&bucketOf('item',x)
+      if(bk){const c=tdLoose.get(bk.id)||{b:bk,kids:[]};c.kids.push(x);tdLoose.set(bk.id,c);continue}
+      alone.push(toCard(en,cardOpts))
+    }
+    const order=(i:any)=>TERMINAL.includes(i.status)?0:i.status==='Ready to Release'?1:NOT_STARTED.includes(i.status)?3:2
+    const byState=(a:any,b:any)=>order(a)-order(b)||String(a.item_id||'').localeCompare(String(b.item_id||''))
+    const initCards:PlanCard[]=[...groups.values()].sort((a,b)=>Number(b.goLive)-Number(a.goLive)||a.p.name.localeCompare(b.p.name)).map(({p,goLive,epics:eps,stories:sts})=>({
+      ...toCard(ent('project',p),{release:true}),status:goLive&&p.release_month?'GO-LIVE':p.status||null,
+      children:[...eps.map((e:any)=>{const n=storiesFor(e).length;return{kind:'epic' as const,name:e.name+(partOf?partOf(e):''),status:e.status||'',note:n?`${n} stor${n===1?'y':'ies'}`:''}}),...sts.sort(byState).map(kid)]}))
+    const tdCards:PlanCard[]=[...tdEpics.values()].map(({e,kids})=>({...toCard(ent('epic',e),cardOpts),name:e.name+(partOf?partOf(e):''),status:e.status||null,children:kids.sort(byState).map(kid)}))
+    const looseCards:PlanCard[]=[...tdLoose.values()].map(({b,kids})=>({kind:'story' as const,name:`${b.name} · no epic`,team:shortOf(b.team),children:kids.sort(byState).map(kid)}))
+    return[...initCards,...tdCards,...looseCards,...alone]
+  }
+  const quarterCols=buildQuarterCols()
   const releaseSlides=quarters.map(qi=>{
     const noRel=planned.filter(en=>!en.x.release_month&&en.qk===qi.qk)
     const cols:PlanColumn[]=[...(noRel.length?[{title:'Not in a release yet',sub:`Planned in ${qi.label}`,meta:[`${noRel.length} · ${pts(noRel)} pts`],milestones:[],cards:noRel.map(en=>toCard(en))}]:[]),
@@ -379,16 +409,13 @@ export function addTechDebtSlides(pptx:any,m:any,sub:string){
     if(cur.length)pages.push(cur)
     pages.forEach((pg,ix)=>slide(title,subtitle,p,pg,ix+1,pages.length))
   }
-  for(const x of m.techDebt as any[]){
-    const p:PlanProgress=x.progress
-    paged(`Tech debt · ${x.label}`,`${x.sub} · ${x.rows.length} ticket${x.rows.length!==1?'s':''}: ${p.deployed} deployed, ${p.ready} ready to release, ${p.fly} in flight, ${p.n-p.done-p.fly} not started · ${sub}`,p,x.rows)
-  }
+  // (Each release's tech debt is on the release slides, inside its epics; this is what's left)
   const bl=m.tdBacklog as any[]
   if(bl.length)paged('Tech debt backlog',`Not in a release yet · ${bl.length} ticket${bl.length!==1?'s':''} · ${sub}`,null,bl)
-  if(!(m.techDebt as any[]).length&&!bl.length){
+  if(!bl.length){
     const s=pptx.addSlide();s.background={color:CREAM}
     s.addText('Tech debt',{x:0.75,y:0.2,w:12.2,h:0.55,fontSize:26,bold:true,color:INK,margin:0})
-    s.addText('No tech-debt stories or bugs in this plan.',{x:0.75,y:1.4,w:12,h:0.4,fontSize:14,italic:true,color:MUTED})
+    s.addText('Every tech-debt story and bug is in a release.',{x:0.75,y:1.4,w:12,h:0.4,fontSize:14,italic:true,color:MUTED})
   }
 }
 const hexOf=(c:any,d:string)=>(c||('#'+d)).replace('#','').toUpperCase()
@@ -435,8 +462,7 @@ export async function exportFullPlanPptx({strategy,strategyCtx,plan,sections,fil
     addEpicSlides(pptx,m,sub)
   }
   if(sections.techdebt){
-    const t=(m.techDebt as any[]).reduce((s,x)=>s+x.rows.length,0)
-    sectionSlide(pptx,++n,'Tech debt',`Every tech-debt story and bug, release by release (${t} ticket${t!==1?'s':''} in ${(m.techDebt as any[]).length} release${(m.techDebt as any[]).length!==1?'s':''}), with each release's progress, then the tech-debt backlog (${(m.tdBacklog as any[]).length} not in a release yet).`)
+    sectionSlide(pptx,++n,'Tech debt backlog',`Tech-debt stories and bugs not in a release yet (${(m.tdBacklog as any[]).length}). Those in a release are on the release slides, inside their epics.`)
     addTechDebtSlides(pptx,m,sub)
   }
   if(sections.sprints){

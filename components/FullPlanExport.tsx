@@ -13,7 +13,7 @@ const SECTIONS:[string,string,string][]=[
   ['releases','Release plan','One slide per quarter'],
   ['calendar','Release calendar','The fiscal year month by month: what ships in each release'],
   ['epics','Epics at a glance','Each epic, how much of it is in the plan, and when it ships'],
-  ['techdebt','Tech debt','Each release\'s tech-debt stories and bugs with progress, then the tech-debt backlog'],
+  ['techdebt','Tech debt backlog','Tech-debt stories and bugs not in a release yet'],
   ['sprints','Sprints','One slide per release: each team\'s sprints'],
   ['unplanned','Not planned yet','Initiatives with no dates; work with no quarter'],
   ['readiness','Readiness','PRD and Design approvals: by quarter, and what\'s not ready'],
