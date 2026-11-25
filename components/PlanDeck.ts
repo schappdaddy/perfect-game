@@ -171,6 +171,8 @@ export function planModel(inp:PlanInput){
     return[...initCards,...tdCards,...looseCards,...alone]
   }
   const quarterCols=buildQuarterCols()
+  // Quarter plan slides show everything too: two quarters a slide, a busy one on its own
+  const quarterSlides=paginateColumns(quarterCols,true).map(sc=>({label:sc.map(c=>c.title.replace('  · NOW','')).join(' & '),cols:sc,opts:{equal:true,contain:true}}))
   // Release slides show everything: per quarter, what's not in a release yet, then each
   // month, two to a slide (a busy month gets slides of its own)
   const releaseSlides=quarters.flatMap(qi=>{
@@ -279,7 +281,7 @@ export function planModel(inp:PlanInput){
       releases:rels.map(k=>fmtMonthKey(k)),inPlan:inPlan.length,total:live.length,
       rows:sts.map((i:any)=>({kind:i.request_type==='Bug'?'Bug':'Story',ref:i.item_id||'',name:i.name,status:i.status||'',quarter:qLabel(qkOf('item',i)),release:i.release_month?fmtMonthKey(i.release_month):'',fit:fitOf(i)}))}
   })
-  return{quarters,quarterCols,releaseSlides,sprintSlides,undatedInits,unplannedRows,ALL,calendarMonth,calendarFys,isBlocked,storiesOf,readiness,epicBreakdown,techDebt,tdBacklog}
+  return{quarters,quarterCols,quarterSlides,releaseSlides,sprintSlides,undatedInits,unplannedRows,ALL,calendarMonth,calendarFys,isBlocked,storiesOf,readiness,epicBreakdown,techDebt,tdBacklog}
 }
 
 // ── The full-plan deck ───────────────────────────────────────────────────────
@@ -448,7 +450,7 @@ export async function exportFullPlanPptx({strategy,strategyCtx,plan,sections,fil
   }
   if(sections.quarters){
     sectionSlide(pptx,++n,'Quarter plan',`What's worked on in each quarter, ${range}: milestones, initiative go-lives, and the epics and stories planned.`)
-    drawBoard(pptx,'Quarter plan',`${range} · ${sub}`,m.quarterCols)
+    m.quarterSlides.forEach(q=>drawBoard(pptx,'Quarter plan',`${q.label} · ${sub}`,q.cols,q.opts))
   }
   if(sections.releases){
     sectionSlide(pptx,++n,'Release plan','What ships in each monthly release, one slide per quarter, and what is planned but not in a release yet.')

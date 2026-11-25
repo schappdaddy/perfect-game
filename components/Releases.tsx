@@ -701,7 +701,7 @@ export function QuarterPlanner({items,setItems,projects,setProjects,epics=[],set
       const range=`${quarters[0].label} - ${quarters[3].label}`
       const who=ALL?'All teams':team,wtl=wtF==='all'?'All work':(WT_LABEL as any)[wtF]
       await exportPlanningPptx({title:`Planning · ${range}`,subtitle:`${who} · ${wtl} · exported ${new Date().toLocaleDateString('en-US',{month:'short',day:'numeric',year:'numeric'})}`,
-        quarters:m.quarterCols,releaseSlides:m.releaseSlides,extra:(p:any)=>{addEpicSlides(p,m,`${who} · ${wtl}`);addTechDebtSlides(p,m,`${who} · ${wtl}`)},fileName:`Planning ${range}${ALL?'':' '+shortOf(team)}`})
+        quarters:m.quarterSlides,releaseSlides:m.releaseSlides,extra:(p:any)=>{addEpicSlides(p,m,`${who} · ${wtl}`);addTechDebtSlides(p,m,`${who} · ${wtl}`)},fileName:`Planning ${range}${ALL?'':' '+shortOf(team)}`})
     }catch(e:any){alert('Failed to export: '+(e?.message||e))}
     setExporting(false)
   }
