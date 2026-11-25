@@ -252,14 +252,33 @@ function drawContainers(pptx:any,slide:any,cards:PlanCard[],x:number,y0:number,w
 // Card measurements, shared by the drawing and the page packing so they always agree.
 // Names and rows wrap onto as many lines as they need instead of being cut off.
 const NAME_FS=11,NAME_LH=0.2,KID_FS=8.5,KID_LH=0.155
-const txtW=(t:string,fs:number,bold=false)=>t.length*fs*(bold?0.48:0.4)/72
-const statusW=(st?:string)=>st?Math.min(1,st.length*0.054+0.08):0
+// Text width in inches, character by character (Calibri's widths, in ems), with a little
+// headroom so the estimate errs towards an extra line rather than an overlap
+const CW:Record<string,number>={' ':0.226,'i':0.229,'l':0.229,'j':0.267,'t':0.335,'f':0.305,'r':0.349,'I':0.252,'.':0.252,',':0.25,':':0.268,';':0.268,"'":0.221,'!':0.326,'|':0.46,
+  '(':0.303,')':0.303,'-':0.306,'—':1,'–':0.5,'·':0.3,'/':0.386,'%':0.715,'&':0.682,'@':0.899,'m':0.799,'w':0.715,'M':0.855,'W':0.89,'s':0.391,'c':0.423,'z':0.395,'e':0.498,'a':0.479,'y':0.453,'v':0.452,'x':0.433,'k':0.455,
+  'o':0.527,'n':0.525,'u':0.525,'h':0.525,'d':0.525,'b':0.525,'p':0.525,'q':0.525,'g':0.471}
+const charW=(c:string)=>CW[c]??(c>='0'&&c<='9'?0.507:c>='A'&&c<='Z'?0.6:0.55)
+const txtW=(t:string,fs:number,bold=false)=>{let w=0;for(const c of t)w+=charW(c);return w*fs/72*(bold?1.06:1)*1.04}
+// How many lines a text wraps to in a box of width w (word by word, as PowerPoint does);
+// lead = width already taken on the first line (a marker and an id)
+const wrapLines=(t:string,fs:number,w:number,bold=false,lead=0)=>{
+  const sp=txtW(' ',fs,bold);let lines=1,x=lead
+  for(const word of t.split(/\s+/).filter(Boolean)){
+    const ww=txtW(word,fs,bold)
+    if(x>0&&x+sp+ww>w){lines++;x=ww;continue}
+    x+=(x>0?sp:0)+ww
+    while(x>w){lines++;x-=w} // a single word longer than the line
+  }
+  return lines
+}
+const statusW=(st?:string)=>st?Math.min(1.15,txtW(st,7.5,true)+0.06):0
 const kidLines=(ch:PlanChild,tw:number)=>{
-  const avail=Math.max(0.6,tw-statusW(ch.status)-0.06-0.14-(ch.ref?txtW(ch.ref+'  ',7.5):0))
-  return Math.max(1,Math.ceil(txtW(ch.name+(ch.note?` · ${ch.note}`:''),KID_FS)/avail))
+  const box=Math.max(0.6,tw-statusW(ch.status)-0.04)
+  const lead=txtW(`${CHILD[ch.kind]?.mark||'▪'} `,KID_FS,true)+(ch.ref?txtW(`${ch.ref}  `,7.5):0)
+  return wrapLines(ch.name+(ch.note?` · ${ch.note}`:''),KID_FS,box,false,lead)
 }
 const kidH=(ch:PlanChild,tw:number)=>0.05+kidLines(ch,tw)*KID_LH
-const nameLines=(cd:PlanCard,tw:number)=>Math.min(4,Math.max(1,Math.ceil(txtW(cd.name,NAME_FS,true)/tw)))
+const nameLines=(cd:PlanCard,tw:number)=>Math.min(4,wrapLines(cd.name,NAME_FS,tw,true))
 const headHt=(cd:PlanCard,tw:number)=>0.26+nameLines(cd,tw)*NAME_LH
 const cardHt=(cd:PlanCard,cw:number,maxr=999)=>{
   const tw=cw-0.17,all=cd.children||[],kids=all.slice(0,maxr)
