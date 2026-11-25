@@ -61,7 +61,8 @@ const TEMPLATE={
 }
 
 export default function StrategyTab({projects:mainProjects,setProjects,strategies,setStrategies,tracks,setTracks,goals,setGoals,deps:allDeps,setDeps,people,teams,onOpenProject,openAssistant,items=[],epics:mainEpics=[],setEpics,strategyItems=[],setStrategyItems,roles=[],projectRoles=[],setProjectRoles,strategyRoles=[],setStrategyRoles}:any){
-  const allTeams=useTeams() // delivery teams, incl. proposed ones (Strategy settings › Teams)
+  const allTeams=useTeams()
+  const [pptPick,setPptPick]=useState<Set<string>|null>(null) // strategies to put in the PowerPoint (dialog open when set) // delivery teams, incl. proposed ones (Strategy settings › Teams)
   const [stratId,setStratId]=useState<any>(()=>{try{return localStorage.getItem('pg_strategy')}catch{return null}})
   const strategy=(strategies as any[]).find(s=>s.id===stratId)||strategies[0]||null
   // ── Sandbox: this strategy's own placement of projects and epics (track, dates, planning
@@ -820,17 +821,34 @@ export default function StrategyTab({projects:mainProjects,setProjects,strategie
           </label>
         </div>}
         <div style={{marginLeft:'auto',display:'flex',gap:6}}>
-          <select value="" disabled={exporting} title="Download as PowerPoint: for each strategy, the roadmap by track and by team, and the budget report" onChange={async e=>{
-            const which=e.target.value;if(!which)return
-            setExporting(true)
-            try{await exportStrategiesPptx({strategies:which==='all'?strategies:[strategy],projects:mainProjects,strategyItems,tracks,goals,deps:allDeps,strategyRoles,projectRoles,people,roles,teams})}
-            catch(err:any){alert('Failed to build the PowerPoint: '+(err?.message||err))}
-            finally{setExporting(false)}
-          }} style={{background:'none',border:'1px solid #243447',borderRadius:6,color:'#F4F6F8',fontSize:11,fontWeight:700,padding:'5px 8px',cursor:'pointer'}}>
-            <option value="">{exporting?'Building…':'⬇ PowerPoint'}</option>
-            <option value="this">This strategy</option>
-            <option value="all">All strategies ({strategies.length})</option>
-          </select>
+          <button disabled={exporting} onClick={()=>setPptPick(new Set([strategy.id]))} title="Download as PowerPoint: pick the strategies; for each, the roadmap by track and by team, and the budget report"
+            style={{background:'none',border:'1px solid #243447',borderRadius:6,color:'#F4F6F8',fontSize:11,fontWeight:700,padding:'5px 10px',cursor:'pointer'}}>{exporting?'Building…':'⬇ PowerPoint'}</button>
+          {pptPick&&<div onClick={()=>setPptPick(null)} style={{position:'fixed',inset:0,background:'rgba(5,10,18,0.65)',zIndex:3000,display:'flex',alignItems:'center',justifyContent:'center'}}>
+            <div onClick={e=>e.stopPropagation()} style={{width:420,maxWidth:'calc(100vw - 32px)',background:'#162436',border:'1px solid #243447',borderRadius:12,padding:'18px 20px',boxShadow:'0 20px 50px rgba(0,0,0,0.5)'}}>
+              <div style={{fontSize:16,fontWeight:800,color:'#F4F6F8',marginBottom:4}}>⬇ Strategy PowerPoint</div>
+              <div style={{fontSize:11.5,color:'#7A8FA6',marginBottom:12}}>Which strategies go in the deck? Each gets its roadmap by track and by team, and its budget.</div>
+              <div style={{display:'flex',flexDirection:'column',gap:6,marginBottom:14,maxHeight:300,overflowY:'auto'}}>
+                {(strategies as any[]).map((st:any)=>(
+                  <label key={st.id} style={{display:'flex',alignItems:'center',gap:8,fontSize:12.5,color:'#F4F6F8',cursor:'pointer'}}>
+                    <input type="checkbox" checked={pptPick.has(st.id)} onChange={e=>{const n=new Set(pptPick);if(e.target.checked)n.add(st.id);else n.delete(st.id);setPptPick(n)}} style={{accentColor:'#C8973A'}}/>
+                    <span style={{fontWeight:700}}>{st.name}</span>
+                    {st.promoted_at&&<span style={{fontSize:10,fontWeight:800,color:'#27AE60',border:'1px solid rgba(39,174,96,0.5)',borderRadius:8,padding:'0 6px'}}>promoted</span>}
+                    {st.id===strategy.id&&<span style={{fontSize:10,color:'#7A8FA6'}}>viewing</span>}
+                  </label>))}
+              </div>
+              <div style={{display:'flex',alignItems:'center',gap:8}}>
+                <button onClick={()=>setPptPick(new Set(pptPick.size===strategies.length?[]:(strategies as any[]).map((x:any)=>x.id)))} style={{background:'none',border:'none',color:'#5DADE2',fontSize:11,cursor:'pointer',padding:0}}>{pptPick.size===strategies.length?'Clear all':'Select all'}</button>
+                <span style={{flex:1}}/>
+                <button onClick={()=>setPptPick(null)} style={{background:'none',border:'1px solid #243447',borderRadius:6,color:'#7A8FA6',fontSize:12,padding:'7px 14px',cursor:'pointer'}}>Cancel</button>
+                <button disabled={!pptPick.size||exporting} onClick={async()=>{
+                    const pick=(strategies as any[]).filter((x:any)=>pptPick.has(x.id));setPptPick(null);setExporting(true)
+                    try{await exportStrategiesPptx({strategies:pick,projects:mainProjects,strategyItems,tracks,goals,deps:allDeps,strategyRoles,projectRoles,people,roles,teams})}
+                    catch(err:any){alert('Failed to build the PowerPoint: '+(err?.message||err))}
+                    finally{setExporting(false)}
+                  }} style={{background:'#C8973A',border:'none',borderRadius:6,color:'#0D1B2A',fontSize:12,fontWeight:800,padding:'7px 16px',cursor:'pointer',opacity:pptPick.size?1:0.5}}>⬇ Download ({pptPick.size})</button>
+              </div>
+            </div>
+          </div>}
           {openAssistant&&<button onClick={()=>openAssistant(`Look at the "${strategy.name}" strategy and draft a Plan A: place the proposed and undated initiatives by quarter on their tracks, respecting dependencies, the code freeze and team capacity. Keep anything you place as proposed.`)}
             style={{background:'none',border:'1px solid #C8973A',borderRadius:6,color:'#C8973A',fontSize:11,fontWeight:700,padding:'5px 10px',cursor:'pointer'}}>💬 Draft Plan A with the assistant</button>}
           {(()=>{const ch=changesVsMain();const n=ch.rows.length+ch.addDeps.length+ch.dropDeps.length
