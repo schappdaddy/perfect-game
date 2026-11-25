@@ -189,12 +189,38 @@ export function planModel(inp:PlanInput){
   const readiness=quarters.map(qi=>({qi,rows:[
     ...inits.filter(en=>en.qk===qi.qk||(!en.qk&&qi.months.includes(en.x.release_month))).map(en=>({kind:'Initiative',x:en.x,home:'',team:shortOf(en.x.team)})),
     ...planned.filter(en=>en.qk===qi.qk&&open(en.x)).map(en=>({kind:en.kind==='epic'?'Epic':en.x.request_type==='Bug'?'Bug':'Story',x:en.x,home:homeOf(en.kind,en.x)?.name||bucketOf(en.kind,en.x)?.name||'No initiative',team:shortOf(teamOf(en.kind,en.x))}))]}))
-  return{quarters,quarterCols,releaseSlides,sprintSlides,undatedInits,unplannedRows,ALL,calendarMonth,calendarFys,isBlocked,storiesOf,readiness}
+  // Epics and what's in them, for conversations about what's in the plan and what isn't:
+  // every open epic (team and work type as chosen) with all its stories and bugs, each marked
+  // in the plan (a quarter shown or a release in range), later, not planned, done or killed
+  const qLabel=(qk:string|null)=>qk?qk.replace('-',' '):''
+  const fitOf=(i:any):{text:string,color:string}=>{
+    if(KILLED.includes(i.status))return{text:'✗ Killed',color:'9AA3AF'}
+    if(TERMINAL.includes(i.status))return{text:'✓ Done',color:'1E8449'}
+    const qk=qkOf('item',i)
+    if(i.release_month&&relMonths.includes(i.release_month))return{text:`✓ In · ${fmtMonthKey(i.release_month)}`,color:'1E8449'}
+    if(qk&&shownQks.has(qk))return{text:`✓ In · ${qLabel(qk)}`,color:'1E8449'}
+    if(qk||i.release_month)return{text:`⏩ Later · ${i.release_month?fmtMonthKey(i.release_month):qLabel(qk)}`,color:'B9770E'}
+    return{text:'✗ Not planned',color:'C0392B'}
+  }
+  const epicHome=(e:any)=>homeOf('epic',e)?.name||bucketOf('epic',e)?.name||'No initiative'
+  const epicList=epics.filter((e:any)=>open(e)&&shown('epic',e))
+    .sort((a:any,b:any)=>{const ha=epicHome(a),hb=epicHome(b);return(ha==='No initiative'?1:0)-(hb==='No initiative'?1:0)||ha.localeCompare(hb)||(qkOf('epic',a)||'~').localeCompare(qkOf('epic',b)||'~')||rank(ent('epic',a),ent('epic',b))})
+  const epicBreakdown=epicList.map((e:any)=>{
+    const sts=storiesOf(e).sort((a:any,b:any)=>{const o=(i:any)=>KILLED.includes(i.status)?4:TERMINAL.includes(i.status)?0:fitOf(i).text.startsWith('✓')?1:fitOf(i).text.startsWith('⏩')?2:3
+      return o(a)-o(b)||(a.release_month||'~').localeCompare(b.release_month||'~')||(PRI[a.priority]||9)-(PRI[b.priority]||9)||String(a.item_id||'').localeCompare(String(b.item_id||''))})
+    const live=sts.filter((i:any)=>!KILLED.includes(i.status))
+    const inPlan=live.filter((i:any)=>{const t=fitOf(i).text;return t.startsWith('✓')})
+    const rels=[...new Set(live.map((i:any)=>i.release_month||e.release_month).filter(Boolean))].sort() as string[]
+    return{epic:e,home:epicHome(e),quarter:qLabel(qkOf('epic',e)),status:e.status||'',team:shortOf(teamOf('epic',e))||'',
+      releases:rels.map(k=>fmtMonthKey(k)),inPlan:inPlan.length,total:live.length,
+      rows:sts.map((i:any)=>({kind:i.request_type==='Bug'?'Bug':'Story',ref:i.item_id||'',name:i.name,status:i.status||'',quarter:qLabel(qkOf('item',i)),release:i.release_month?fmtMonthKey(i.release_month):'',fit:fitOf(i)}))}
+  })
+  return{quarters,quarterCols,releaseSlides,sprintSlides,undatedInits,unplannedRows,ALL,calendarMonth,calendarFys,isBlocked,storiesOf,readiness,epicBreakdown}
 }
 
 // ── The full-plan deck ───────────────────────────────────────────────────────
 const INK='1F2A3C',MUTED='6B7280',CREAM='FDFBF0',ORANGE='E07B2A',HEAD='1F2A3C',SUB='EEF1F5',LINE='D9DEE5'
-export type FullPlanSections={roadmap:boolean,budget:boolean,quarters:boolean,releases:boolean,calendar?:boolean,sprints:boolean,unplanned:boolean,readiness?:boolean}
+export type FullPlanSections={roadmap:boolean,budget:boolean,quarters:boolean,releases:boolean,calendar?:boolean,epics?:boolean,sprints:boolean,unplanned:boolean,readiness?:boolean}
 
 function titleSlide(pptx:any,title:string,lines:string[]){
   const s=pptx.addSlide();s.background={color:'1F2A3C'}
@@ -210,13 +236,14 @@ function sectionSlide(pptx:any,n:number,title:string,blurb:string){
   s.addText(blurb,{x:0.9,y:4.05,w:11,h:0.9,fontSize:15,color:MUTED,margin:0,valign:'top'})
 }
 // A long list as table slides, a set number of rows per slide, grouped with band rows
-function tableSlides(pptx:any,title:string,subtitle:string,header:string[],colW:number[],rows:{group?:string,cells:string[]}[],boldCol=0,perSlide=17){
+type Cell=string|{text:string,color?:string,bold?:boolean}
+function tableSlides(pptx:any,title:string,subtitle:string,header:string[],colW:number[],rows:{group?:string,groupFill?:string,cells:Cell[]}[],boldCol=0,perSlide=17){
   const pages:any[][]=[];let page:any[]=[],last:string|undefined,n=0
   const th=(t:string)=>({text:t,options:{bold:true,color:'FFFFFF',fill:{color:HEAD},fontSize:9,valign:'middle'}})
   for(const r of rows){
     if(n>=perSlide){pages.push(page);page=[];n=0;last=undefined}
-    if(r.group!==undefined&&r.group!==last){page.push([{text:r.group,options:{colspan:header.length,bold:true,color:INK,fill:{color:SUB},fontSize:9}}]);last=r.group;n++}
-    page.push(r.cells.map((c,i)=>({text:c,options:{fontSize:9,color:INK,bold:i===boldCol}})));n++
+    if(r.group!==undefined&&r.group!==last){page.push([{text:r.group,options:{colspan:header.length,bold:true,color:INK,fill:{color:r.groupFill||SUB},fontSize:9}}]);last=r.group;n++}
+    if(r.cells.length)page.push(r.cells.map((c,i)=>typeof c==='string'?{text:c,options:{fontSize:9,color:INK,bold:i===boldCol}}:{text:c.text,options:{fontSize:9,color:c.color||INK,bold:c.bold??i===boldCol}}));n++
   }
   if(page.length)pages.push(page)
   pages.forEach((p,ix)=>{
@@ -279,6 +306,23 @@ function calendarSlide(pptx:any,m:any,fy:number,releases:any[],sub:string){
     {x:0.75,y:7.1,w:12.3,h:0.25,fontSize:8.5,color:MUTED,margin:0})
 }
 
+// Epics at a glance, then each epic with everything in it (stories and bugs, in the plan or not)
+export function addEpicSlides(pptx:any,m:any,sub:string){
+  const eb=m.epicBreakdown as any[]
+  tableSlides(pptx,'Epics at a glance',`Each epic, how much of it is in the plan, and when it ships · ${sub}`,
+    ['Epic','Initiative','Team','Status','Quarter','Ships','In the plan'],[3.9,2.7,0.6,1.3,1.0,1.6,1.1],
+    eb.map(x=>({cells:[x.epic.name,x.home,x.team,x.status,x.quarter||'—',x.releases.join(', ')||'—',
+      x.total?{text:`${x.inPlan} of ${x.total}`,color:x.inPlan===x.total?'1E8449':x.inPlan===0?'C0392B':'B9770E',bold:true}:{text:'no stories',color:MUTED}]})),0,16)
+  const rows:any[]=[]
+  for(const x of eb){
+    const group=`◆ ${x.epic.name}   ·   ${x.home}   ·   ${x.status}${x.quarter?` · worked ${x.quarter}`:''}${x.releases.length?` · ships ${x.releases.join(', ')}`:''}   ·   ${x.total?`${x.inPlan} of ${x.total} in the plan`:'no stories yet'}`
+    if(!x.rows.length){rows.push({group,groupFill:'FBE5D3',cells:[{text:'',color:MUTED},'',{text:'No stories or bugs yet',color:MUTED},'','','','']});continue}
+    for(const r of x.rows)rows.push({group,groupFill:'FBE5D3',cells:[r.kind,r.ref,r.name,r.status,r.quarter||'—',r.release||'—',{text:r.fit.text,color:r.fit.color,bold:true}]})
+  }
+  tableSlides(pptx,'What\'s in each epic',`Every story and bug, and whether it's in the plan · ${sub}`,
+    ['Type','ID','Story / bug','Status','Quarter','Release','In the plan?'],[0.6,0.95,5.1,1.45,1.0,1.1,1.95],rows,2,17)
+}
+
 export async function exportFullPlanPptx({strategy,strategyCtx,plan,sections,fileName}:{strategy:any,strategyCtx:any,plan:PlanInput,sections:FullPlanSections,fileName:string}){
   const PptxGenJS=(await import('pptxgenjs')).default
   const pptx=new PptxGenJS()
@@ -295,7 +339,7 @@ export async function exportFullPlanPptx({strategy,strategyCtx,plan,sections,fil
   const sub=`${who} · ${wtl} · ${stamp}`
   const parts:string[]=[]
   if(strategy&&(sections.roadmap||sections.budget))parts.push('Strategy')
-  if(sections.quarters)parts.push('Quarter plan');if(sections.releases)parts.push('Release plan');if(sections.calendar)parts.push('Release calendar');if(sections.sprints)parts.push('Sprints');if(sections.unplanned)parts.push('Not planned yet');if(sections.readiness)parts.push('Readiness')
+  if(sections.quarters)parts.push('Quarter plan');if(sections.releases)parts.push('Release plan');if(sections.calendar)parts.push('Release calendar');if(sections.epics)parts.push('Epics');if(sections.sprints)parts.push('Sprints');if(sections.unplanned)parts.push('Not planned yet');if(sections.readiness)parts.push('Readiness')
   titleSlide(pptx,m.ALL?'The plan':`${plan.team} plan`,[strategy?`Strategy: ${strategy.name}`:'',`Planning ${range} · ${who} · ${wtl}`,parts.join('  →  '),`Exported ${stamp}`].filter(Boolean))
   let n=0
   if(strategy&&(sections.roadmap||sections.budget)){
@@ -314,6 +358,11 @@ export async function exportFullPlanPptx({strategy,strategyCtx,plan,sections,fil
   if(sections.calendar){
     sectionSlide(pptx,++n,'Release calendar','Each month\'s release across the fiscal year: initiatives going live, and the epics and stories shipping in it.')
     for(const fy of m.calendarFys)calendarSlide(pptx,m,fy,plan.releases,sub)
+  }
+  if(sections.epics){
+    const eb=m.epicBreakdown as any[],tot=eb.reduce((s,x)=>s+x.total,0),inn=eb.reduce((s,x)=>s+x.inPlan,0)
+    sectionSlide(pptx,++n,'Epics',`${eb.length} epic${eb.length!==1?'s':''} and what's in them: ${inn} of ${tot} stories and bugs are in the plan. For each epic, every story and bug and whether it's in, later, or not planned.`)
+    addEpicSlides(pptx,m,sub)
   }
   if(sections.sprints){
     sectionSlide(pptx,++n,'Sprints','For each release, each team\'s sprints and what\'s in them, and what\'s planned for the release but not in a sprint yet. Work in a sprint that isn\'t planned for that release is flagged.')
