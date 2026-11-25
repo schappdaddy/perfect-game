@@ -43,12 +43,13 @@ function readinessPips(pptx:any,slide:any,x:number,y:number,cd:PlanCard,d=0.13){
 }
 const PIPS_W=0.32
 
-export async function exportPlanningPptx({title,subtitle,quarters,releaseSlides,fileName}:{title:string,subtitle:string,quarters:PlanColumn[],releaseSlides:{label:string,cols:PlanColumn[]}[],fileName:string}){
+export async function exportPlanningPptx({title,subtitle,quarters,releaseSlides,fileName,extra}:{title:string,subtitle:string,quarters:PlanColumn[],releaseSlides:{label:string,cols:PlanColumn[]}[],fileName:string,extra?:(pptx:any)=>void}){
   const PptxGenJS=(await import('pptxgenjs')).default
   const pptx=new PptxGenJS()
   pptx.layout='LAYOUT_WIDE' // 13.33 × 7.5 in
   drawBoard(pptx,title,`Quarter plan · ${subtitle}`,quarters)
   for(const r of releaseSlides)drawBoard(pptx,title,`Release plan · ${r.label} · ${subtitle}`,r.cols)
+  extra?.(pptx)
   await pptx.writeFile({fileName:fileName+'.pptx'})
 }
 
