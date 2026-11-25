@@ -145,7 +145,10 @@ export function planModel(inp:PlanInput){
   // with no epic) listed under it; a tech-debt epic with its stories and bugs under it; tech
   // debt with no epic under its Tech Debt initiative; work with no initiative on its own
   function containers(list:Entry[],ini:Entry[],storiesFor:(e:any)=>any[],partOf:((e:any)=>string)|null,cardOpts:any):PlanCard[]{
-    const kid=(i:any):PlanChild=>({kind:i.request_type==='Bug'?'bug':'story',ref:i.item_id||'',name:i.name,status:i.status||''})
+    const kid=(i:any):PlanChild=>({kind:i.request_type==='Bug'?'bug':'story',ref:i.item_id||'',name:i.name,status:i.status||'',priority:i.priority||null,release:effRel(i)?fmtMonthKey(effRel(i)):null})
+    const isDone=(x:any)=>TERMINAL.includes(x.status==='Hypercare'?'Done':x.status)||x.status==='Ready to Release'
+    // Story counts rolled up for a card: its stories and bugs, done (or ready to release) of all
+    const roll=(kids:any[])=>({n:kids.length,done:kids.filter(isDone).length})
     const groups=new Map<string,{p:any,goLive:boolean,epics:any[],stories:any[]}>()
     const g=(p:any)=>{if(!groups.has(p.id))groups.set(p.id,{p,goLive:false,epics:[],stories:[]});return groups.get(p.id)!}
     for(const en of ini)g(en.x).goLive=g(en.x).goLive||!!(cardOpts.quarter?true:en.x.release_month)
@@ -166,10 +169,12 @@ export function planModel(inp:PlanInput){
     const byState=(a:any,b:any)=>order(a)-order(b)||String(a.item_id||'').localeCompare(String(b.item_id||''))
     const initCards:PlanCard[]=[...groups.values()].sort((a,b)=>Number(b.goLive)-Number(a.goLive)||a.p.name.localeCompare(b.p.name)).map(({p,goLive,epics:eps,stories:sts})=>({
       ...toCard(ent('project',p),{release:true}),status:goLive&&p.release_month?'GO-LIVE':p.status||null,
-      children:[...eps.map((e:any)=>{const n=storiesFor(e).length;return{kind:'epic' as const,name:e.name+(partOf?partOf(e):''),status:e.status||'',note:n?`${n} stor${n===1?'y':'ies'}`:''}}),...sts.sort(byState).map(kid)]}))
-    const tdCards:PlanCard[]=[...tdEpics.values()].map(({e,kids})=>({...toCard(ent('epic',e),cardOpts),name:e.name+(partOf?partOf(e):''),status:e.status||null,children:kids.sort(byState).map(kid)}))
+      pid:p.id,...roll([...eps.flatMap(storiesFor),...sts]),
+      children:[...eps.map((e:any)=>{const ss=storiesFor(e).sort(byState),n=ss.length;return{kind:'epic' as const,name:e.name+(partOf?partOf(e):''),status:e.status||'',note:n?`${n} stor${n===1?'y':'ies'}`:'',
+        ...roll(ss),release:e.release_month?fmtMonthKey(e.release_month):null,priority:e.priority||null,kids:ss.map(kid)}}),...sts.sort(byState).map(kid)]}))
+    const tdCards:PlanCard[]=[...tdEpics.values()].map(({e,kids})=>({...toCard(ent('epic',e),cardOpts),name:e.name+(partOf?partOf(e):''),status:e.status||null,...roll(kids),children:kids.sort(byState).map(kid)}))
     // The Tech Debt initiative itself, holding its stories and bugs that have no epic
-    const looseCards:PlanCard[]=[...tdLoose.values()].map(({b,kids})=>({kind:'initiative' as const,name:b.name,team:shortOf(b.team),status:'Tech debt · no epic',children:kids.sort(byState).map(kid)}))
+    const looseCards:PlanCard[]=[...tdLoose.values()].map(({b,kids})=>({kind:'initiative' as const,name:b.name,team:shortOf(b.team),status:'Tech debt · no epic',pid:b.id,...roll(kids),children:kids.sort(byState).map(kid)}))
     return[...initCards,...tdCards,...looseCards,...alone]
   }
   const quarterCols=buildQuarterCols()
