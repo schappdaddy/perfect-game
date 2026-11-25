@@ -168,7 +168,8 @@ export function planModel(inp:PlanInput){
       ...toCard(ent('project',p),{release:true}),status:goLive&&p.release_month?'GO-LIVE':p.status||null,
       children:[...eps.map((e:any)=>{const n=storiesFor(e).length;return{kind:'epic' as const,name:e.name+(partOf?partOf(e):''),status:e.status||'',note:n?`${n} stor${n===1?'y':'ies'}`:''}}),...sts.sort(byState).map(kid)]}))
     const tdCards:PlanCard[]=[...tdEpics.values()].map(({e,kids})=>({...toCard(ent('epic',e),cardOpts),name:e.name+(partOf?partOf(e):''),status:e.status||null,children:kids.sort(byState).map(kid)}))
-    const looseCards:PlanCard[]=[...tdLoose.values()].map(({b,kids})=>({kind:'story' as const,name:`${b.name} · no epic`,team:shortOf(b.team),children:kids.sort(byState).map(kid)}))
+    // The Tech Debt initiative itself, holding its stories and bugs that have no epic
+    const looseCards:PlanCard[]=[...tdLoose.values()].map(({b,kids})=>({kind:'initiative' as const,name:b.name,team:shortOf(b.team),status:'Tech debt · no epic',children:kids.sort(byState).map(kid)}))
     return[...initCards,...tdCards,...looseCards,...alone]
   }
   const quarterCols=buildQuarterCols()
