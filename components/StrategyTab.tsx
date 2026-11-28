@@ -154,9 +154,13 @@ export default function StrategyTab({projects:mainProjects,setProjects,strategie
   const [editGoal,setEditGoal]=useState<any>(null) // {track_id,fy,text}
   const pref=(k:string,d:any)=>{try{const v=localStorage.getItem('pg_strat_'+k);return v==null?d:JSON.parse(v)}catch{return d}}
   const [exporting,setExporting]=useState(false)
-  const [view,setView]=useState<any>(()=>({sortBy:pref('sortBy','start_date'),sortDir:pref('sortDir','asc'),showLoad:pref('showLoad',false),showEpics:pref('showEpics',true),showStories:pref('showStories',true),snap:pref('snap','quarter'),groupBy:pref('groupBy','tracks'),budgetScope:pref('budgetScope','all'),sideTab:pref('sideTab','settings'),mode:pref('mode','map'),collapsed:pref('collapsed',{})}))
+  const [view,setView]=useState<any>(()=>({sortBy:pref('sortBy','start_date'),sortDir:pref('sortDir','asc'),showLoad:pref('showLoad',false),showEpics:pref('showEpics',true),showStories:pref('showStories',true),snap:pref('snap','quarter'),groupBy:pref('groupBy','tracks'),budgetScope:pref('budgetScope','all'),sideTab:pref('sideTab','settings'),mode:pref('mode','map'),collapsed:pref('collapsed',{}),sideHidden:pref('sideHidden',false)}))
   function setPref(k:string,v:any){setView((cur:any)=>({...cur,[k]:v}));try{localStorage.setItem('pg_strat_'+k,JSON.stringify(v))}catch{}}
   const toggleCollapsed=(key:string)=>setPref('collapsed',{...view.collapsed,[key]:!view.collapsed[key]})
+  // Epic and story layers start closed on every load; open them one at a time (not remembered).
+  const [openLayers,setOpenLayers]=useState<Record<string,boolean>>({})
+  const layerClosed=(key:string)=>!openLayers[key]
+  const toggleLayer=(key:string)=>setOpenLayers(cur=>({...cur,[key]:!cur[key]}))
   const [narrow,setNarrow]=useState(false)
   useEffect(()=>{
     const q=window.matchMedia('(max-width: 820px)')
@@ -605,11 +609,11 @@ export default function StrategyTab({projects:mainProjects,setProjects,strategie
     const shownEp=new Set(eps.map((e:any)=>e.id))
     const loose=view.showStories?projectItems(p).filter((i:any)=>!shownEp.has(i.epic_id)):[]
     rows.push({kind:'project',p,epicCount:eps.length+loose.length,inGroup,h:ROW_H})
-    if(view.collapsed['pe:'+p.id])return
+    if(layerClosed('pe:'+p.id))return
     eps.forEach(e=>{
       const its=view.showStories?epicItems(e,p):[]
       rows.push({kind:'epic',e,p,itemCount:its.length,h:20})
-      if(!view.collapsed['es:'+e.id])its.forEach((it:any)=>rows.push({kind:'item',it,p,indent:44,h:18}))
+      if(!layerClosed('es:'+e.id))its.forEach((it:any)=>rows.push({kind:'item',it,p,indent:44,h:18}))
     })
     loose.forEach((it:any)=>rows.push({kind:'item',it,p,indent:28,h:18}))
   }
@@ -993,11 +997,11 @@ export default function StrategyTab({projects:mainProjects,setProjects,strategie
                   return(
                     <div key={ri} style={{display:'flex',height:r.h,position:'relative',zIndex:drag?.id===ep.id?8:1}}>
                       <div onClick={()=>setSelId('epic:'+ep.id)} style={{...cellLabel,padding:r.itemCount?'0 12px 0 14px':'0 12px 0 28px',display:'flex',alignItems:'center',gap:5,cursor:'pointer',background:isSelE?'#2A2418':'#0D1B2A'}}>
-                        {r.itemCount>0&&<button onClick={e=>{e.stopPropagation();toggleCollapsed('es:'+ep.id)}} title={`${view.collapsed['es:'+ep.id]?'Show':'Hide'} ${r.itemCount} stor${r.itemCount!==1?'ies':'y'} and bugs`}
-                          style={{...HDR_BTN,color:STORY,fontSize:8,padding:0,width:10}}>{view.collapsed['es:'+ep.id]?'▸':'▾'}</button>}
+                        {r.itemCount>0&&<button onClick={e=>{e.stopPropagation();toggleLayer('es:'+ep.id)}} title={`${layerClosed('es:'+ep.id)?'Show':'Hide'} ${r.itemCount} stor${r.itemCount!==1?'ies':'y'} and bugs`}
+                          style={{...HDR_BTN,color:STORY,fontSize:8,padding:0,width:10}}>{layerClosed('es:'+ep.id)?'▸':'▾'}</button>}
                         <span style={{fontSize:9,color:EPIC}}>◆</span>
                         <span title={ep.name} style={{...CLIP,fontSize:10.5,color:done?'#7A8FA6':'#C8C8D4',textDecoration:done?'line-through':'none'}}>{ep.name}</span>
-                        {r.itemCount>0&&view.collapsed['es:'+ep.id]&&<span style={{fontSize:9,color:'#7A8FA6',flexShrink:0}}>{r.itemCount}</span>}
+                        {r.itemCount>0&&layerClosed('es:'+ep.id)&&<span style={{fontSize:9,color:'#7A8FA6',flexShrink:0}}>{r.itemCount}</span>}
                       </div>
                       <div onClick={e=>onEpicRowClick(e,ep)} style={{width:TW,position:'relative',cursor:ex?'default':'copy'}}>
                         {!ex&&<span style={{position:'absolute',left:8,top:3,fontSize:9.5,color:'#3A4A5E',fontStyle:'italic',pointerEvents:'none'}}>No dates. Click a {view.snap==='month'?'month':'quarter'} to place it there.</span>}
@@ -1044,8 +1048,8 @@ export default function StrategyTab({projects:mainProjects,setProjects,strategie
                 return(
                   <div key={ri} style={{display:'flex',height:r.h,position:'relative',zIndex:drag?.id===p.id?8:1}}>
                     <div onClick={()=>setSelId(p.id)} style={{...cellLabel,padding:r.epicCount?'0 12px 0 6px':'0 12px',display:'flex',alignItems:'center',gap:6,cursor:'pointer',background:isSel?'#1E3048':'#0D1B2A',borderLeft:r.inGroup?`3px solid ${GROUP}`:undefined}}>
-                      {r.epicCount>0&&<button onClick={e=>{e.stopPropagation();toggleCollapsed('pe:'+p.id)}} title={`${view.collapsed['pe:'+p.id]?'Show':'Hide'} its ${r.epicCount} epic${r.epicCount!==1?'s':''}, stories and bugs`}
-                        style={{...HDR_BTN,color:EPIC,fontSize:9}}>{view.collapsed['pe:'+p.id]?'▸':'▾'}</button>}
+                      {r.epicCount>0&&<button onClick={e=>{e.stopPropagation();toggleLayer('pe:'+p.id)}} title={`${layerClosed('pe:'+p.id)?'Show':'Hide'} its ${r.epicCount} epic${r.epicCount!==1?'s':''}, stories and bugs`}
+                        style={{...HDR_BTN,color:EPIC,fontSize:9}}>{layerClosed('pe:'+p.id)?'▸':'▾'}</button>}
                       <span style={{fontSize:11,color:done?'#7A8FA6':'#F4F6F8',fontWeight:isSel?700:400,overflow:'hidden',whiteSpace:'nowrap' as const,textOverflow:'ellipsis',flex:1,textDecoration:done?'line-through':'none'}}>{p.name}</span>
                       {p.team&&<span style={{fontSize:9,color:'#7A8FA6'}}>{teamShort(p.team)}</span>}
                     </div>
@@ -1095,7 +1099,15 @@ export default function StrategyTab({projects:mainProjects,setProjects,strategie
           </div>
         </div>
 
-        {/* Side panel */}
+        {/* Side panel: can be hidden to give the roadmap the full width. A selected initiative or epic still opens it. */}
+        {view.sideHidden&&!narrow&&!sel&&!selEpic&&selId!=='__new'?(
+          <div style={{width:30,flexShrink:0,borderLeft:'1px solid #243447',background:'#0F1C2B',display:'flex',flexDirection:'column',alignItems:'center',paddingTop:6,gap:10}}>
+            <button onClick={()=>setPref('sideHidden',false)} title="Show the side panel" style={{...HDR_BTN,color:'#C8973A',fontSize:14}}>«</button>
+            <div onClick={()=>setPref('sideHidden',false)} title="Show the side panel" style={{writingMode:'vertical-rl',cursor:'pointer',fontSize:11,fontWeight:700,letterSpacing:1,color:'#7A8FA6'}}>
+              {view.sideTab==='budget'?'$ BUDGET':'⚙ SETTINGS'}{issues.length>0&&<span style={{color:'#E74C3C'}}> · {issues.length} TO CHECK</span>}
+            </div>
+          </div>
+        ):(
         <div style={{width:narrow?'100%':(!sel&&!selEpic&&selId!=='__new'&&view.sideTab==='budget'?440:320),maxHeight:narrow?'45%':'none',flexShrink:0,borderLeft:narrow?'none':'1px solid #243447',borderTop:narrow?'1px solid #243447':'none',background:'#0F1C2B',overflowY:'auto'}}>
           {selId==='__new'?(
             <NewStrategy onCreate={async(t:any)=>{await createStrategy(t);setSelId(null)}} onCancel={()=>setSelId(null)}/>
@@ -1115,6 +1127,7 @@ export default function StrategyTab({projects:mainProjects,setProjects,strategie
               {[['settings','⚙ Settings'],['budget','$ Budget']].map(([k,l])=>(
                 <button key={k} onClick={()=>setPref('sideTab',k)} style={{flex:1,background:view.sideTab===k?'#0F1C2B':'transparent',color:view.sideTab===k?'#F4F6F8':'#7A8FA6',border:'none',borderBottom:view.sideTab===k?'2px solid #C8973A':'2px solid transparent',padding:'9px 0',fontSize:12,fontWeight:700,cursor:'pointer'}}>{l}</button>
               ))}
+              {!narrow&&<button onClick={()=>setPref('sideHidden',true)} title="Hide the side panel" style={{background:'transparent',border:'none',borderBottom:'2px solid transparent',color:'#7A8FA6',padding:'0 10px',fontSize:14,cursor:'pointer'}}>»</button>}
             </div>
             {view.sideTab==='budget'?<StrategyBudgetPanel entries={budgetEntries} fys={fys} scope={view.budgetScope} setScope={(v:string)=>setPref('budgetScope',v)} onOpen={(id:any)=>setSelId(id)}/>:
             <SettingsPanel strategy={strategy} tracks={sTracks} projects={live} teams={teams} issues={issues} setSelId={setSelId} duplicateStrategy={duplicateStrategy} resetToMain={resetToMain}
@@ -1122,6 +1135,7 @@ export default function StrategyTab({projects:mainProjects,setProjects,strategie
               updProject={updProject} createProject={createProject}/>}
           </>)}
         </div>
+        )}
       </div>
       )}
     </div>
