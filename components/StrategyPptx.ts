@@ -109,7 +109,7 @@ function drawSlide(pptx:any,strategy:any,{projects,strategyItems,tracks,goals,de
     for(const t of sTracks){
       rows.push({kind:'section',text:`${t.name.toUpperCase()} TRACK${t.description?': '+t.description:''}`,color:hex(t.color,'5B7A99'),style:'band'})
       if((goals as any[]).some(g=>g.track_id===t.id&&g.goal))rows.push({kind:'goals',track:t})
-      pushList(live.filter(p=>p.track_id===t.id&&visible(p)))
+      pushList(live.filter(p=>p.track_id===t.id&&!PROJECT_TERMINAL.includes(p.status)&&visible(p)))
     }
     if(ongoing.length){rows.push({kind:'section',text:`ONGOING DELIVERABLES: always supported (in the ${Number(strategy.bau_pct)||0}% BAU share)`,color:'6B7280',style:'band'});pushList(ongoing)}
   }else{
