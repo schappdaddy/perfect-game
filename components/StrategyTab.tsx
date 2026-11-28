@@ -399,6 +399,10 @@ export default function StrategyTab({projects:mainProjects,setProjects,strategie
     if(t==='epic'){const ep=(epics as any[]).find(e=>e.id===id);const b=ep&&epicBase(ep);return b?{s:b.s,e:b.e}:null}
     const it=(items as any[]).find(i=>i.id===id);return it?{s:it.start_date,e:it.end_date}:null
   }
+  function keyClosed(key:string){
+    const[t,id]=key.split(':')
+    return isClosed(t==='project'?projById(id):t==='epic'?(epics as any[]).find(e=>e.id===id):(items as any[]).find(i=>i.id===id))
+  }
   const depBad=(d:any)=>{
     const a=keyDates(depKey(d.blocker_type,d.blocker_id)),b=keyDates(depKey(d.blocked_type,d.blocked_id))
     return !!(a?.e&&b?.s&&b.s<=a.e)
@@ -455,8 +459,8 @@ export default function StrategyTab({projects:mainProjects,setProjects,strategie
       return a.name.localeCompare(b.name)
     })
   }
-  // Every project sits on one of your tracks, or in the backlog. Completed and cancelled
-  // projects only show if they're on a track.
+  // Every project sits on one of your tracks, or in the backlog. A strategy is about the work
+  // still to do, so completed and cancelled projects are left off (the main Roadmap keeps them).
   // Projects in the same group run at the same time: keep them together, where the group's
   // first member falls in the sort
   function groupTogether(list:any[]){
@@ -469,8 +473,8 @@ export default function StrategyTab({projects:mainProjects,setProjects,strategie
     }
     return out
   }
-  const onTrack=(t:any)=>groupTogether(sortProjects(live.filter(p=>p.track_id===t.id)))
-  const backlog=groupTogether(sortProjects(live.filter(p=>!sTrackIds.has(p.track_id)&&!PROJECT_TERMINAL.includes(p.status))))
+  const onTrack=(t:any)=>groupTogether(sortProjects(live.filter(p=>p.track_id===t.id&&!isClosed(p))))
+  const backlog=groupTogether(sortProjects(live.filter(p=>!sTrackIds.has(p.track_id)&&!isClosed(p))))
   // Staffing & cost: every active, dated project on this roadmap with its roster here. A
   // person's time is split evenly across the projects they overlap on (see StrategyBudget).
   const budgetEntries=[...sTracks.flatMap(onTrack).map((p:any)=>({p,onTrack:true})),...backlog.map((p:any)=>({p,onTrack:false}))]
@@ -526,10 +530,11 @@ export default function StrategyTab({projects:mainProjects,setProjects,strategie
   const issues:any[]=[]
   const shownKeys=new Set<string>()
   shown.forEach(p=>{shownKeys.add(depKey('project',p.id));if(view.showEpics)projectEpics(p).forEach(e=>shownKeys.add(depKey('epic',e.id)))
-    if(view.showStories)(items as any[]).filter(i=>i.parent_project===p.name).forEach(i=>shownKeys.add(depKey('item',i.id)))})
+    if(view.showStories)(items as any[]).filter(i=>i.parent_project===p.name&&!isClosed(i)).forEach(i=>shownKeys.add(depKey('item',i.id)))})
   for(const d of deps as any[]){
     const from=depKey(d.blocker_type,d.blocker_id),to=depKey(d.blocked_type,d.blocked_id)
     if(!shownKeys.has(from)&&!shownKeys.has(to))continue
+    if(keyClosed(from)||keyClosed(to))continue // finished work can't block or be blocked
     const a=keyDates(from),b=keyDates(to)
     const sel=d.blocked_type==='project'?d.blocked_id:d.blocked_type==='epic'?'epic:'+d.blocked_id:null
     if(a?.e&&b?.s&&b.s<=a.e)issues.push({kind:'dep',id:sel,text:`${keyName(to)} starts ${fmtDate(b.s)}, before ${keyName(from)} finishes ${fmtDate(a.e)}.`})
@@ -743,7 +748,7 @@ export default function StrategyTab({projects:mainProjects,setProjects,strategie
     return null
   }
   function projectEpics(p:any){
-    return(epics as any[]).filter(e=>e.project_id===p.id)
+    return(epics as any[]).filter(e=>e.project_id===p.id&&!isClosed(e))
       .sort((a,b)=>(epicBase(a)?.s||'9999').localeCompare(epicBase(b)?.s||'9999')||a.name.localeCompare(b.name))
   }
   // Clicking an empty row places an undated project into the clicked quarter
